@@ -1,0 +1,33 @@
+services:
+  # Backend API Service
+  - type: web
+    name: devpilot-ai-backend
+    env: node
+    buildCommand: cd server && npm install
+    startCommand: cd server && node test-render.js
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: 18.0.0
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+    healthCheckPath: /health
+
+
+
+  # Frontend Static Site
+  - type: web
+    name: devpilot-ai-frontend
+    env: static
+    buildCommand: cd client && npm install && npm run build
+    staticPublishPath: ./client/dist
+    plan: free
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 18.0.0 
