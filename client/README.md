@@ -1,6 +1,6 @@
-# 100Agents Hack Project
+# InfraMind Frontend
 
-This is a React application built with TypeScript and Vite.
+Modern React application built with TypeScript, Tailwind CSS, and Vite for the InfraMind AI-powered DevOps platform.
 
 ## Getting Started
 
