@@ -368,12 +368,12 @@ export const EnhancedDashboard = () => {
               <Card className="border-slate-200/60">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center space-x-2">
-                    <Globe className="h-4 w-4 text-purple-600" />
+                    <Globe className="h-4 w-4 text-emerald-600" />
                     <span>Deployment Success</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-purple-600">99.2%</div>
+                  <div className="text-2xl font-bold text-emerald-600">99.2%</div>
                   <p className="text-sm text-slate-600">First-time deployment success rate</p>
                 </CardContent>
               </Card>
