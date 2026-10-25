@@ -2,7 +2,7 @@ export const MOCK_CHAT_QA = [
   {
     id: 'intro',
     question: 'What does this platform do?',
-    answer: `DevPilotAI automates your entire DevOps workflow by analyzing your repository and generating deployment-ready pipelines. It uses AI to:
+    answer: `InfraMind automates your entire DevOps workflow by analyzing your repository and generating deployment-ready pipelines. It uses AI to:
 
 - Generate Dockerfiles tailored to your tech stack
 - Create GitHub Actions workflows for CI/CD
@@ -13,7 +13,7 @@ export const MOCK_CHAT_QA = [
   {
     id: 'tech',
     question: 'What technologies does it use?',
-    answer: `DevPilotAI leverages cutting-edge AI and cloud technologies:
+    answer: `InfraMind leverages cutting-edge AI and cloud technologies:
 
 - **AI & Search**: Tavily for code analysis, Mem0 for context retention
 - **Image Generation**: DALL·E for architecture diagrams
@@ -25,7 +25,7 @@ export const MOCK_CHAT_QA = [
   {
     id: 'nodejs',
     question: 'Can it generate a CI/CD pipeline for a Node.js app?',
-    answer: `Absolutely! For Node.js applications, DevPilotAI generates:
+    answer: `Absolutely! For Node.js applications, InfraMind generates:
 
 1. **Dockerfile**:
 \`\`\`dockerfile
@@ -67,7 +67,7 @@ jobs:
   {
     id: 'security',
     question: 'Is it secure?',
-    answer: `Yes, DevPilotAI takes security seriously:
+    answer: `Yes, InfraMind takes security seriously:
 
 - **Token Management**: All API keys and secrets are securely stored and never exposed
 - **Zero Storage**: Code is analyzed in memory and never persisted without explicit consent

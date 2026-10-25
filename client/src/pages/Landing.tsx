@@ -45,10 +45,10 @@ export const Landing = () => {
   const [currentAgentIndex, setCurrentAgentIndex] = useState(0);
   
   const agents = [
-    { name: "Planner Agent", description: "Analyzes codebase structure", icon: <Brain className="h-5 w-5" />, color: "from-purple-500 to-pink-500" },
-    { name: "Analyzer Agent", description: "Detects tech stack and dependencies", icon: <Search className="h-5 w-5" />, color: "from-blue-500 to-cyan-500" },
-    { name: "Generator Agent", description: "Creates CI/CD pipelines", icon: <Settings className="h-5 w-5" />, color: "from-green-500 to-emerald-500" },
-    { name: "Verifier Agent", description: "Validates and optimizes output", icon: <CheckCircle className="h-5 w-5" />, color: "from-orange-500 to-red-500" }
+    { name: "Planner Agent", description: "Analyzes codebase structure", icon: <Brain className="h-5 w-5" />, color: "from-slate-600 to-slate-800" },
+    { name: "Analyzer Agent", description: "Detects tech stack and dependencies", icon: <Search className="h-5 w-5" />, color: "from-blue-600 to-blue-800" },
+    { name: "Generator Agent", description: "Creates CI/CD pipelines", icon: <Settings className="h-5 w-5" />, color: "from-emerald-600 to-emerald-800" },
+    { name: "Verifier Agent", description: "Validates and optimizes output", icon: <CheckCircle className="h-5 w-5" />, color: "from-amber-600 to-amber-800" }
   ];
 
   // Cycle through agents every 3 seconds
@@ -71,7 +71,7 @@ export const Landing = () => {
       icon: <Bot className="h-6 w-6" />,
       title: "Multi-Agent AI Orchestration",
       description: "Four specialized AI agents work in harmony: Planner analyzes structure, Analyzer detects tech stack, Generator creates pipelines, and Verifier ensures quality.",
-      color: "from-purple-500 to-pink-500",
+      color: "from-slate-700 to-slate-900",
       tech: "LangGraph + Llama 3 70B",
       highlight: "NEW"
     },
@@ -79,7 +79,7 @@ export const Landing = () => {
       icon: <Search className="h-6 w-6" />,
       title: "Intelligent Code Analysis",
       description: "Tavily-powered search combined with advanced AI understands complex codebases, dependencies, and architectural patterns with 99% accuracy.",
-      color: "from-blue-500 to-cyan-500",
+      color: "from-slate-700 to-slate-900",
       tech: "Tavily + Novita.ai",
       highlight: "AI-POWERED"
     },
@@ -87,7 +87,7 @@ export const Landing = () => {
       icon: <Database className="h-6 w-6" />,
       title: "Smart Memory & Learning",
       description: "Mem0 provides persistent memory across projects, enabling personalized DevOps recommendations that improve with every interaction.",
-      color: "from-green-500 to-emerald-500",
+      color: "from-slate-700 to-slate-900",
       tech: "Mem0 + Vector DB",
       highlight: "ADAPTIVE"
     },
@@ -95,7 +95,7 @@ export const Landing = () => {
       icon: <Monitor className="h-6 w-6" />,
       title: "Real-time Observability",
       description: "Keywords AI powers comprehensive monitoring, logging, and analytics for complete visibility into your AI-driven DevOps pipeline performance.",
-      color: "from-orange-500 to-red-500",
+      color: "from-slate-700 to-slate-900",
       tech: "Keywords AI + Metrics",
       highlight: "ENTERPRISE"
     },
@@ -103,7 +103,7 @@ export const Landing = () => {
       icon: <Shield className="h-6 w-6" />,
       title: "Appwrite Backend Infrastructure",
       description: "Secure, scalable backend powered by Appwrite with built-in authentication, real-time databases, and enterprise-grade security compliance.",
-      color: "from-indigo-500 to-purple-500",
+      color: "from-slate-700 to-slate-900",
       tech: "Appwrite Cloud",
       highlight: "SECURE"
     },
@@ -111,7 +111,7 @@ export const Landing = () => {
       icon: <Workflow className="h-6 w-6" />,
       title: "Automated CI/CD Generation",
       description: "Generate production-ready Docker configurations, GitHub Actions workflows, and deployment scripts tailored to your specific technology stack.",
-      color: "from-teal-500 to-green-500",
+      color: "from-slate-700 to-slate-900",
       tech: "AI-Generated",
       highlight: "AUTOMATED"
     }
@@ -209,7 +209,7 @@ export const Landing = () => {
       title: "AI Agent Coordination",
       description: "LangGraph orchestrates all four agents for optimal collaboration and results",
       icon: <Network className="h-5 w-5" />,
-      color: "bg-purple-500",
+      color: "bg-slate-800",
       details: "Real-time agent communication and state management"
     },
     {
@@ -231,24 +231,21 @@ export const Landing = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 relative overflow-hidden">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-1/2 -right-1/2 w-full h-full bg-gradient-to-br from-purple-400/20 via-blue-400/20 to-cyan-400/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute -bottom-1/2 -left-1/2 w-full h-full bg-gradient-to-tr from-pink-400/20 via-purple-400/20 to-indigo-400/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
-      </div>
+    <div className="min-h-screen bg-slate-50 relative overflow-hidden">
+      {/* Background Pattern */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none"></div>
       
       {/* Navigation */}
-      <nav className="fixed top-0 w-full bg-white/90 backdrop-blur-xl border-b border-purple-200/40 z-50 shadow-lg shadow-purple-500/10">
+      <nav className="fixed top-0 w-full bg-white/90 backdrop-blur-md border-b border-slate-200 z-50 shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Bot className="h-6 w-6 text-white animate-pulse" />
+              <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center shadow-sm">
+                <Bot className="h-5 w-5 text-white" />
               </div>
               <div className="flex flex-col">
-                <span className="text-xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                  DevPilotAI
+                <span className="text-xl font-bold text-slate-900 tracking-tight">
+                  InfraMind
                 </span>
                 <span className="text-xs text-slate-500 font-medium">Powered by Appwrite</span>
               </div>
@@ -261,7 +258,7 @@ export const Landing = () => {
               <a href="#testimonials" className="text-slate-600 hover:text-slate-900 transition-colors font-medium">Testimonials</a>
               <Button 
                 onClick={() => navigate('/auth')}
-                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 font-semibold"
+                className="bg-slate-900 hover:bg-slate-800 text-white shadow-sm hover:shadow transition-all duration-200 font-medium"
               >
                 <Sparkles className="mr-2 h-4 w-4" />
                 Get Started Free
@@ -288,7 +285,7 @@ export const Landing = () => {
               <a href="#testimonials" className="block text-slate-600 hover:text-slate-900 transition-colors font-medium">Testimonials</a>
               <Button 
                 onClick={() => navigate('/auth')}
-                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium"
               >
                 <Sparkles className="mr-2 h-4 w-4" />
                 Get Started Free
@@ -299,27 +296,25 @@ export const Landing = () => {
       </nav>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 px-4 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-blue-600/20 to-cyan-600/20 blur-3xl"></div>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-purple-100/30 to-pink-100/30"></div>
+      <section className="pt-32 pb-20 px-4 relative">
         <div className="container mx-auto text-center relative z-10">
           {/* Floating Agent Indicator */}
           <div className="mb-8 flex justify-center">
-            <div className="bg-white/90 backdrop-blur-md rounded-2xl p-6 shadow-2xl shadow-purple-500/20 border border-purple-200/50 ring-1 ring-purple-500/10">
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
               <div className="flex items-center space-x-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${agents[currentAgentIndex].color} bg-opacity-20 flex items-center justify-center transition-all duration-500`}>
+                <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${agents[currentAgentIndex].color} flex items-center justify-center text-white transition-all duration-500`}>
                   {agents[currentAgentIndex].icon}
                 </div>
                 <div className="text-left">
                   <div className="font-semibold text-slate-900">{agents[currentAgentIndex].name}</div>
                   <div className="text-sm text-slate-600">{agents[currentAgentIndex].description}</div>
                 </div>
-                <div className="flex space-x-1">
+                <div className="flex space-x-1.5 ml-2">
                   {agents.map((_, index) => (
                     <div
                       key={index}
                       className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                        index === currentAgentIndex ? 'bg-blue-500' : 'bg-slate-300'
+                        index === currentAgentIndex ? 'bg-slate-900' : 'bg-slate-200'
                       }`}
                     />
                   ))}
@@ -329,21 +324,21 @@ export const Landing = () => {
           </div>
 
           <div className="relative">
-            <h1 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 leading-tight">
+            <h1 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 leading-tight tracking-tight">
               Next-Gen DevOps with<br/>
-              <span className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
+              <span className="text-slate-900 underline decoration-slate-300 underline-offset-8">
                 Multi-Agent AI
               </span>
             </h1>
           </div>
           <p className="text-xl md:text-2xl text-slate-600 mb-8 max-w-3xl mx-auto leading-relaxed">
             Four specialized AI agents collaborate to understand, analyze, and automate your entire DevOps pipeline. 
-            <span className="font-semibold text-purple-600"> Powered by Llama 3 70B and Appwrite.</span>
+            <span className="font-semibold text-slate-900"> Powered by Llama 3 70B and Appwrite.</span>
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
             <Button 
               onClick={() => navigate('/auth')}
-              className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-6 text-lg shadow-lg hover:shadow-xl transition-all duration-200 font-semibold"
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white px-8 py-6 text-lg shadow-sm hover:shadow transition-all duration-200 font-medium"
             >
               <Rocket className="mr-2 h-5 w-5" />
               Start Free Trial
@@ -352,41 +347,40 @@ export const Landing = () => {
             <Button 
               variant="outline"
               onClick={() => navigate('/demo')}
-              className="w-full sm:w-auto border-2 border-slate-200 hover:border-slate-300 px-8 py-6 text-lg font-semibold"
+              className="w-full sm:w-auto border border-slate-300 hover:bg-slate-100 px-8 py-6 text-lg font-medium"
             >
               <Play className="mr-2 h-5 w-5" />
               Watch AI Agents Demo
             </Button>
           </div>
           <div className="text-sm text-slate-500 flex items-center justify-center space-x-4">
-            <span className="flex items-center"><CheckCircle className="h-4 w-4 mr-1 text-green-500" /> No credit card required</span>
-            <span className="flex items-center"><Zap className="h-4 w-4 mr-1 text-yellow-500" /> Deploy in 60 seconds</span>
-            <span className="flex items-center"><Shield className="h-4 w-4 mr-1 text-blue-500" /> Enterprise secure</span>
+            <span className="flex items-center"><CheckCircle className="h-4 w-4 mr-1 text-emerald-600" /> No credit card required</span>
+            <span className="flex items-center"><Zap className="h-4 w-4 mr-1 text-amber-500" /> Deploy in 60 seconds</span>
+            <span className="flex items-center"><Shield className="h-4 w-4 mr-1 text-slate-700" /> Enterprise secure</span>
           </div>
         </div>
       </section>
 
       {/* Stats Section */}
-      <section className="py-20 bg-gradient-to-br from-white/50 via-purple-50/50 to-pink-50/50 backdrop-blur-sm relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/5 via-blue-500/5 to-cyan-500/5"></div>
+      <section className="py-16 bg-white border-y border-slate-200 relative">
         <div className="container mx-auto px-4 relative z-10">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-slate-900 mb-4">Trusted by Industry Leaders</h2>
-            <p className="text-slate-600">Join thousands of developers using AI agents for DevOps automation</p>
+          <div className="text-center mb-10">
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">Trusted by Engineering Teams</h2>
+            <p className="text-sm text-slate-500">Autonomous DevOps pipeline automation built for modern codebases</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {stats.map((stat, index) => (
               <div 
                 key={index}
-                className="bg-white/80 backdrop-blur-md rounded-2xl p-6 shadow-xl shadow-purple-500/10 hover:shadow-2xl hover:shadow-purple-500/20 transition-all duration-300 border border-purple-200/40 group hover:scale-105"
+                className="bg-slate-50 rounded-xl p-6 border border-slate-200/80 hover:border-slate-300 transition-all duration-200"
               >
                 <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/10 to-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
-                    {React.cloneElement(stat.icon, { className: "h-6 w-6 text-purple-600" })}
+                  <div className="w-11 h-11 rounded-lg bg-slate-200/70 flex items-center justify-center text-slate-800">
+                    {React.cloneElement(stat.icon, { className: "h-5 w-5 text-slate-700" })}
                   </div>
                   <div>
-                    <div className="text-2xl font-bold text-slate-900">{stat.value}</div>
-                    <div className="text-sm text-slate-600">{stat.label}</div>
+                    <div className="text-2xl font-bold text-slate-900 tracking-tight">{stat.value}</div>
+                    <div className="text-xs font-medium text-slate-500">{stat.label}</div>
                   </div>
                 </div>
               </div>
@@ -396,37 +390,36 @@ export const Landing = () => {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-20 relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-indigo-50/30 to-purple-50/30"></div>
+      <section id="features" className="py-20 bg-slate-50 relative">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
-              Powered by Advanced <span className="bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">AI Technology</span>
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight mb-3">
+              Automated Pipeline Architecture
             </h2>
-            <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              Our multi-agent system combines cutting-edge AI models with enterprise-grade infrastructure for unmatched DevOps automation.
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Four specialized agents collaborate in an automated pipeline to produce production-grade deployment configurations.
             </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, index) => (
               <Card 
                 key={index} 
-                className="group hover:shadow-xl transition-all duration-300 border-slate-200/60 overflow-hidden relative"
+                className="bg-white border-slate-200 shadow-sm hover:shadow transition-all duration-200 relative"
               >
                 {feature.highlight && (
                   <div className="absolute top-4 right-4">
-                    <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 text-xs font-bold">
+                    <Badge variant="secondary" className="bg-slate-100 text-slate-800 border border-slate-200 text-xs font-semibold">
                       {feature.highlight}
                     </Badge>
                   </div>
                 )}
                 <CardContent className="p-6">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.color} bg-opacity-10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-200`}>
+                  <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mb-4 text-slate-800">
                     {feature.icon}
                   </div>
-                  <h3 className="text-xl font-semibold text-slate-900 mb-2">{feature.title}</h3>
-                  <p className="text-slate-600 mb-4 leading-relaxed">{feature.description}</p>
-                  <Badge variant="secondary" className="bg-slate-100 text-slate-600 font-medium">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">{feature.title}</h3>
+                  <p className="text-sm text-slate-600 mb-4 leading-relaxed">{feature.description}</p>
+                  <Badge variant="outline" className="text-xs font-medium text-slate-600 border-slate-200">
                     {feature.tech}
                   </Badge>
                 </CardContent>
@@ -437,35 +430,34 @@ export const Landing = () => {
       </section>
 
       {/* Technology Stack */}
-      <section id="tech" className="py-20 bg-gradient-to-br from-slate-50/80 via-purple-50/40 to-pink-50/40 relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5"></div>
+      <section id="tech" className="py-20 bg-white border-y border-slate-200 relative">
         <div className="container mx-auto px-4">
-          <div className="text-center space-y-4 mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-slate-900">
-              Enterprise <span className="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">Technology Stack</span>
+          <div className="text-center space-y-3 mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
+              Enterprise Technology Stack
             </h2>
-            <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              Built on cutting-edge AI and cloud-native technologies for enterprise scale and reliability
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Built on production-ready AI models and cloud-native infrastructure for enterprise reliability
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {techStack.map((tech, index) => (
-              <Card key={index} className="border-slate-200/60 hover:shadow-xl transition-all duration-300 bg-white group">
+              <Card key={index} className="border-slate-200 shadow-sm hover:shadow transition-all duration-200 bg-slate-50/50">
                 <CardHeader className="text-center pb-4">
-                  <div className="text-4xl mb-3 group-hover:scale-110 transition-transform duration-200">{tech.logo}</div>
-                  <CardTitle className="text-xl font-bold text-slate-900">{tech.name}</CardTitle>
+                  <div className="text-3xl mb-2">{tech.logo}</div>
+                  <CardTitle className="text-lg font-bold text-slate-900">{tech.name}</CardTitle>
                   <div className="flex items-center justify-center space-x-2">
-                    <Badge variant="secondary">{tech.category}</Badge>
-                    <Badge variant="outline" className="text-xs">{tech.provider}</Badge>
+                    <Badge variant="secondary" className="text-xs">{tech.category}</Badge>
+                    <Badge variant="outline" className="text-xs text-slate-500">{tech.provider}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="text-center">
-                  <p className="text-slate-600 mb-4">{tech.description}</p>
-                  <div className="space-y-2">
+                  <p className="text-sm text-slate-600 mb-4">{tech.description}</p>
+                  <div className="space-y-1.5">
                     {tech.features.map((feature, idx) => (
-                      <div key={idx} className="flex items-center justify-center space-x-2 text-sm text-slate-500">
-                        <CheckCircle className="h-3 w-3 text-green-500" />
+                      <div key={idx} className="flex items-center justify-center space-x-2 text-xs text-slate-500">
+                        <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
                         <span>{feature}</span>
                       </div>
                     ))}
@@ -478,34 +470,30 @@ export const Landing = () => {
       </section>
 
       {/* How It Works */}
-      <section id="workflow" className="py-20 bg-gradient-to-br from-white/80 via-indigo-50/30 to-purple-50/30 relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/5 via-blue-500/5 to-purple-500/5"></div>
+      <section id="workflow" className="py-20 bg-slate-50 relative">
         <div className="container mx-auto px-4">
-          <div className="text-center space-y-4 mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-slate-900">
-              How <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">AI Agents</span> Work Together
+          <div className="text-center space-y-3 mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
+              How the Multi-Agent Pipeline Works
             </h2>
-            <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              Watch our multi-agent system analyze, plan, generate, and verify your DevOps infrastructure with unprecedented precision
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Deterministic sequence from repository ingestion to verified CI/CD artifact creation
             </p>
           </div>
 
-          <div className="max-w-5xl mx-auto">
-            <div className="space-y-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="space-y-4">
               {workflows.map((workflow, index) => (
-                <div key={index} className="flex items-center space-x-6 group">
-                  <div className={`flex-shrink-0 w-16 h-16 ${workflow.color} rounded-2xl flex items-center justify-center text-white font-bold text-lg shadow-lg group-hover:scale-110 transition-transform`}>
+                <div key={index} className="flex items-center space-x-5 bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+                  <div className="flex-shrink-0 w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center text-white font-semibold text-sm">
                     {workflow.step}
                   </div>
-                  <div className="flex-1 bg-white rounded-xl p-6 shadow-sm border border-slate-200/60 group-hover:shadow-md transition-all duration-200">
-                    <h3 className="text-2xl font-bold text-slate-900 mb-2 flex items-center space-x-3">
+                  <div className="flex-1">
+                    <h3 className="text-base font-semibold text-slate-900 mb-1 flex items-center space-x-2">
                       <span>{workflow.title}</span>
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
-                        {workflow.icon}
-                      </div>
                     </h3>
-                    <p className="text-slate-600 text-lg mb-2">{workflow.description}</p>
-                    <p className="text-sm text-slate-500 font-medium">{workflow.details}</p>
+                    <p className="text-sm text-slate-600 mb-1">{workflow.description}</p>
+                    <p className="text-xs text-slate-400 font-medium">{workflow.details}</p>
                   </div>
                 </div>
               ))}
@@ -515,40 +503,34 @@ export const Landing = () => {
       </section>
 
       {/* Testimonials */}
-      <section id="testimonials" className="py-20 bg-gradient-to-br from-slate-50/80 via-blue-50/40 to-indigo-50/40 relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 via-blue-500/5 to-purple-500/5"></div>
+      <section id="testimonials" className="py-20 bg-white border-y border-slate-200 relative">
         <div className="container mx-auto px-4">
-          <div className="text-center space-y-4 mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-slate-900">
-              Trusted by <span className="bg-gradient-to-r from-green-600 to-cyan-600 bg-clip-text text-transparent">Industry Leaders</span>
+          <div className="text-center space-y-3 mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
+              Built for Modern Engineering Teams
             </h2>
-            <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              Enterprise teams rely on our AI agents for mission-critical deployments and infrastructure automation
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Trusted by developers automating their deployment infrastructure
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {testimonials.map((testimonial, index) => (
-              <Card key={index} className="border-slate-200/60 hover:shadow-xl transition-all duration-300 bg-white">
-                <CardHeader>
+              <Card key={index} className="border-slate-200 shadow-sm bg-white">
+                <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-3xl">{testimonial.avatar}</div>
+                    <div className="flex items-center space-x-3">
+                      <div className="text-2xl">{testimonial.avatar}</div>
                       <div>
-                        <div className="font-semibold text-slate-900">{testimonial.name}</div>
-                        <div className="text-sm text-slate-600">{testimonial.role}</div>
-                        <Badge variant="outline" className="text-xs mt-1">{testimonial.company}</Badge>
+                        <div className="font-semibold text-sm text-slate-900">{testimonial.name}</div>
+                        <div className="text-xs text-slate-500">{testimonial.role}</div>
                       </div>
                     </div>
-                    <div className="flex text-yellow-400">
-                      {[...Array(testimonial.rating)].map((_, i) => (
-                        <Star key={i} className="h-4 w-4 fill-current" />
-                      ))}
-                    </div>
+                    <Badge variant="outline" className="text-xs font-mono">{testimonial.company}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-slate-600 leading-relaxed italic">"{testimonial.content}"</p>
+                  <p className="text-sm text-slate-600 leading-relaxed italic">"{testimonial.content}"</p>
                 </CardContent>
               </Card>
             ))}
@@ -557,51 +539,47 @@ export const Landing = () => {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-purple-900 via-blue-900 to-indigo-900 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-600/30 via-blue-600/30 to-cyan-600/30 blur-3xl"></div>
-        <div className="absolute inset-0 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-blue-500/10"></div>
-        <div className="container mx-auto px-4 text-center relative">
-          <div className="max-w-4xl mx-auto space-y-8">
-            <h2 className="text-4xl md:text-6xl font-bold text-white leading-tight">
-              Ready to Deploy with
-              <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"> AI Agents</span>?
+      <section className="py-20 bg-slate-900 text-white relative">
+        <div className="container mx-auto px-4 text-center relative z-10">
+          <div className="max-w-3xl mx-auto space-y-6">
+            <h2 className="text-3xl md:text-5xl font-bold text-white tracking-tight leading-tight">
+              Ready to Automate Your DevOps Pipeline?
             </h2>
-            <p className="text-xl text-slate-300 leading-relaxed">
-              Join thousands of developers using our multi-agent AI system to automate their entire DevOps pipeline. 
-              Powered by Appwrite's secure cloud infrastructure.
+            <p className="text-base md:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+              Connect your repository and generate production-ready Docker and CI/CD pipelines in seconds.
             </p>
-            <div className="flex flex-col sm:flex-row gap-6 justify-center items-center pt-8">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
               <Button 
                 onClick={() => navigate('/auth')} 
                 size="lg"
-                className="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-10 py-4 text-xl font-semibold shadow-2xl"
+                className="bg-white text-slate-900 hover:bg-slate-100 px-8 py-5 text-base font-semibold shadow-sm"
               >
-                <Bot className="mr-3 h-6 w-6" />
+                <Bot className="mr-2 h-5 w-5" />
                 Start Free Trial
-                <Sparkles className="ml-3 h-5 w-5" />
+                <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
               <Button 
                 variant="outline" 
                 size="lg"
                 onClick={() => window.open('https://github.com', '_blank')}
-                className="border-white/30 text-white hover:bg-white/10 backdrop-blur-sm px-10 py-4 text-xl font-semibold"
+                className="border-slate-700 bg-transparent text-white hover:bg-slate-800 px-8 py-5 text-base font-medium"
               >
-                <Github className="mr-3 h-6 w-6" />
+                <Github className="mr-2 h-5 w-5" />
                 View on GitHub
               </Button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-slate-400 text-sm max-w-2xl mx-auto">
-              <span className="flex items-center justify-center space-x-2">
-                <Sparkles className="h-4 w-4 text-cyan-400" />
+            <div className="flex flex-wrap justify-center gap-6 text-slate-400 text-xs pt-4">
+              <span className="flex items-center space-x-1.5">
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
                 <span>No credit card required</span>
               </span>
-              <span className="flex items-center justify-center space-x-2">
-                <Zap className="h-4 w-4 text-yellow-400" />
+              <span className="flex items-center space-x-1.5">
+                <Zap className="h-3.5 w-3.5 text-amber-400" />
                 <span>Deploy in 60 seconds</span>
               </span>
-              <span className="flex items-center justify-center space-x-2">
-                <Shield className="h-4 w-4 text-green-400" />
-                <span>Enterprise security</span>
+              <span className="flex items-center space-x-1.5">
+                <Shield className="h-3.5 w-3.5 text-blue-400" />
+                <span>Enterprise grade security</span>
               </span>
             </div>
           </div>
@@ -609,31 +587,28 @@ export const Landing = () => {
       </section>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-white py-12">
+      <footer className="bg-slate-950 text-slate-400 py-12 border-t border-slate-800">
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg flex items-center justify-center">
-                  <Bot className="h-5 w-5 text-white" />
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
+                  <Bot className="h-4 w-4 text-slate-900" />
                 </div>
-                <div>
-                  <span className="text-lg font-bold">DevPilotAI</span>
-                  <div className="text-xs text-slate-400">Powered by Appwrite</div>
-                </div>
+                <span className="text-base font-bold text-white tracking-tight">InfraMind</span>
               </div>
-              <p className="text-slate-400">
-                Multi-Agent AI system for automated DevOps with enterprise-grade security and scalability.
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Multi-agent AI system for automated DevOps with enterprise-grade security and scalability.
               </p>
-              <div className="text-xs text-slate-500 space-y-1">
-                <div>AI: Llama 3 70B via Novita.ai • LangGraph • Tavily • Mem0</div>
-                <div>Backend: Appwrite Cloud • Keywords AI Observability</div>
+              <div className="text-[11px] text-slate-400 space-y-0.5">
+                <div>AI Core: Llama 3 70B • LangGraph • Tavily • Mem0</div>
+                <div>Backend: Appwrite Cloud Infrastructure</div>
               </div>
             </div>
             
             <div>
-              <h3 className="font-semibold mb-4">AI Agents</h3>
-              <div className="space-y-2 text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">AI Agents</h3>
+              <div className="space-y-2 text-xs text-slate-400">
                 <div>Planner Agent</div>
                 <div>Analyzer Agent</div>
                 <div>Generator Agent</div>
@@ -642,18 +617,18 @@ export const Landing = () => {
             </div>
             
             <div>
-              <h3 className="font-semibold mb-4">Technology</h3>
-              <div className="space-y-2 text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Technology</h3>
+              <div className="space-y-2 text-xs text-slate-400">
                 <div>LangGraph Framework</div>
                 <div>Llama 3 70B Model</div>
                 <div>Appwrite Backend</div>
-                <div>Enterprise Security</div>
+                <div>Docker & GitHub Actions</div>
               </div>
             </div>
             
             <div>
-              <h3 className="font-semibold mb-4">Company</h3>
-              <div className="space-y-2 text-slate-400">
+              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Company</h3>
+              <div className="space-y-2 text-xs text-slate-400">
                 <div>About Us</div>
                 <div>Contact Support</div>
                 <div>Privacy Policy</div>
@@ -662,8 +637,8 @@ export const Landing = () => {
             </div>
           </div>
           
-          <div className="border-t border-slate-800 mt-8 pt-8 text-center text-slate-400">
-            <p>&copy; 2024 DevPilotAI. Built with ❤️ using cutting-edge AI technology and Appwrite infrastructure.</p>
+          <div className="border-t border-slate-800/80 mt-10 pt-6 text-center text-xs text-slate-400">
+            <p>&copy; 2024 InfraMind. Built with Appwrite and modern AI technologies.</p>
           </div>
         </div>
       </footer>

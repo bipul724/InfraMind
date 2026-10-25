@@ -145,7 +145,7 @@ export const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-slate-50 via-white to-slate-100">
+    <div className="min-h-screen w-full flex flex-col bg-slate-50">
       {/* Header */}
       <div className="flex items-center justify-between p-6">
         <Button
@@ -158,12 +158,12 @@ export const Auth = () => {
         </Button>
         
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 rounded-lg flex items-center justify-center animate-gradient">
+          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
             <Bot className="h-5 w-5 text-white animate-pulse" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
-              DevPilotAI
+            <span className="text-xl font-bold text-slate-900">
+              InfraMind
             </span>
             <span className="text-xs text-slate-500 font-medium">Powered by Appwrite</span>
           </div>
@@ -174,11 +174,11 @@ export const Auth = () => {
       <div className="flex-1 flex items-center justify-center px-4 py-8">
         <div className="w-full max-w-[450px] relative">
           {/* Background Gradient Effect */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 rounded-2xl blur opacity-20"></div>
+          <div className="absolute -inset-1 bg-slate-300 rounded-2xl blur opacity-20"></div>
           
           <Card className="relative shadow-xl border-slate-200/60 backdrop-blur-sm">
             <CardHeader className="text-center pb-4 space-y-2">
-              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
+              <CardTitle className="text-2xl font-bold text-slate-900">
                 {activeTab === 'signin' ? 'Welcome back!' : 'Create your account'}
               </CardTitle>
               <CardDescription className="text-slate-600">
@@ -262,7 +262,7 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 hover:from-purple-700 hover:via-blue-700 hover:to-cyan-700"
+                      className="w-full bg-slate-900 hover:bg-slate-800"
                       disabled={loading}
                     >
                       {loading ? (
@@ -415,7 +415,7 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 hover:from-purple-700 hover:via-blue-700 hover:to-cyan-700"
+                      className="w-full bg-slate-900 hover:bg-slate-800"
                       disabled={loading}
                     >
                       {loading ? (

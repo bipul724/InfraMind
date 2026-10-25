@@ -304,7 +304,7 @@ What specific aspect would you like to explore?`;
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-slate-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Demo Mode Banner */}
       <div className="bg-yellow-500/10 border-b border-yellow-500/20 py-2">
         <div className="container mx-auto px-4">
@@ -383,7 +383,7 @@ What specific aspect would you like to explore?`;
                         }`}
                       >
                         {message.type === 'assistant' && (
-                          <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center flex-shrink-0">
                             <Bot className="h-5 w-5 text-white" />
                           </div>
                         )}
@@ -391,7 +391,7 @@ What specific aspect would you like to explore?`;
                           <div
                             className={`rounded-lg p-4 shadow-sm ${
                               message.type === 'user'
-                                ? 'bg-purple-600 text-white ml-12'
+                                ? 'bg-slate-900 text-white ml-12'
                                 : 'bg-white text-slate-700'
                             }`}
                           >
