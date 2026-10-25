@@ -154,7 +154,7 @@
 
   /* Gradient text */
   .gradient-text {
-    @apply bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent;
+    color: #0f172a;
   }
 
   /* Custom Animations */
@@ -262,10 +262,10 @@
 
   @keyframes glow {
     0%, 100% {
-      box-shadow: 0 0 5px rgba(168, 85, 247, 0.4);
+      box-shadow: 0 0 5px rgba(37, 99, 235, 0.2);
     }
     50% {
-      box-shadow: 0 0 20px rgba(168, 85, 247, 0.6), 0 0 30px rgba(59, 130, 246, 0.4);
+      box-shadow: 0 0 20px rgba(37, 99, 235, 0.3), 0 0 30px rgba(37, 99, 235, 0.2);
     }
   }
 
@@ -300,15 +300,15 @@
 
   /* Custom gradient backgrounds */
   .bg-gradient-ai {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #1e293b;
   }
 
   .bg-gradient-devops {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    background: #334155;
   }
 
   .bg-gradient-tech {
-    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    background: #475569;
   }
 
   /* Custom button hover effects */
@@ -324,7 +324,7 @@
   /* Loading spinner enhancements */
   .spinner {
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #667eea;
+    border-top: 2px solid #2563EB;
     border-radius: 50%;
     width: 20px;
     height: 20px;
@@ -374,21 +374,10 @@
 
   /* Progress bar enhancements */
   .progress-bar {
-    background: linear-gradient(90deg, #667eea, #764ba2);
+    background: #2563EB;
     border-radius: 10px;
     position: relative;
     overflow: hidden;
-  }
-
-  .progress-bar::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-    animation: shimmer 1.5s infinite;
   }
 
   /* Glass effect */
@@ -405,7 +394,7 @@
     left: 0;
     width: 100%;
     height: 3px;
-    background: linear-gradient(90deg, #667eea, #764ba2);
+    background: #2563EB;
     z-index: 9999;
     transform-origin: left;
   }
@@ -479,12 +468,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: linear-gradient(45deg, #667eea, #764ba2);
+    background: #94a3b8;
     border-radius: 10px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(45deg, #5a67d8, #6b46c1);
+    background: #64748b;
   }
 
   /* Code syntax highlighting */
@@ -504,10 +493,8 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 30px;
-    background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #3b82f6, #8b5cf6);
-    background-size: 200% 100%;
-    animation: gradient 3s ease infinite;
+    height: 3px;
+    background: #334155;
     border-radius: 8px 8px 0 0;
   }
 

@@ -47,7 +47,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const userEmail = user?.email || '';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-slate-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200/60 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
@@ -55,10 +55,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             {/* Logo and Title */}
             <div className="flex items-center space-x-4">
               <Link to="/dashboard" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-                <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg flex items-center justify-center">
+                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
                   <Rocket className="h-5 w-5 text-white" />
                 </div>
-                <h1 className="text-2xl font-bold text-slate-900">DevPilotAI</h1>
+                <h1 className="text-2xl font-bold text-slate-900">InfraMind</h1>
               </Link>
               <Badge variant="secondary" className="hidden sm:inline-flex">
                 {title}
