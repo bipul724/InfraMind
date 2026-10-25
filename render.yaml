@@ -1,7 +1,7 @@
 services:
   # Backend API Service
   - type: web
-    name: devpilot-ai-backend
+    name: inframind-backend
     env: node
     buildCommand: cd server && npm install
     startCommand: cd server && node test-render.js
@@ -19,7 +19,7 @@ services:
 
   # Frontend Static Site
   - type: web
-    name: devpilot-ai-frontend
+    name: inframind-frontend
     env: static
     buildCommand: cd client && npm install && npm run build
     staticPublishPath: ./client/dist

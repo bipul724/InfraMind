@@ -1,4 +1,4 @@
-# 🚀 DevPilotAI Deployment Guide
+# 🚀 InfraMind Deployment Guide
 
 Complete deployment guide for the multi-agent AI DevOps automation platform.
 
@@ -43,8 +43,8 @@ Complete deployment guide for the multi-agent AI DevOps automation platform.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/devpilot-ai.git
-cd devpilot-ai
+git clone https://github.com/your-org/inframind.git
+cd inframind
 
 # Install server dependencies
 cd server
@@ -150,7 +150,7 @@ The project includes a `render.yaml` configuration for automatic deployment:
 services:
   # Backend API Service
   - type: web
-    name: devpilot-ai-backend
+    name: inframind-backend
     env: node
     buildCommand: cd server && npm install
     startCommand: cd server && node server.js
@@ -161,7 +161,7 @@ services:
 
   # Frontend Static Site
   - type: web
-    name: devpilot-ai-frontend
+    name: inframind-frontend
     env: static
     buildCommand: cd client && npm install && npm run build
     staticPublishPath: ./client/dist
@@ -255,7 +255,7 @@ Generate an API key with the following scopes:
 2. Click "New OAuth App"
 
 **Application Details**:
-- Application name: `DevPilotAI`
+- Application name: `InfraMind`
 - Homepage URL: `https://your-frontend-domain.vercel.app`
 - Authorization callback URL: `https://your-backend-domain.onrender.com/auth/github/callback`
 
@@ -416,7 +416,7 @@ KEYWORDS_AI_API_KEY=your-keywords-ai-api-key
 
 ## 🎯 Ready for Production!
 
-With these configurations, DevPilotAI is ready for production deployment with:
+With these configurations, InfraMind is ready for production deployment with:
 
 ✅ **Multi-Agent AI System**: Four specialized agents working in harmony
 ✅ **Enterprise Authentication**: Secure Appwrite backend with OAuth

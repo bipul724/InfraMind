@@ -1,7 +1,7 @@
 {
-  "name": "100agents-hack",
+  "name": "inframind",
   "version": "1.0.0",
-  "description": "CI/CD Automation Platform",
+  "description": "InfraMind - AI-Powered DevOps Automation Platform",
   "scripts": {
     "dev": "concurrently \"cd client && npm run dev\" \"cd server && npm run dev\"",
     "dev:client": "cd client && npm run dev",
