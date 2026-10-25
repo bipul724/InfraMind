@@ -233,11 +233,11 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
       <Card className="shadow-lg border-slate-200/60">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
-            <div className="p-2 bg-gradient-to-r from-blue-100 to-purple-100 rounded-lg">
-              <Bot className="h-5 w-5 text-blue-600" />
+            <div className="p-2 bg-slate-100 rounded-lg">
+              <Bot className="h-5 w-5 text-slate-800" />
             </div>
             <span>AI Agent DevOps Generator</span>
-            <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+            <Badge variant="secondary" className="bg-slate-100 text-slate-800 border border-slate-200">
               Multi-Agent System
             </Badge>
           </CardTitle>
@@ -310,7 +310,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                   </div>
 
                   {useAdvancedMode && (
-                    <div className="space-y-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-blue-200 animate-in slide-in-from-top duration-300">
+                    <div className="space-y-4 p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in slide-in-from-top duration-300">
                       <div className="space-y-2">
                         <Label htmlFor="auth-token" className="flex items-center space-x-2">
                           <Key className="h-4 w-4" />
@@ -350,25 +350,25 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 <Separator />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                      <Zap className="h-5 w-5 text-purple-600" />
+                  <div className="flex items-center space-x-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="w-10 h-10 bg-slate-200 rounded-lg flex items-center justify-center">
+                      <Zap className="h-5 w-5 text-slate-800" />
                     </div>
                     <div>
-                      <h3 className="font-medium text-purple-900">AI-Powered Analysis</h3>
-                      <p className="text-sm text-purple-700">
+                      <h3 className="font-medium text-slate-900">AI-Powered Analysis</h3>
+                      <p className="text-sm text-slate-500">
                         Multi-agent system analyzes your repository
                       </p>
                     </div>
                   </div>
                   
-                  <div className="flex items-center space-x-3 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
-                    <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                      <Github className="h-5 w-5 text-green-600" />
+                  <div className="flex items-center space-x-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="w-10 h-10 bg-slate-200 rounded-lg flex items-center justify-center">
+                      <Github className="h-5 w-5 text-slate-800" />
                     </div>
                     <div>
-                      <h3 className="font-medium text-green-900">Production Ready</h3>
-                      <p className="text-sm text-green-700">
+                      <h3 className="font-medium text-slate-900">Production Ready</h3>
+                      <p className="text-sm text-slate-500">
                         Generates optimized CI/CD configurations
                       </p>
                     </div>
@@ -378,7 +378,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 <Button 
                   onClick={handleStartAnalysis}
                   disabled={!isValidUrl || isRunning}
-                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium py-3 transition-all duration-200 transform hover:scale-105"
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 transition-all duration-200 shadow-sm"
                   size="lg"
                 >
                   {isRunning ? (

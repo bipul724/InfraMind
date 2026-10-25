@@ -62,7 +62,7 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({ className }) => {
             label: 'Hours Saved',
             value: hoursSaved,
             icon: <Clock className="h-5 w-5" />,
-            color: 'text-purple-600'
+            color: 'text-slate-700'
           },
           {
             label: 'Success Rate',
@@ -91,7 +91,7 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({ className }) => {
             label: 'Hours Saved',
             value: 0,
             icon: <Clock className="h-5 w-5" />,
-            color: 'text-purple-600'
+            color: 'text-slate-700'
           },
           {
             label: 'Success Rate',
@@ -157,7 +157,7 @@ export const defaultStats: StatItem[] = [
     label: 'Hours Saved',
     value: 0,
     icon: <Clock className="h-5 w-5" />,
-    color: 'text-purple-600',
+    color: 'text-slate-700',
     trend: { value: 15, isPositive: true }
   },
   {

@@ -104,11 +104,11 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     const newSocket = io(serverUrl);
     
     newSocket.on('connect', () => {
-      console.log('🔗 Connected to DevPilotAI server');
+      console.log('🔗 Connected to InfraMind server');
     });
 
     newSocket.on('disconnect', () => {
-      console.log('❌ Disconnected from DevPilotAI server');
+      console.log('❌ Disconnected from InfraMind server');
     });
 
     // Listen for progress updates

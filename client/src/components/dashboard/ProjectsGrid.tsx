@@ -114,7 +114,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
         
         <Button 
           onClick={onCreateNew}
-          className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+          className="bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-sm"
         >
           <Plus className="h-4 w-4 mr-2" />
           New Project
@@ -141,7 +141,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            className="px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm"
           >
             <option value="all">All Status ({statusCounts.all})</option>
             <option value="completed">Completed ({statusCounts.completed})</option>
@@ -156,7 +156,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             variant="outline"
             size="sm"
             onClick={() => toggleSort('createdAt')}
-            className={sortField === 'createdAt' ? 'bg-purple-50 border-purple-200' : ''}
+            className={sortField === 'createdAt' ? 'bg-slate-100 border-slate-300 text-slate-900' : ''}
           >
             Date
             {sortField === 'createdAt' && (
@@ -167,7 +167,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             variant="outline"
             size="sm"
             onClick={() => toggleSort('name')}
-            className={sortField === 'name' ? 'bg-purple-50 border-purple-200' : ''}
+            className={sortField === 'name' ? 'bg-slate-100 border-slate-300 text-slate-900' : ''}
           >
             Name
             {sortField === 'name' && (
@@ -211,7 +211,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
               {!searchTerm && filterStatus === 'all' && (
                 <Button 
                   onClick={onCreateNew}
-                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-sm"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Generate Your First Setup

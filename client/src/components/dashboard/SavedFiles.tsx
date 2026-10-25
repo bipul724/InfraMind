@@ -66,7 +66,7 @@ export const SavedFiles: React.FC = () => {
       case 'dockerfile':
         return 'bg-blue-100 text-blue-800';
       case 'github-actions':
-        return 'bg-purple-100 text-purple-800';
+        return 'bg-slate-100 text-slate-800';
       case 'env':
         return 'bg-green-100 text-green-800';
       case 'docs':

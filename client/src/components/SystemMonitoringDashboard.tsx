@@ -196,7 +196,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
-              <Users className="h-4 w-4 mr-2 text-purple-600" />
+              <Users className="h-4 w-4 mr-2 text-blue-600" />
               Active Sessions
             </CardTitle>
           </CardHeader>
