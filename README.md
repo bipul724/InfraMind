@@ -1,6 +1,6 @@
-# DevPilotAI - AI-Powered DevOps Automation Platform
+# InfraMind - AI-Powered DevOps Automation Platform
 
-DevPilotAI is a comprehensive AI-powered platform that automates DevOps workflows by analyzing GitHub repositories and generating production-ready CI/CD configurations. The platform uses a multi-agent system to intelligently analyze codebases, detect tech stacks, and create deployment-ready files.
+InfraMind is a comprehensive AI-powered platform that automates DevOps workflows by analyzing GitHub repositories and generating production-ready CI/CD configurations. The platform uses a multi-agent system to intelligently analyze codebases, detect tech stacks, and create deployment-ready files.
 
 ## 🚀 Features
 
@@ -136,8 +136,8 @@ KEYWORDS_AI_API_KEY=your-keywords-ai-api-key
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/devpilot-ai.git
-cd devpilot-ai
+git clone https://github.com/your-repo/inframind.git
+cd inframind
 
 # Install backend dependencies
 cd server

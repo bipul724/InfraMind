@@ -1,8 +1,8 @@
-# DevPilotAI Architecture Overview
+# InfraMind Architecture Overview
 
 ## 🏗️ System Architecture
 
-DevPilotAI uses a clean separation of concerns with distinct services handling different aspects of the platform:
+InfraMind uses a clean separation of concerns with distinct services handling different aspects of the platform:
 
 ### Authentication vs Repository Access
 
