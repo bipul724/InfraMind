@@ -39,9 +39,13 @@ function App() {
       <AuthProvider>
         <Router>
           <Routes>
+            {/* Landing route uses its own navigation without the public shell header. */}
+            <Route element={<PublicLayout showHeader={false}><Outlet /></PublicLayout>}>
+              <Route path="/" element={<Landing />} />
+            </Route>
+
             {/* Public Routes - No Auth Required */}
             <Route element={<PublicLayout><Outlet /></PublicLayout>}>
-              <Route path="/" element={<Landing />} />
               <Route path="/demo" element={<Demo />} />
               <Route path="/auth/success" element={<AuthSuccess />} />
             </Route>

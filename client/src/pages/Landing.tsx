@@ -60,24 +60,24 @@ export const Landing = () => {
     },
     {
       icon: <Search className="h-6 w-6" />,
-      title: "Intelligent Code Analysis",
+      title: "Code Analysis",
       description: "Agents scan your repository's file structure and dependency manifests, then Llama 3 70B interprets its frameworks, dependencies and architectural patterns.",
       tech: "Repository Scan + Novita.ai",
-      highlight: "AI-POWERED"
+      highlight: "ANALYSIS"
     },
     {
       icon: <Database className="h-6 w-6" />,
-      title: "Smart Memory & Learning",
+      title: "Persistent Memory",
       description: "Mem0 provides persistent memory across projects, enabling personalized DevOps recommendations that improve with every interaction.",
       tech: "Mem0 + Vector DB",
-      highlight: "ADAPTIVE"
+      highlight: "MEMORY"
     },
     {
       icon: <Monitor className="h-6 w-6" />,
       title: "Real-time Observability",
       description: "Keywords AI powers comprehensive monitoring, logging, and analytics for complete visibility into your AI-driven DevOps pipeline performance.",
       tech: "Keywords AI + Metrics",
-      highlight: "ENTERPRISE"
+      highlight: "MONITORING"
     },
     {
       icon: <Shield className="h-6 w-6" />,
@@ -140,27 +140,6 @@ export const Landing = () => {
     }
   ];
 
-  const testimonials = [
-    {
-      name: "Sarah Chen",
-      role: "Senior DevOps Engineer @ Netflix",
-      content: "The multi-agent system is revolutionary. It understands our microservices architecture perfectly and generated production-ready Kubernetes manifests that saved our team weeks of work.",
-      company: "Netflix",
-    },
-    {
-      name: "Marcus Rodriguez",
-      role: "CTO @ Stripe", 
-      content: "Each AI agent specializes in different aspects - security, performance, compliance. It's like having a team of senior engineers working around the clock. Incredible technology.",
-      company: "Stripe",
-    },
-    {
-      name: "Emily Johnson",
-      role: "Platform Engineer @ GitHub",
-      content: "The Mem0 integration means it remembers our specific requirements and coding standards. Every generated pipeline gets better and more personalized. Game changer for our workflow.",
-      company: "GitHub",
-    }
-  ];
-
   const workflows = [
     {
       step: "1",
@@ -178,7 +157,7 @@ export const Landing = () => {
     },
     {
       step: "3",
-      title: "Intelligent Generation",
+      title: "Pipeline Generation",
       description: "Generator Agent creates tailored CI/CD pipelines and infrastructure code",
       icon: <Cpu className="h-5 w-5" />,
       details: "Production-ready Docker, GitHub Actions, and deployment configs"
@@ -209,7 +188,6 @@ export const Landing = () => {
             <div className="hidden items-center gap-6 md:flex">
               <a href="#features" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">AI Agents</a>
               <a href="#tech" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">Technology</a>
-              <a href="#testimonials" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">Testimonials</a>
               <Button onClick={() => navigate('/auth')}>
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
@@ -225,7 +203,6 @@ export const Landing = () => {
             <div className="animate-slideDown space-y-3 border-t border-border/80 py-4 md:hidden">
               <a href="#features" className="block text-sm font-medium text-muted-foreground hover:text-foreground">AI Agents</a>
               <a href="#tech" className="block text-sm font-medium text-muted-foreground hover:text-foreground">Technology</a>
-              <a href="#testimonials" className="block text-sm font-medium text-muted-foreground hover:text-foreground">Testimonials</a>
               <Button onClick={() => navigate('/auth')} className="w-full">
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
@@ -237,14 +214,14 @@ export const Landing = () => {
 
       <main>
         <section className="border-b border-border bg-muted/20">
-          <div className="container mx-auto grid gap-12 px-4 pb-16 pt-32 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:pb-24 lg:pt-40">
+          <div className="container mx-auto grid gap-12 px-4 py-16 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:py-24">
             <div className="max-w-xl">
               <Badge variant="outline" className="mb-6 gap-2 border-primary/30 bg-primary/5 text-primary">
                 <GitBranch className="h-3.5 w-3.5" />
                 Multi-agent DevOps pipeline
               </Badge>
               <h1 className="text-5xl font-semibold leading-[1.05] tracking-[-0.04em] sm:text-6xl">
-                Next-Gen DevOps with <span className="text-primary">Multi-Agent AI</span>
+                DevOps config, generated by a four-agent pipeline
               </h1>
               <p className="mt-6 max-w-lg text-lg leading-8 text-muted-foreground">
                 Four specialized AI agents collaborate to understand, analyze, and automate your entire DevOps pipeline.
@@ -335,8 +312,8 @@ export const Landing = () => {
         <div className="container mx-auto px-4 py-20">
           <div className="mb-10 max-w-2xl">
             <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">Under the hood</p>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Enterprise Technology Stack</h2>
-            <p className="mt-3 text-muted-foreground">Built on production-ready AI models and cloud-native infrastructure for enterprise reliability.</p>
+            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Technology stack</h2>
+            <p className="mt-3 text-muted-foreground">Built on AI models and cloud-native infrastructure.</p>
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="hidden grid-cols-[1.1fr_1fr_1.5fr] gap-6 border-b border-border bg-muted/50 px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-muted-foreground md:grid">
@@ -382,30 +359,9 @@ export const Landing = () => {
         </div>
       </section>
 
-      <section id="testimonials" className="border-y border-border bg-muted/20">
-        <div className="container mx-auto px-4 py-20">
-          <div className="mb-10 max-w-2xl">
-            <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">From engineering teams</p>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Built for Modern Engineering Teams</h2>
-            <p className="mt-3 text-muted-foreground">Trusted by developers automating their deployment infrastructure.</p>
-          </div>
-          <div className="divide-y divide-border border-y border-border">
-            {testimonials.map((testimonial, index) => (
-              <blockquote key={index} className="grid gap-4 py-6 md:grid-cols-[14rem_1fr] md:gap-8">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 font-mono text-xs font-medium text-primary">{testimonial.name.split(' ').map((part) => part[0]).join('')}</div>
-                  <div><p className="text-sm font-medium">{testimonial.name}</p><p className="mt-1 text-xs text-muted-foreground">{testimonial.role}</p></div>
-                </div>
-                <div><Badge variant="outline" className="mb-3 font-mono text-[11px]">{testimonial.company}</Badge><p className="max-w-2xl text-sm leading-6 text-muted-foreground">"{testimonial.content}"</p></div>
-              </blockquote>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="border-b border-border bg-secondary/50">
         <div className="container mx-auto grid gap-8 px-4 py-16 md:grid-cols-[1fr_auto] md:items-center">
-          <div className="max-w-2xl"><h2 className="text-3xl font-semibold tracking-tight">Ready to Automate Your DevOps Pipeline?</h2><p className="mt-3 text-muted-foreground">Connect your repository and generate production-ready Docker and CI/CD pipelines in seconds.</p></div>
+          <div className="max-w-2xl"><h2 className="text-3xl font-semibold tracking-tight">Ready to Automate Your DevOps Pipeline?</h2><p className="mt-3 text-muted-foreground">Connect your repository and generate Docker and CI/CD pipelines in seconds.</p></div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button onClick={() => navigate('/auth')} size="lg">Start Free Trial<ArrowRight className="h-4 w-4" /></Button>
             <Button variant="outline" size="lg" onClick={() => window.open('https://github.com', '_blank')}><Github className="h-4 w-4" />View on GitHub</Button>
@@ -419,7 +375,7 @@ export const Landing = () => {
           <div className="grid gap-10 md:grid-cols-4">
             <div className="space-y-3 md:col-span-2">
               <div className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-foreground"><Terminal className="h-3.5 w-3.5" /></div><span className="font-semibold tracking-tight">InfraMind</span></div>
-              <p className="max-w-sm text-xs leading-5 text-background/70">Multi-agent AI system for automated DevOps with enterprise-grade security and scalability.</p>
+              <p className="max-w-sm text-xs leading-5 text-background/70">Multi-agent AI system for automated DevOps with authentication, Postgres data, and row-level security.</p>
               <div className="font-mono text-[11px] leading-5 text-background/60"><div>AI Core: Llama 3 70B • Tavily • Mem0</div><div>Backend: Supabase Cloud Infrastructure</div></div>
             </div>
             <div><h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">AI Agents</h3><div className="space-y-2 text-xs text-background/70"><div>Planner Agent</div><div>Analyzer Agent</div><div>Generator Agent</div><div>Verifier Agent</div></div></div>
