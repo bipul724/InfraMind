@@ -37,7 +37,11 @@ export const Landing = () => {
   
   const agents = [
     { name: "Planner Agent", description: "Analyzes codebase structure", icon: <Brain className="h-5 w-5" /> },
-    { name: "Analyzer Agent", description: "Detects tech stack and dependencies", icon: <Search className="h-5 w-5" /> },
+    {
+      name: "Analyzer Agent",
+      description: "Detects tech stack and dependencies",
+      icon: <Search className="h-5 w-5" />
+    },
     { name: "Generator Agent", description: "Creates CI/CD pipelines", icon: <Settings className="h-5 w-5" /> },
     { name: "Verifier Agent", description: "Validates and optimizes output", icon: <CheckCircle className="h-5 w-5" /> }
   ];
@@ -186,8 +190,18 @@ export const Landing = () => {
               </div>
             </div>
             <div className="hidden items-center gap-6 md:flex">
-              <a href="#features" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">AI Agents</a>
-              <a href="#tech" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">Technology</a>
+              <a
+                href="#features"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                AI Agents
+              </a>
+              <a
+                href="#tech"
+                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Technology
+              </a>
               <Button onClick={() => navigate('/auth')}>
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
@@ -201,8 +215,18 @@ export const Landing = () => {
           </div>
           {mobileMenuOpen && (
             <div className="animate-slideDown space-y-3 border-t border-border/80 py-4 md:hidden">
-              <a href="#features" className="block text-sm font-medium text-muted-foreground hover:text-foreground">AI Agents</a>
-              <a href="#tech" className="block text-sm font-medium text-muted-foreground hover:text-foreground">Technology</a>
+              <a
+                href="#features"
+                className="block text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                AI Agents
+              </a>
+              <a
+                href="#tech"
+                className="block text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                Technology
+              </a>
               <Button onClick={() => navigate('/auth')} className="w-full">
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
@@ -258,8 +282,22 @@ export const Landing = () => {
                     <span>Running {agents[currentAgentIndex].name}</span>
                   </div>
                   {agents.map((agent, index) => (
-                    <div key={agent.name} className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${index === currentAgentIndex ? 'border-primary/40 bg-primary/5' : 'border-border bg-background'}`}>
-                      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono text-[11px] ${index <= currentAgentIndex ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                    <div
+                      key={agent.name}
+                      className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${
+                        index === currentAgentIndex
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border bg-background'
+                      }`}
+                    >
+                      <div
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono
+                          text-[11px] ${
+                          index <= currentAgentIndex
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
                         {String(index + 1).padStart(2, '0')}
                       </div>
                       <div className="min-w-0">
@@ -274,7 +312,11 @@ export const Landing = () => {
                     <span className="font-mono text-[11px] text-background/70">Dockerfile</span>
                     <Container className="h-3.5 w-3.5 text-background/60" />
                   </div>
-                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-background/90"><code>{`FROM node:20-alpine AS build\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci\nCOPY . .\nRUN npm run build\n\nFROM nginx:alpine\nCOPY --from=build /app/dist /usr/share/nginx/html\nEXPOSE 80`}</code></pre>
+                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-background/90">
+                    <code>
+                      {`FROM node:20-alpine AS build\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci\nCOPY . .\nRUN npm run build\n\nFROM nginx:alpine\nCOPY --from=build /app/dist /usr/share/nginx/html\nEXPOSE 80`}
+                    </code>
+                  </pre>
                 </div>
               </div>
             </div>
@@ -286,29 +328,49 @@ export const Landing = () => {
             <div className="mb-10 max-w-2xl">
               <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">What it does</p>
               <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Automated Pipeline Architecture</h2>
-              <p className="mt-3 text-muted-foreground">Four specialized agents collaborate in an automated pipeline to produce production-grade deployment configurations.</p>
+              <p className="mt-3 text-muted-foreground">
+                Four specialized agents collaborate in an automated pipeline to produce
+                production-grade deployment configurations.
+              </p>
             </div>
             <div className="divide-y divide-border border-y border-border">
               {features.map((feature, index) => (
-                <div key={index} className="grid gap-4 py-5 md:grid-cols-[2rem_1fr_auto] md:items-start md:gap-6">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted text-primary">
+                 <div
+                   key={index}
+                   className="grid gap-4 py-5 md:grid-cols-[2rem_1fr_auto] md:items-start md:gap-6"
+                 >
+                  <div
+                    className="flex h-8 w-8 items-center justify-center rounded-md border border-border
+                      bg-muted text-primary"
+                  >
                     {React.cloneElement(feature.icon, { className: "h-4 w-4" })}
                   </div>
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-medium">{feature.title}</h3>
-                      {feature.highlight && <Badge variant="secondary" className="text-[11px]">{feature.highlight}</Badge>}
+                      {feature.highlight && (
+                        <Badge variant="secondary" className="text-[11px]">
+                          {feature.highlight}
+                        </Badge>
+                      )}
                     </div>
-                    <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">{feature.description}</p>
+                     <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
+                       {feature.description}
+                     </p>
                   </div>
-                  <Badge variant="outline" className="w-fit font-mono text-[11px] text-muted-foreground">{feature.tech}</Badge>
+                  <Badge
+                    variant="outline"
+                    className="w-fit font-mono text-[11px] text-muted-foreground"
+                  >
+                    {feature.tech}
+                  </Badge>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-      <section id="tech" className="border-b border-border bg-muted/20">
+        <section id="tech" className="border-b border-border bg-muted/20">
         <div className="container mx-auto px-4 py-20">
           <div className="mb-10 max-w-2xl">
             <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">Under the hood</p>
@@ -316,18 +378,38 @@ export const Landing = () => {
             <p className="mt-3 text-muted-foreground">Built on AI models and cloud-native infrastructure.</p>
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-card">
-            <div className="hidden grid-cols-[1.1fr_1fr_1.5fr] gap-6 border-b border-border bg-muted/50 px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-muted-foreground md:grid">
-              <span>Component</span><span>Role</span><span>Capabilities</span>
+            <div
+              className="hidden grid-cols-[1.1fr_1fr_1.5fr] gap-6 border-b border-border bg-muted/50 px-5 py-3
+                font-mono text-[11px] uppercase tracking-wider text-muted-foreground md:grid"
+            >
+              <span>Component</span>
+              <span>Role</span>
+              <span>Capabilities</span>
             </div>
             {techStack.map((tech, index) => (
-              <div key={index} className="grid gap-3 border-b border-border px-5 py-5 last:border-0 md:grid-cols-[1.1fr_1fr_1.5fr] md:items-start md:gap-6">
-                <div><p className="font-medium">{tech.name}</p><p className="mt-1 text-xs text-muted-foreground">{tech.provider}</p></div>
-                <Badge variant="outline" className="w-fit text-[11px]">{tech.category}</Badge>
+              <div
+                key={index}
+                className="grid gap-3 border-b border-border px-5 py-5 last:border-0
+                  md:grid-cols-[1.1fr_1fr_1.5fr] md:items-start md:gap-6"
+              >
+                <div>
+                  <p className="font-medium">{tech.name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{tech.provider}</p>
+                </div>
+                <Badge variant="outline" className="w-fit text-[11px]">
+                  {tech.category}
+                </Badge>
                 <div>
                   <p className="text-sm text-muted-foreground">{tech.description}</p>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                     {tech.features.map((feature, idx) => (
-                      <span key={idx} className="flex items-center gap-1.5 text-xs text-muted-foreground"><CheckCircle className="h-3.5 w-3.5 text-status-success" />{feature}</span>
+                      <span
+                        key={idx}
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                      >
+                        <CheckCircle className="h-3.5 w-3.5 text-status-success" />
+                        {feature}
+                      </span>
                     ))}
                   </div>
                 </div>
@@ -342,18 +424,35 @@ export const Landing = () => {
           <div className="mb-10 max-w-2xl">
             <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">Execution flow</p>
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">How the Multi-Agent Pipeline Works</h2>
-            <p className="mt-3 text-muted-foreground">Deterministic sequence from repository ingestion to verified CI/CD artifact creation.</p>
+            <p className="mt-3 text-muted-foreground">
+              Deterministic sequence from repository ingestion to verified CI/CD artifact creation.
+            </p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {workflows.map((workflow, index) => (
-              <div key={index} className="flex gap-4 rounded-lg border border-border bg-card p-5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs text-primary-foreground">{workflow.step}</div>
-                <div>
-                  <div className="flex items-center gap-2"><span className="text-primary">{workflow.icon}</span><h3 className="font-medium">{workflow.title}</h3></div>
-                  <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{workflow.description}</p>
-                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">{workflow.details}</p>
-                </div>
-              </div>
+             {workflows.map((workflow, index) => (
+               <div
+                 key={index}
+                 className="flex gap-4 rounded-lg border border-border bg-card p-5"
+               >
+                 <div
+                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs
+                     text-primary-foreground"
+                 >
+                   {workflow.step}
+                 </div>
+                 <div>
+                   <div className="flex items-center gap-2">
+                     <span className="text-primary">{workflow.icon}</span>
+                     <h3 className="font-medium">{workflow.title}</h3>
+                   </div>
+                   <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                     {workflow.description}
+                   </p>
+                   <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                     {workflow.details}
+                   </p>
+                 </div>
+               </div>
             ))}
           </div>
         </div>
@@ -361,10 +460,27 @@ export const Landing = () => {
 
       <section className="border-b border-border bg-secondary/50">
         <div className="container mx-auto grid gap-8 px-4 py-16 md:grid-cols-[1fr_auto] md:items-center">
-          <div className="max-w-2xl"><h2 className="text-3xl font-semibold tracking-tight">Ready to Automate Your DevOps Pipeline?</h2><p className="mt-3 text-muted-foreground">Connect your repository and generate Docker and CI/CD pipelines in seconds.</p></div>
+          <div className="max-w-2xl">
+            <h2 className="text-3xl font-semibold tracking-tight">
+              Ready to Automate Your DevOps Pipeline?
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              Connect your repository and generate Docker and CI/CD pipelines in seconds.
+            </p>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Button onClick={() => navigate('/auth')} size="lg">Start Free Trial<ArrowRight className="h-4 w-4" /></Button>
-            <Button variant="outline" size="lg" onClick={() => window.open('https://github.com', '_blank')}><Github className="h-4 w-4" />View on GitHub</Button>
+            <Button onClick={() => navigate('/auth')} size="lg">
+              Start Free Trial
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => window.open('https://github.com', '_blank')}
+            >
+              <Github className="h-4 w-4" />
+              View on GitHub
+            </Button>
           </div>
         </div>
       </section>
@@ -374,14 +490,46 @@ export const Landing = () => {
         <div className="container mx-auto px-4 py-12">
           <div className="grid gap-10 md:grid-cols-4">
             <div className="space-y-3 md:col-span-2">
-              <div className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-foreground"><Terminal className="h-3.5 w-3.5" /></div><span className="font-semibold tracking-tight">InfraMind</span></div>
-              <p className="max-w-sm text-xs leading-5 text-background/70">Multi-agent AI system for automated DevOps with authentication, Postgres data, and row-level security.</p>
-              <div className="font-mono text-[11px] leading-5 text-background/60"><div>AI Core: Llama 3 70B • Tavily • Mem0</div><div>Backend: Supabase Cloud Infrastructure</div></div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-foreground">
+                  <Terminal className="h-3.5 w-3.5" />
+                </div>
+                <span className="font-semibold tracking-tight">InfraMind</span>
+              </div>
+              <p className="max-w-sm text-xs leading-5 text-background/70">
+                Multi-agent AI system for automated DevOps with authentication, Postgres data, and row-level security.
+              </p>
+              <div className="font-mono text-[11px] leading-5 text-background/60">
+                <div>AI Core: Llama 3 70B • Tavily • Mem0</div>
+                <div>Backend: Supabase Cloud Infrastructure</div>
+              </div>
             </div>
-            <div><h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">AI Agents</h3><div className="space-y-2 text-xs text-background/70"><div>Planner Agent</div><div>Analyzer Agent</div><div>Generator Agent</div><div>Verifier Agent</div></div></div>
-            <div><h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">Technology</h3><div className="space-y-2 text-xs text-background/70"><div>Sequential Agent Pipeline</div><div>Llama 3 70B Model</div><div>Supabase Backend</div><div>Docker & GitHub Actions</div></div></div>
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">
+                AI Agents
+              </h3>
+              <div className="space-y-2 text-xs text-background/70">
+                <div>Planner Agent</div>
+                <div>Analyzer Agent</div>
+                <div>Generator Agent</div>
+                <div>Verifier Agent</div>
+              </div>
+            </div>
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">
+                Technology
+              </h3>
+              <div className="space-y-2 text-xs text-background/70">
+                <div>Sequential Agent Pipeline</div>
+                <div>Llama 3 70B Model</div>
+                <div>Supabase Backend</div>
+                <div>Docker & GitHub Actions</div>
+              </div>
+            </div>
           </div>
-          <div className="mt-10 border-t border-background/15 pt-6 text-xs text-background/60"><p>&copy; 2024 InfraMind. Built with Supabase and modern AI technologies.</p></div>
+          <div className="mt-10 border-t border-background/15 pt-6 text-xs text-background/60">
+            <p>&copy; 2024 InfraMind. Built with Supabase and modern AI technologies.</p>
+          </div>
         </div>
       </footer>
     </div>

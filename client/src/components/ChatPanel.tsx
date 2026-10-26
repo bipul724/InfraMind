@@ -134,8 +134,14 @@ export const ChatPanel = () => {
                 <div className="rounded-lg bg-background/10 p-3">
                   <div className="flex space-x-1">
                     <div className="h-2 w-2 animate-bounce rounded-full bg-background/50"></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-background/50" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-background/50" style={{ animationDelay: '0.2s' }}></div>
+                    <div
+                      className="h-2 w-2 animate-bounce rounded-full bg-background/50"
+                      style={{ animationDelay: '0.1s' }}
+                    ></div>
+                    <div
+                      className="h-2 w-2 animate-bounce rounded-full bg-background/50"
+                      style={{ animationDelay: '0.2s' }}
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -157,7 +163,7 @@ export const ChatPanel = () => {
               onClick={sendMessage} 
               disabled={!inputValue.trim() || isTyping}
               size="icon"
-               className=""
+              className=""
             >
               <Send className="h-4 w-4" />
             </Button>

@@ -174,7 +174,10 @@ export const OutputDisplay = ({ techStack, apiResponse, repoUrl }: OutputDisplay
                     <span className="font-mono text-xs text-background/75">{tab.fileName}</span>
                     <span className="font-mono text-[11px] text-background/50">{tab.label}</span>
                   </div>
-                  <pre className="scrollbar-slim max-h-[32rem] overflow-auto p-4 font-mono text-sm leading-6 text-background/90">
+                  <pre
+                    className="scrollbar-slim max-h-[32rem] overflow-auto p-4 font-mono
+                      text-sm leading-6 text-background/90"
+                  >
                     <code>{tab.content}</code>
                   </pre>
                 </div>

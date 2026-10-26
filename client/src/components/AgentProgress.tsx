@@ -335,10 +335,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             <span className="font-medium">{currentStep}</span>
             <span className="font-mono text-xs text-muted-foreground">{progress}% Complete</span>
           </div>
-            <Progress
-              value={progress}
-              className={`h-2 ${status === 'failed' ? 'bg-status-error/10' : 'bg-muted'}`}
-            />
+          <Progress
+            value={progress}
+            className={`h-2 ${status === 'failed' ? 'bg-status-error/10' : 'bg-muted'}`}
+          />
         </div>
 
         {/* Workflow Steps */}
@@ -350,7 +350,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             return (
               <div
                 key={step.id}
-                className={`flex min-h-40 flex-col gap-4 rounded-md border p-4 transition-colors duration-200 ${getStepColor(stepStatus)}`}
+                className={`flex min-h-40 flex-col gap-4 rounded-md border p-4 transition-colors duration-200 ${
+                  getStepColor(stepStatus)
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs text-muted-foreground">
@@ -384,8 +386,12 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                           ? 'Failed'
                           : 'Pending'}
                   </Badge>
-                  <p className="mt-3 text-sm leading-5 text-muted-foreground">{step.description}</p>
-                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">Est. time: {step.estimatedTime}</p>
+                  <p className="mt-3 text-sm leading-5 text-muted-foreground">
+                    {step.description}
+                  </p>
+                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                    Est. time: {step.estimatedTime}
+                  </p>
                 </div>
               </div>
             );
@@ -401,7 +407,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             </div>
             <div className="space-y-1">
               {displayErrors.map((error, index) => (
-                <p key={index} className="text-sm text-status-error">{error}</p>
+                <p key={index} className="text-sm text-status-error">
+                  {error}
+                </p>
               ))}
             </div>
           </div>
@@ -470,7 +478,11 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             </h3>
             <div className="flex flex-wrap gap-2">
               {displayGeneratedFiles.map((file, index) => (
-                <Badge key={index} variant="secondary" className="border border-status-success/30 bg-status-success/10 text-status-success">
+                <Badge
+                  key={index}
+                  variant="secondary"
+                  className="border border-status-success/30 bg-status-success/10 text-status-success"
+                >
                   {file}
                 </Badge>
               ))}

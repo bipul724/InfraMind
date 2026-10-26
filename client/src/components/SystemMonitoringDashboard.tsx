@@ -298,7 +298,10 @@ export const SystemMonitoringDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-             <div className="flex items-center justify-between rounded-md border border-status-success/30 bg-status-success/10 p-3">
+             <div
+               className="flex items-center justify-between rounded-md border border-status-success/30
+                 bg-status-success/10 p-3"
+             >
               <div className="flex items-center">
                  <CheckCircle className="mr-2 h-5 w-5 text-status-success" />
                 <span className="text-sm font-medium">API Status</span>
@@ -318,7 +321,10 @@ export const SystemMonitoringDashboard: React.FC = () => {
               </Badge>
             </div>
             
-             <div className="flex items-center justify-between rounded-md border border-status-warning/30 bg-status-warning/10 p-3">
+             <div
+               className="flex items-center justify-between rounded-md border border-status-warning/30
+                 bg-status-warning/10 p-3"
+             >
               <div className="flex items-center">
                  <HardDrive className="mr-2 h-5 w-5 text-status-warning" />
                 <span className="text-sm font-medium">Memory Usage</span>
