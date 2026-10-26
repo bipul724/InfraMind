@@ -194,7 +194,7 @@ export const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <nav className="sticky top-0 z-50 border-b border-border/80 bg-background/95">
+      <nav className="fixed inset-x-0 top-0 z-50 border-b border-border/80 bg-background">
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -237,7 +237,7 @@ export const Landing = () => {
 
       <main>
         <section className="border-b border-border bg-muted/20">
-          <div className="container mx-auto grid gap-12 px-4 py-16 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:py-24">
+          <div className="container mx-auto grid gap-12 px-4 pb-16 pt-32 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:pb-24 lg:pt-40">
             <div className="max-w-xl">
               <Badge variant="outline" className="mb-6 gap-2 border-primary/30 bg-primary/5 text-primary">
                 <GitBranch className="h-3.5 w-3.5" />
