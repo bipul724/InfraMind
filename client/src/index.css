@@ -57,56 +57,6 @@
     --sidebar-ring: 156 38% 25%;
   }
 
-  .dark {
-    color-scheme: dark;
-
-    --background: 220 18% 10%;
-    --foreground: 40 20% 95%;
-
-    --card: 220 16% 14%;
-    --card-foreground: 40 20% 95%;
-
-    --popover: 220 16% 14%;
-    --popover-foreground: 40 20% 95%;
-
-    --primary: 153 42% 60%;
-    --primary-foreground: 220 18% 10%;
-
-    --secondary: 220 14% 20%;
-    --secondary-foreground: 40 20% 95%;
-
-    --muted: 220 14% 18%;
-    --muted-foreground: 220 10% 67%;
-
-    --accent: 220 14% 20%;
-    --accent-foreground: 40 20% 95%;
-
-    --destructive: 0 55% 36%;
-    --destructive-foreground: 40 20% 95%;
-
-    --border: 220 12% 25%;
-    --input: 220 12% 28%;
-    --ring: 153 42% 60%;
-
-    --success: 153 42% 56%;
-    --success-foreground: 220 18% 10%;
-    --warning: 36 78% 62%;
-    --warning-foreground: 220 18% 10%;
-    --error: 0 65% 64%;
-    --error-foreground: 220 18% 10%;
-    --running: 153 42% 60%;
-    --running-foreground: 220 18% 10%;
-
-    --sidebar-background: 220 18% 12%;
-    --sidebar-foreground: 40 20% 91%;
-    --sidebar-primary: 153 42% 60%;
-    --sidebar-primary-foreground: 220 18% 10%;
-    --sidebar-accent: 220 14% 20%;
-    --sidebar-accent-foreground: 40 20% 95%;
-    --sidebar-border: 220 12% 25%;
-    --sidebar-ring: 153 42% 60%;
-  }
-
   * {
     @apply border-border;
   }
