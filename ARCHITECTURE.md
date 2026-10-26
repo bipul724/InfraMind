@@ -171,7 +171,7 @@ graph TD
 - Node.js Express server
 - WebSocket support for real-time updates
 - All environment variables configured
-- Note: `render.yaml` currently starts `test-render.js` (a smoke-test stub), not `server.js`. See DEPLOYMENT-GUIDE.md
+- Started by `render.yaml` with `cd server && npm start` (`node server.js`)
 
 ### API URL
 - The frontend reaches the server through `VITE_API_URL`. `VITE_SERVER_URL` is read only by the unused `client/src/lib/agentApi.ts`

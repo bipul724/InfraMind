@@ -185,7 +185,7 @@ Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_API_URL` in the host
 # Set environment variables in Render dashboard
 ```
 
-> ⚠️ `render.yaml` currently starts the backend with `cd server && node test-render.js`. That is a smoke-test stub, not the API server. See [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md) before relying on a Render deployment.
+`render.yaml` starts the backend with `cd server && npm start` (the real Express server). See [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md) for the full Render setup.
 
 ## 🤖 Multi-Agent System
 

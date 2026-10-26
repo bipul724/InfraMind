@@ -36,7 +36,7 @@ export interface AnalyticsData {
 }
 
 // API Base URL
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:10000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:10000';
 
 // Define interfaces for saving generated files to Supabase
 export interface SaveFileRequest {
@@ -60,12 +60,14 @@ export interface SavedFile {
 export class DevPilotAPI {
   private static async makeRequest(data: DevPilotRequest): Promise<DevPilotResponse> {
     try {
-      const response = await fetch(API_BASE_URL, {
+      // useAgents: false selects the single-shot generator (server/index.js),
+      // which returns the DevPilotResponse shape including docs
+      const response = await fetch(`${API_BASE_URL}/api/devpilot`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, useAgents: false }),
       });
 
       if (!response.ok) {
@@ -270,6 +272,43 @@ export class SavedFilesAPI {
       throw new Error(error.message);
     }
     return toSavedFile(row);
+  }
+
+  // Inserts all files in one request, so either every file is saved or none is
+  static async saveFiles(files: SaveFileRequest[]): Promise<SavedFile[]> {
+    const { data: rows, error } = await supabase
+      .from('saved_files')
+      .insert(files.map(file => ({
+        user_id: file.userId,
+        content: file.content,
+        name: file.name,
+        type: file.type,
+        repo_url: file.repoUrl || null,
+      })))
+      .select();
+
+    if (error) {
+      console.error('Failed to save files:', error);
+      throw new Error(error.message);
+    }
+    return rows.map(toSavedFile);
+  }
+
+  static async deleteFile(id: string): Promise<void> {
+    // Row-level security hides other users' rows, so a foreign id deletes nothing
+    const { data, error } = await supabase
+      .from('saved_files')
+      .delete()
+      .eq('id', id)
+      .select('id');
+
+    if (error) {
+      console.error('Failed to delete file:', error);
+      throw new Error(error.message);
+    }
+    if (!data || data.length === 0) {
+      throw new Error('File not found');
+    }
   }
 
   static async getSavedFiles(limit = 50): Promise<SavedFile[]> {

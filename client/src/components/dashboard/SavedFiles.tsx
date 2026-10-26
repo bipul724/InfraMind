@@ -13,6 +13,7 @@ export const SavedFiles: React.FC = () => {
   const [files, setFiles] = useState<SavedFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchSavedFiles = async () => {
     if (!user?.id) return;
@@ -50,6 +51,29 @@ export const SavedFiles: React.FC = () => {
     a.download = file.name;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleDelete = async (file: SavedFile) => {
+    if (!window.confirm(`Delete ${file.name}? This cannot be undone.`)) return;
+
+    setDeletingId(file.id);
+    try {
+      await SavedFilesAPI.deleteFile(file.id);
+      setFiles(prev => prev.filter(f => f.id !== file.id));
+      toast({
+        title: 'File deleted',
+        description: `${file.name} has been removed from your account.`,
+      });
+    } catch (err) {
+      console.error('Error deleting file:', err);
+      toast({
+        title: 'Delete Failed',
+        description: 'Failed to delete the file',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const getFileTypeColor = (type: string) => {
@@ -128,7 +152,7 @@ export const SavedFiles: React.FC = () => {
             <FilePlus className="h-12 w-12 mx-auto text-slate-300" />
             <p className="text-slate-600">No saved files found</p>
             <p className="text-slate-400 text-sm">
-              Generated files can be saved using the "Save" button
+              Save generated files from a completed generation to see them here
             </p>
           </div>
         ) : (
@@ -162,6 +186,15 @@ export const SavedFiles: React.FC = () => {
                   >
                     <Download className="h-4 w-4" />
                     <span className="sr-only">Download</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDelete(file)}
+                    disabled={deletingId === file.id}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="sr-only">Delete</span>
                   </Button>
                 </div>
               </div>

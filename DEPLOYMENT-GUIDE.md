@@ -165,7 +165,7 @@ services:
     name: inframind-backend
     env: node
     buildCommand: cd server && npm install
-    startCommand: cd server && node test-render.js
+    startCommand: cd server && npm start
     plan: free
     envVars:
       - key: NODE_VERSION
@@ -192,7 +192,9 @@ services:
         value: 18.0.0
 ```
 
-> ⚠️ **The backend start command runs `test-render.js`, not the API server.** `test-render.js` is a deployment smoke test: it answers every request, including `/health`, with `{"message": "Render deployment test successful"}`. None of the API routes, Socket.IO or agents are available. To serve the real API, change `startCommand` to `cd server && npm start` (which runs `node server.js`). That change is left for you to make deliberately.
+`render.yaml` has no `rootDir`, so commands run from the repository root, and `cd server` is required. `npm start` runs `node server.js`, the real Express API. Its `/health` route reports the live process status, and unknown paths return 404.
+
+> Until October 2026 the start command was `cd server && node test-render.js`. That file is a deployment smoke test that answers every request, including `/health`, with `{"message": "Render deployment test successful"}`. So a deploy looked healthy while serving no API. `test-render.js` is still available via `npm run test:render`, but it must never be the production start command.
 
 **Deploy Steps**:
 1. Connect your GitHub repository to Render
@@ -401,7 +403,7 @@ KEYWORDS_AI_API_KEY=your-keywords-ai-api-key
 ### Deployment Testing
 
 - [ ] **Frontend Build**: Vercel deployment successful
-- [ ] **Backend API**: Render runs `server.js` (not `test-render.js`) and `/health` returns the real health status
+- [ ] **Backend API**: Render runs `server.js` via `npm start`. `/health` returns the real health status, and an unknown path returns 404
 - [ ] **Authentication Flow**: OAuth login/signup working
 - [ ] **GitHub Integration**: Repository selection and access working
 - [ ] **AI Agent Pipeline**: Multi-agent workflow functional

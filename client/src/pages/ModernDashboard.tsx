@@ -26,7 +26,8 @@ import {
   Star,
   Plus,
   Search,
-  Filter
+  Filter,
+  FileText
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGitHub } from '@/contexts/GitHubContext';
@@ -34,6 +35,7 @@ import { useNavigate } from 'react-router-dom';
 import { AgentGenerationForm } from '@/components/AgentGenerationForm';
 import { AgentProgress } from '@/components/AgentProgress';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { SavedFiles } from '@/components/dashboard/SavedFiles';
 
 interface Repository {
   id: string;
@@ -238,7 +240,7 @@ export const ModernDashboard = () => {
 
             {/* Main Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-              <TabsList className="grid w-full grid-cols-3 max-w-md mx-auto">
+              <TabsList className="grid w-full grid-cols-4 max-w-xl mx-auto">
                 <TabsTrigger value="generate" className="flex items-center space-x-2">
                   <Zap className="h-4 w-4" />
                   <span>Generate</span>
@@ -250,6 +252,10 @@ export const ModernDashboard = () => {
                 <TabsTrigger value="projects" className="flex items-center space-x-2">
                   <Activity className="h-4 w-4" />
                   <span>Projects</span>
+                </TabsTrigger>
+                <TabsTrigger value="saved" className="flex items-center space-x-2">
+                  <FileText className="h-4 w-4" />
+                  <span>Saved Files</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -482,6 +488,13 @@ export const ModernDashboard = () => {
                     )}
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              {/* Saved Files Tab */}
+              <TabsContent value="saved" className="space-y-6">
+                <div className="max-w-4xl mx-auto">
+                  <SavedFiles />
+                </div>
               </TabsContent>
             </Tabs>
           </div>

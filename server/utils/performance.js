@@ -3,7 +3,7 @@
  * Tracks API performance, memory usage, and system metrics
  */
 
-import { logger } from './logger.js';
+import { logger, redactUrl } from './logger.js';
 
 class PerformanceMonitor {
   constructor() {
@@ -40,14 +40,14 @@ class PerformanceMonitor {
       
       // Log slow requests
       if (duration > 1000) {
-        logger.warn(`Slow request detected: ${req.method} ${req.originalUrl}`, {
+        logger.warn(`Slow request detected: ${req.method} ${redactUrl(req.originalUrl)}`, {
           duration: `${duration}ms`,
           status: res.statusCode,
           ip: req.ip
         });
       }
       
-      logger.performance(`${req.method} ${req.originalUrl}`, duration, {
+      logger.performance(`${req.method} ${redactUrl(req.originalUrl)}`, duration, {
         status: res.statusCode,
         userAgent: req.get('User-Agent'),
         ip: req.ip

@@ -2,6 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import simpleGit from 'simple-git';
 import fs from 'fs-extra';
@@ -57,33 +59,7 @@ app.use(performanceMonitor.trackRequest.bind(performanceMonitor));
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Cookie parser middleware (simple implementation)
-app.use((req, res, next) => {
-  const cookies = {};
-  if (req.headers.cookie) {
-    req.headers.cookie.split(';').forEach(cookie => {
-      const [name, value] = cookie.trim().split('=');
-      cookies[name] = value;
-    });
-  }
-  req.cookies = cookies;
-  
-  // Add cookie setter to response
-  res.cookie = (name, value, options = {}) => {
-    let cookieStr = `${name}=${value}`;
-    if (options.httpOnly) cookieStr += '; HttpOnly';
-    if (options.maxAge) cookieStr += `; Max-Age=${options.maxAge / 1000}`;
-    if (options.path) cookieStr += `; Path=${options.path}`;
-    res.setHeader('Set-Cookie', cookieStr);
-  };
-  
-  res.clearCookie = (name) => {
-    res.setHeader('Set-Cookie', `${name}=; Max-Age=0`);
-  };
-  
-  next();
-});
+app.use(cookieParser());
 
 // Store active sessions
 const activeSessions = new Map();
@@ -155,91 +131,61 @@ app.get('/api/analytics', (req, res) => {
 
 // GitHub OAuth Routes
 
-// Initiate GitHub OAuth
+// OAuth state cookie: HttpOnly, single-use, scoped to the /auth/github routes.
+// Production frontends and backends sit on different sites, so use SameSite=None; Secure there.
+const OAUTH_STATE_COOKIE = 'oauth_state';
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
+const isProduction = process.env.NODE_ENV === 'production';
+const oauthStateCookieOptions = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: isProduction ? 'none' : 'lax',
+  path: '/auth/github'
+};
+
+const isValidOAuthState = (state, storedState) => {
+  if (typeof state !== 'string' || typeof storedState !== 'string' || !state || !storedState) {
+    return false;
+  }
+  const received = Buffer.from(state);
+  const expected = Buffer.from(storedState);
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+};
+
+// Initiate GitHub OAuth. The browser navigates here (top-level), so the state
+// cookie is first-party and survives browsers that block third-party cookies.
 app.get('/auth/github', (req, res) => {
   try {
-    const state = uuidv4(); // CSRF protection
+    const state = crypto.randomBytes(32).toString('hex'); // CSRF protection
     const authUrl = GitHubService.getAuthURL(state);
     
-    // Store state in session or temporary storage (in production, use proper session management)
-    res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000 }); // 10 minutes
+    res.cookie(OAUTH_STATE_COOKIE, state, { ...oauthStateCookieOptions, maxAge: OAUTH_STATE_MAX_AGE_MS });
     
-    res.json({ authUrl });
+    res.redirect(authUrl);
   } catch (error) {
-    console.error('GitHub OAuth initiation error:', error);
-    res.status(500).json({ error: 'Failed to initiate GitHub authentication' });
-  }
-});
-
-// GitHub OAuth callback (simplified)
-app.post('/api/github/callback', async (req, res) => {
-  try {
-    const { code } = req.body;
-    
-    if (!code) {
-      return res.status(400).json({ error: 'Authorization code is required' });
-    }
-
-    // Exchange code for access token
-    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: process.env.GITHUB_CLIENT_ID,
-        client_secret: process.env.GITHUB_CLIENT_SECRET,
-        code: code,
-      }),
-    });
-
-    const tokenData = await tokenResponse.json();
-
-    if (tokenData.error) {
-      return res.status(400).json({ error: tokenData.error_description || 'Failed to get access token' });
-    }
-
-    // Get user info from GitHub
-    const userResponse = await fetch('https://api.github.com/user', {
-      headers: {
-        'Authorization': `token ${tokenData.access_token}`,
-        'Accept': 'application/vnd.github.v3+json',
-      },
-    });
-
-    const userData = await userResponse.json();
-
-    if (!userResponse.ok) {
-      return res.status(400).json({ error: 'Failed to get user information from GitHub' });
-    }
-
-    res.json({
-      success: true,
-      access_token: tokenData.access_token,
-      username: userData.login,
-      name: userData.name,
-      email: userData.email,
-      avatar_url: userData.avatar_url,
-    });
-
-  } catch (error) {
-    console.error('GitHub callback error:', error);
-    res.status(500).json({ error: 'Internal server error during GitHub authentication' });
+    console.error('GitHub OAuth initiation error:', error.message);
+    res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
   }
 });
 
 // GitHub OAuth callback
 app.get('/auth/github/callback', async (req, res) => {
+  const { code, state } = req.query;
+  const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
+  
+  // The state is single-use: clear it whether or not validation succeeds
+  res.clearCookie(OAUTH_STATE_COOKIE, oauthStateCookieOptions);
+  
+  // Verify state to prevent CSRF attacks
+  if (!isValidOAuthState(state, storedState)) {
+    return res.redirect(`${process.env.CLIENT_URL}/auth?error=invalid_state`);
+  }
+  
+  if (typeof code !== 'string' || !code) {
+    return res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
+  }
+  
   try {
-    const { code, state } = req.query;
-    const storedState = req.cookies?.oauth_state;
-    
-    // Verify state to prevent CSRF attacks
-    if (!state || state !== storedState) {
-      return res.status(400).redirect(`${process.env.CLIENT_URL}/auth?error=invalid_state`);
-    }
-    
     // Exchange code for access token
     const accessToken = await GitHubService.getAccessToken(code);
     
@@ -256,14 +202,11 @@ app.get('/auth/github/callback', async (req, res) => {
       accessToken: accessToken
     });
     
-    // Clear OAuth state cookie
-    res.clearCookie('oauth_state');
-    
     // Redirect to frontend with JWT token
     res.redirect(`${process.env.CLIENT_URL}/auth/success?token=${jwtToken}`);
     
   } catch (error) {
-    console.error('GitHub OAuth callback error:', error);
+    console.error('GitHub OAuth callback error:', error.message);
     res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
   }
 });

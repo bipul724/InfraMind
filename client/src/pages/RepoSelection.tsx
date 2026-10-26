@@ -10,6 +10,7 @@ import { ArrowRight, Search, GitBranch, Github, Globe, Link, Users } from 'lucid
 import { TechStackSelector } from '@/components/TechStackSelector';
 import { RepositorySelector } from '@/components/RepositorySelector';
 import { useToast } from '@/hooks/use-toast';
+import { API_BASE_URL } from '@/lib/api';
 
 export const RepoSelection = () => {
   const { user } = useAuth();
@@ -65,7 +66,7 @@ export const RepoSelection = () => {
     setLoading(true);
     try {
       // Clone repository using the new backend endpoint
-      const cloneResponse = await fetch('http://localhost:3001/api/clone-repo', {
+      const cloneResponse = await fetch(`${API_BASE_URL}/api/clone-repo`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -84,7 +85,7 @@ export const RepoSelection = () => {
       const cloneData = await cloneResponse.json();
       
       // Start analysis
-      const analyzeResponse = await fetch('http://localhost:3001/api/analyze', {
+      const analyzeResponse = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

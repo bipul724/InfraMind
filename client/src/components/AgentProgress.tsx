@@ -15,9 +15,13 @@ import {
   Shield,
   Download,
   ExternalLink,
-  Loader2
+  Loader2,
+  Save
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { SavedFilesAPI } from '@/lib/api';
 
 interface AgentMessage {
   agent: string;
@@ -27,6 +31,7 @@ interface AgentMessage {
 
 interface AgentProgressProps {
   sessionId?: string;
+  repoUrl?: string;
   currentStep: string;
   progress: number;
   status: 'cloning' | 'cloned' | 'analyzing' | 'completed' | 'failed';
@@ -77,8 +82,29 @@ const WORKFLOW_STEPS = [
   }
 ];
 
+// Agent output keys -> the file names and types used for saved files (see OutputDisplay)
+const SAVED_FILE_META: Record<string, { name: string; type: string }> = {
+  dockerfile: { name: 'Dockerfile', type: 'dockerfile' },
+  githubActions: { name: '.github/workflows/ci.yml', type: 'github-actions' },
+  envExample: { name: '.env.example', type: 'env' },
+};
+
+// Private repos are cloned as https://<token>@github.com/..., so never store credentials
+const stripCredentials = (url?: string): string | undefined => {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return url.includes('@') ? undefined : url;
+  }
+};
+
 export const AgentProgress: React.FC<AgentProgressProps> = ({
   sessionId,
+  repoUrl,
   currentStep,
   progress,
   status,
@@ -97,6 +123,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const [localErrors, setLocalErrors] = useState<string[]>(errors);
   const [localTechStack, setLocalTechStack] = useState(techStack);
   const [localGeneratedFiles, setLocalGeneratedFiles] = useState<string[]>(generatedFiles);
+  const [saving, setSaving] = useState(false);
+  const { user } = useAuth();
+  const { toast } = useToast();
 
   // Initialize Socket.IO connection
   useEffect(() => {
@@ -190,21 +219,24 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     }
   };
 
+  const fetchGeneratedFiles = async (): Promise<Record<string, unknown>> => {
+    const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:10000';
+    const response = await fetch(`${serverUrl}/api/files/${sessionId}`);
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch generated files');
+    }
+    
+    const data = await response.json();
+    return data.files || {};
+  };
+
   const handleDownloadFiles = async () => {
     if (!sessionId) return;
     
     try {
-      const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:10000';
-      const response = await fetch(`${serverUrl}/api/files/${sessionId}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch generated files');
-      }
-      
-      const data = await response.json();
-      
       // Create downloadable files
-      const files = data.files;
+      const files = await fetchGeneratedFiles();
       Object.entries(files).forEach(([filename, content]) => {
         const blob = new Blob([content as string], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -218,6 +250,51 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       });
     } catch (error) {
       console.error('Download error:', error);
+    }
+  };
+
+  const handleSaveFiles = async () => {
+    if (!sessionId) return;
+    if (!user?.id) {
+      toast({
+        title: 'Authentication required',
+        description: 'Please sign in to save files.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const files = await fetchGeneratedFiles();
+      const requests = Object.entries(files)
+        .filter(([, content]) => typeof content === 'string' && content.trim() !== '')
+        .map(([key, content]) => ({
+          userId: user.id,
+          content: content as string,
+          name: SAVED_FILE_META[key]?.name || key,
+          type: SAVED_FILE_META[key]?.type || key,
+          repoUrl: stripCredentials(repoUrl),
+        }));
+
+      if (requests.length === 0) {
+        throw new Error('No generated files to save');
+      }
+
+      await SavedFilesAPI.saveFiles(requests);
+      toast({
+        title: 'Files saved',
+        description: `${requests.length} file${requests.length === 1 ? '' : 's'} saved to your account.`,
+      });
+    } catch (error) {
+      console.error('Save error:', error);
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Failed to save files',
+        variant: 'destructive'
+      });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -407,6 +484,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
               <Button size="sm" variant="outline" onClick={handleDownloadFiles}>
                 <Download className="h-4 w-4 mr-2" />
                 Download Files
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                {saving ? 'Saving...' : 'Save to Account'}
               </Button>
               <Button size="sm">
                 <ExternalLink className="h-4 w-4 mr-2" />

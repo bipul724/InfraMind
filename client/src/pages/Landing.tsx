@@ -72,15 +72,15 @@ export const Landing = () => {
       title: "Multi-Agent AI Orchestration",
       description: "Four specialized AI agents work in harmony: Planner analyzes structure, Analyzer detects tech stack, Generator creates pipelines, and Verifier ensures quality.",
       color: "from-slate-700 to-slate-900",
-      tech: "LangGraph + Llama 3 70B",
+      tech: "Sequential Agents + Llama 3 70B",
       highlight: "NEW"
     },
     {
       icon: <Search className="h-6 w-6" />,
       title: "Intelligent Code Analysis",
-      description: "Tavily-powered search combined with advanced AI understands complex codebases, dependencies, and architectural patterns with 99% accuracy.",
+      description: "Agents scan your repository's file structure and dependency manifests, then Llama 3 70B interprets its frameworks, dependencies and architectural patterns.",
       color: "from-slate-700 to-slate-900",
-      tech: "Tavily + Novita.ai",
+      tech: "Repository Scan + Novita.ai",
       highlight: "AI-POWERED"
     },
     {
@@ -127,12 +127,12 @@ export const Landing = () => {
       provider: "Novita.ai"
     },
     { 
-      name: "LangGraph", 
-      description: "Multi-agent orchestration framework",
+      name: "Agent Pipeline", 
+      description: "Custom sequential multi-agent workflow",
       logo: "🕸️",
       category: "Agent System",
-      features: ["Agent Coordination", "Workflow Management", "State Management"],
-      provider: "LangChain"
+      features: ["Agent Sequencing", "Shared State", "LLM Retry Handling"],
+      provider: "InfraMind"
     },
     { 
       name: "Tavily", 
@@ -202,15 +202,15 @@ export const Landing = () => {
       description: "Planner Agent analyzes codebase structure while Analyzer Agent detects tech stack",
       icon: <Search className="h-5 w-5" />,
       color: "bg-blue-500",
-      details: "Tavily-powered deep analysis + AI pattern recognition"
+      details: "File-structure scan and dependency detection, interpreted by Llama 3 70B"
     },
     {
       step: "2", 
       title: "AI Agent Coordination",
-      description: "LangGraph orchestrates all four agents for optimal collaboration and results",
+      description: "The planner, analyzer, generator and verifier run in sequence, each building on the previous result",
       icon: <Network className="h-5 w-5" />,
       color: "bg-slate-800",
-      details: "Real-time agent communication and state management"
+      details: "Shared state between agents, with progress updates over Socket.IO"
     },
     {
       step: "3",
@@ -601,7 +601,7 @@ export const Landing = () => {
                 Multi-agent AI system for automated DevOps with enterprise-grade security and scalability.
               </p>
               <div className="text-[11px] text-slate-400 space-y-0.5">
-                <div>AI Core: Llama 3 70B • LangGraph • Tavily • Mem0</div>
+                <div>AI Core: Llama 3 70B • Tavily • Mem0</div>
                 <div>Backend: Supabase Cloud Infrastructure</div>
               </div>
             </div>
@@ -619,7 +619,7 @@ export const Landing = () => {
             <div>
               <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Technology</h3>
               <div className="space-y-2 text-xs text-slate-400">
-                <div>LangGraph Framework</div>
+                <div>Sequential Agent Pipeline</div>
                 <div>Llama 3 70B Model</div>
                 <div>Supabase Backend</div>
                 <div>Docker & GitHub Actions</div>

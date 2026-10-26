@@ -5,7 +5,7 @@
 
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import { logger } from './logger.js';
+import { logger, redactUrl } from './logger.js';
 
 // Rate limiting configurations
 export const createRateLimiter = (windowMs, max, message) => {
@@ -19,7 +19,7 @@ export const createRateLimiter = (windowMs, max, message) => {
       logger.warn(`Rate limit exceeded for IP: ${req.ip}`, {
         ip: req.ip,
         userAgent: req.get('User-Agent'),
-        endpoint: req.originalUrl
+        endpoint: redactUrl(req.originalUrl)
       });
       res.status(429).json({ error: message });
     }
@@ -109,7 +109,7 @@ export const ipWhitelist = (allowedIPs) => {
     } else {
       logger.warn(`Access denied for IP: ${clientIP}`, {
         ip: clientIP,
-        endpoint: req.originalUrl
+        endpoint: redactUrl(req.originalUrl)
       });
       res.status(403).json({ error: 'Access denied' });
     }
@@ -122,9 +122,10 @@ export const requestLogger = (req, res, next) => {
   
   res.on('finish', () => {
     const duration = Date.now() - start;
-    logger.info(`${req.method} ${req.originalUrl}`, {
+    const url = redactUrl(req.originalUrl);
+    logger.info(`${req.method} ${url}`, {
       method: req.method,
-      url: req.originalUrl,
+      url,
       status: res.statusCode,
       duration: `${duration}ms`,
       ip: req.ip,

@@ -25,6 +25,11 @@
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 
+// Axios errors carry the request config (client secret, auth code, access token),
+// so log only the message and HTTP status
+const describeError = (error) =>
+  `${error.message}${error.response ? ` (HTTP ${error.response.status})` : ''}`;
+
 class GitHubService {
   constructor() {
     this.clientId = process.env.GITHUB_CLIENT_ID;
@@ -54,9 +59,14 @@ class GitHubService {
         }
       });
 
+      // GitHub answers an invalid or expired code with HTTP 200 and an error field
+      if (!response.data.access_token) {
+        throw new Error(`GitHub rejected the authorization code: ${response.data.error || 'no access token returned'}`);
+      }
+
       return response.data.access_token;
     } catch (error) {
-      console.error('Error exchanging code for token:', error);
+      console.error('Error exchanging code for token:', describeError(error));
       throw new Error('Failed to authenticate with GitHub');
     }
   }
@@ -73,7 +83,7 @@ class GitHubService {
 
       return response.data;
     } catch (error) {
-      console.error('Error fetching user info:', error);
+      console.error('Error fetching user info:', describeError(error));
       throw new Error('Failed to fetch user information');
     }
   }
@@ -114,7 +124,7 @@ class GitHubService {
         }
       }));
     } catch (error) {
-      console.error('Error fetching repositories:', error);
+      console.error('Error fetching repositories:', describeError(error));
       throw new Error('Failed to fetch repositories');
     }
   }
@@ -155,7 +165,7 @@ class GitHubService {
         }
       }));
     } catch (error) {
-      console.error('Error fetching org repositories:', error);
+      console.error('Error fetching org repositories:', describeError(error));
       throw new Error('Failed to fetch organization repositories');
     }
   }
@@ -178,7 +188,7 @@ class GitHubService {
         url: org.url
       }));
     } catch (error) {
-      console.error('Error fetching organizations:', error);
+      console.error('Error fetching organizations:', describeError(error));
       throw new Error('Failed to fetch organizations');
     }
   }

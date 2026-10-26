@@ -405,6 +405,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
             <TabsContent value="progress" className="space-y-4">
               <AgentProgress
                 sessionId={sessionId}
+                repoUrl={repoUrl}
                 currentStep={currentStep}
                 progress={progress}
                 status={status}

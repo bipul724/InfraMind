@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle, AlertTriangle, Github } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { API_BASE_URL } from '@/lib/api';
 
 export const GitHubCallback = () => {
   const [searchParams] = useSearchParams();
@@ -17,68 +18,32 @@ export const GitHubCallback = () => {
     handleCallback();
   }, []);
 
-  const handleCallback = async () => {
-    try {
-      const code = searchParams.get('code');
-      const error = searchParams.get('error');
-      const state = searchParams.get('state');
+  const handleCallback = () => {
+    const code = searchParams.get('code');
+    const error = searchParams.get('error');
 
-      if (error) {
-        setStatus('error');
-        setMessage(`GitHub OAuth error: ${error}`);
-        return;
-      }
-
-      if (!code) {
-        setStatus('error');
-        setMessage('No authorization code received from GitHub');
-        return;
-      }
-
-      setMessage('Exchanging code for access token...');
-
-      // Exchange the code for an access token
-      const response = await fetch('/api/github/callback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ code, state }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to exchange code for token');
-      }
-
-      const data = await response.json();
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      setMessage('GitHub account connected successfully!');
-      setStatus('success');
-
-      // Store GitHub info in localStorage for now
-      localStorage.setItem('github_connected', 'true');
-      localStorage.setItem('github_username', data.username || '');
-      localStorage.setItem('github_access_token', data.access_token || '');
-
-      // Redirect to dashboard after a short delay
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
-
-    } catch (error) {
-      console.error('GitHub callback error:', error);
+    if (error) {
       setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Failed to connect GitHub account');
+      setMessage(`GitHub OAuth error: ${error}`);
+      return;
     }
+
+    if (!code) {
+      setStatus('error');
+      setMessage('No authorization code received from GitHub');
+      return;
+    }
+
+    setMessage('Verifying GitHub authorization...');
+
+    // The server checks the OAuth state against its HttpOnly cookie, so it must
+    // exchange the code. It redirects back to /auth/success with a session token.
+    window.location.replace(`${API_BASE_URL}/auth/github/callback?${searchParams.toString()}`);
   };
 
   const handleRetry = () => {
-    const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${import.meta.env.VITE_GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin + '/auth/github/callback')}&scope=repo,user:email`;
-    window.location.href = githubAuthUrl;
+    // Restart through the server so a fresh state cookie is issued
+    window.location.href = `${API_BASE_URL}/auth/github`;
   };
 
   return (

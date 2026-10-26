@@ -124,6 +124,20 @@ class Logger {
 
 export const logger = new Logger();
 
+// OAuth callbacks carry authorization codes, state and tokens in the query string;
+// never write those values to logs
+const SENSITIVE_QUERY_PARAMS = ['code', 'state', 'token', 'access_token'];
+
+export const redactUrl = (url = '') => {
+  const queryStart = url.indexOf('?');
+  if (queryStart === -1) return url;
+  const params = new URLSearchParams(url.slice(queryStart + 1));
+  for (const key of SENSITIVE_QUERY_PARAMS) {
+    if (params.has(key)) params.set(key, 'REDACTED');
+  }
+  return `${url.slice(0, queryStart)}?${params.toString()}`;
+};
+
 // Clean up logs on startup
 if (process.env.NODE_ENV === 'production') {
   logger.cleanupLogs();

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { API_BASE_URL } from '@/lib/api';
 
 interface GitHubUser {
   id: number;
@@ -49,7 +50,7 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch('http://localhost:3001/api/github/repositories', {
+      const response = await fetch(`${API_BASE_URL}/api/github/repositories`, {
         headers: {
           'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
@@ -76,16 +77,9 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
   const connectGitHub = async () => {
     try {
       setError(null);
-      const response = await fetch('http://localhost:3001/auth/github');
-      
-      if (!response.ok) {
-        throw new Error('Failed to initiate GitHub authentication');
-      }
-
-      const data = await response.json();
-      
-      // Open OAuth URL in a popup or redirect
-      window.location.href = data.authUrl;
+      // Navigate (not fetch) so the server's OAuth state cookie is set first-party,
+      // then the server redirects to GitHub
+      window.location.href = `${API_BASE_URL}/auth/github`;
     } catch (error) {
       console.error('GitHub connection error:', error);
       setError('Failed to connect to GitHub. Please try again.');
