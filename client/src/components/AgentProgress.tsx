@@ -9,7 +9,6 @@ import {
   Clock, 
   AlertCircle, 
   Bot, 
-  GitBranch,
   Search,
   Cog,
   Shield,
@@ -46,36 +45,29 @@ interface AgentProgressProps {
 
 const WORKFLOW_STEPS = [
   {
-    id: 'clone',
-    title: 'Clone Repository',
-    description: 'Downloading repository from GitHub',
-    icon: GitBranch,
-    estimatedTime: '10-30s'
-  },
-  {
     id: 'plan',
-    title: 'AI Planning',
+    title: 'Planner Agent',
     description: 'Planner Agent analyzing project structure',
     icon: Bot,
     estimatedTime: '15-45s'
   },
   {
     id: 'analyze',
-    title: 'Codebase Analysis',
+    title: 'Analyzer Agent',
     description: 'Analyzer Agent detecting tech stack',
     icon: Search,
     estimatedTime: '30-60s'
   },
   {
     id: 'generate',
-    title: 'Generate CI/CD',
+    title: 'Generator Agent',
     description: 'Generator Agent creating configurations',
     icon: Cog,
     estimatedTime: '45-90s'
   },
   {
     id: 'verify',
-    title: 'Verification',
+    title: 'Verifier Agent',
     description: 'Verifier Agent validating outputs',
     icon: Shield,
     estimatedTime: '15-30s'
@@ -168,11 +160,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
   useEffect(() => {
     // Update current step index based on progress
-    if (progress <= 25) setCurrentStepIndex(0);
-    else if (progress <= 35) setCurrentStepIndex(1);
-    else if (progress <= 65) setCurrentStepIndex(2);
-    else if (progress <= 90) setCurrentStepIndex(3);
-    else setCurrentStepIndex(4);
+    if (progress <= 35) setCurrentStepIndex(0);
+    else if (progress <= 65) setCurrentStepIndex(1);
+    else if (progress <= 90) setCurrentStepIndex(2);
+    else setCurrentStepIndex(3);
   }, [progress]);
 
   useEffect(() => {
@@ -188,34 +179,39 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   }, [status, onComplete, onError, localTechStack, localGeneratedFiles, localMessages, localErrors]);
 
   const getStepStatus = (stepIndex: number) => {
-    if (stepIndex < currentStepIndex) return 'completed';
-    if (stepIndex === currentStepIndex) return 'current';
+    if (status === 'failed' && stepIndex === currentStepIndex) return 'failed';
+    if (status === 'completed' || stepIndex < currentStepIndex) return 'done';
+    if (stepIndex === currentStepIndex && status !== 'cloned') return 'running';
     return 'pending';
   };
 
   const getStatusIcon = (stepStatus: string) => {
     switch (stepStatus) {
-      case 'completed':
-        return <CheckCircle className="h-5 w-5 text-green-600 animate-pulse" />;
-      case 'current':
-        return <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />;
+      case 'done':
+        return <CheckCircle className="h-5 w-5 text-status-success" />;
+      case 'running':
+        return <Loader2 className="h-5 w-5 animate-spin text-status-running" />;
+      case 'failed':
+        return <AlertCircle className="h-5 w-5 text-status-error" />;
       case 'pending':
-        return <Clock className="h-5 w-5 text-gray-400" />;
+        return <Clock className="h-5 w-5 text-muted-foreground" />;
       default:
-        return <Clock className="h-5 w-5 text-gray-400" />;
+        return <Clock className="h-5 w-5 text-muted-foreground" />;
     }
   };
 
   const getStepColor = (stepStatus: string) => {
     switch (stepStatus) {
-      case 'completed':
-        return 'border-green-200 bg-green-50';
-      case 'current':
-        return 'border-blue-200 bg-blue-50';
+      case 'done':
+        return 'border-status-success/30 bg-status-success/10';
+      case 'running':
+        return 'border-status-running/30 bg-status-running/10';
+      case 'failed':
+        return 'border-status-error/30 bg-status-error/10';
       case 'pending':
-        return 'border-gray-200 bg-gray-50';
+        return 'border-border bg-muted/40';
       default:
-        return 'border-gray-200 bg-gray-50';
+        return 'border-border bg-muted/40';
     }
   };
 
@@ -305,12 +301,12 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const displayGeneratedFiles = localGeneratedFiles.length > 0 ? localGeneratedFiles : generatedFiles;
 
   return (
-    <Card className="w-full max-w-4xl mx-auto shadow-lg">
+    <Card className="mx-auto w-full max-w-4xl border-border bg-card shadow-sm">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center space-x-2">
-              <Bot className="h-6 w-6 text-blue-600" />
+              <Bot className="h-6 w-6 text-primary" />
               <span>AI DevOps Agent Pipeline</span>
               {sessionId && (
                 <Badge variant="outline" className="text-xs">
@@ -337,16 +333,16 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="font-medium">{currentStep}</span>
-            <span className="text-gray-500">{progress}% Complete</span>
+            <span className="font-mono text-xs text-muted-foreground">{progress}% Complete</span>
           </div>
-          <Progress 
-            value={progress} 
-            className={`h-2 ${status === 'failed' ? 'bg-red-100' : 'bg-blue-100'}`}
-          />
+            <Progress
+              value={progress}
+              className={`h-2 ${status === 'failed' ? 'bg-status-error/10' : 'bg-muted'}`}
+            />
         </div>
 
         {/* Workflow Steps */}
-        <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
           {WORKFLOW_STEPS.map((step, index) => {
             const stepStatus = getStepStatus(index);
             const Icon = step.icon;
@@ -354,26 +350,42 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             return (
               <div
                 key={step.id}
-                className={`flex items-center space-x-4 p-4 rounded-lg border ${getStepColor(stepStatus)} transition-all duration-200`}
+                className={`flex min-h-40 flex-col gap-4 rounded-md border p-4 transition-colors duration-200 ${getStepColor(stepStatus)}`}
               >
-                <div className="flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
                   {getStatusIcon(stepStatus)}
                 </div>
                 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2">
-                    <Icon className="h-4 w-4 text-gray-600" />
-                    <h3 className="font-medium text-gray-900">{step.title}</h3>
-                    <Badge 
-                      variant={stepStatus === 'completed' ? 'default' : 'secondary'}
-                      className="text-xs"
-                    >
-                      {stepStatus === 'completed' ? 'Done' : 
-                       stepStatus === 'current' ? 'Running' : 'Pending'}
-                    </Badge>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Icon className="h-4 w-4 text-foreground" />
+                    <h3 className="font-medium">{step.title}</h3>
                   </div>
-                  <p className="text-sm text-gray-600 mt-1">{step.description}</p>
-                  <p className="text-xs text-gray-500 mt-1">Est. time: {step.estimatedTime}</p>
+                  <Badge
+                    variant="outline"
+                    className={`mt-3 w-fit text-xs ${
+                      stepStatus === 'done'
+                        ? 'border-status-success/30 text-status-success'
+                        : stepStatus === 'running'
+                          ? 'border-status-running/30 text-status-running'
+                          : stepStatus === 'failed'
+                            ? 'border-status-error/30 text-status-error'
+                            : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {stepStatus === 'done'
+                      ? 'Done'
+                      : stepStatus === 'running'
+                        ? 'Running'
+                        : stepStatus === 'failed'
+                          ? 'Failed'
+                          : 'Pending'}
+                  </Badge>
+                  <p className="mt-3 text-sm leading-5 text-muted-foreground">{step.description}</p>
+                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">Est. time: {step.estimatedTime}</p>
                 </div>
               </div>
             );
@@ -382,14 +394,14 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {/* Error Display */}
         {displayErrors.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-center space-x-2 mb-2">
-              <AlertCircle className="h-5 w-5 text-red-600" />
-              <h3 className="font-medium text-red-900">Errors Detected</h3>
+          <div className="rounded-md border border-status-error/30 bg-status-error/10 p-4">
+            <div className="mb-2 flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 text-status-error" />
+              <h3 className="font-medium text-status-error">Errors Detected</h3>
             </div>
             <div className="space-y-1">
               {displayErrors.map((error, index) => (
-                <p key={index} className="text-sm text-red-700">{error}</p>
+                <p key={index} className="text-sm text-status-error">{error}</p>
               ))}
             </div>
           </div>
@@ -398,11 +410,11 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {/* Agent Messages */}
         {showDetails && displayMessages.length > 0 && (
           <div className="space-y-3">
-            <h3 className="font-medium text-gray-900 flex items-center space-x-2">
+            <h3 className="flex items-center space-x-2 font-medium">
               <Bot className="h-4 w-4" />
               <span>Agent Activity Log</span>
             </h3>
-            <ScrollArea className="h-48 w-full border rounded-lg p-3">
+            <ScrollArea className="scrollbar-slim h-48 w-full rounded-md border border-border p-3">
               <div className="space-y-3">
                 {displayMessages.map((message, index) => (
                   <div key={index} className="flex items-start space-x-3">
@@ -410,8 +422,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                       {message.agent}
                     </Badge>
                     <div className="flex-1">
-                      <p className="text-sm text-gray-800">{message.message}</p>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-sm text-foreground">{message.message}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {new Date(message.timestamp).toLocaleTimeString()}
                       </p>
                     </div>
@@ -424,8 +436,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {/* Tech Stack Detection */}
         {displayTechStack && showDetails && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="font-medium text-blue-900 mb-2">🔍 Detected Tech Stack</h3>
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-4">
+            <h3 className="mb-2 font-medium text-primary">Detected Tech Stack</h3>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <span className="font-medium">Primary:</span> {displayTechStack.primary}
@@ -451,14 +463,14 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {/* Generated Files */}
         {displayGeneratedFiles.length > 0 && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <h3 className="font-medium text-green-900 mb-2 flex items-center space-x-2">
+          <div className="rounded-md border border-status-success/30 bg-status-success/10 p-4">
+            <h3 className="mb-2 flex items-center space-x-2 font-medium text-status-success">
               <CheckCircle className="h-4 w-4" />
               <span>Generated Files</span>
             </h3>
             <div className="flex flex-wrap gap-2">
               {displayGeneratedFiles.map((file, index) => (
-                <Badge key={index} variant="secondary" className="bg-green-100 text-green-800">
+                <Badge key={index} variant="secondary" className="border border-status-success/30 bg-status-success/10 text-status-success">
                   {file}
                 </Badge>
               ))}
@@ -467,13 +479,13 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         )}
 
         {/* Status Actions */}
-        <div className="flex justify-between items-center pt-4 border-t">
+        <div className="flex items-center justify-between border-t border-border pt-4">
           <div className="flex items-center space-x-2">
             <div 
-              className={`w-3 h-3 rounded-full ${
-                status === 'completed' ? 'bg-green-500' :
-                status === 'failed' ? 'bg-red-500' :
-                'bg-blue-500 animate-pulse'
+              className={`h-2 w-2 rounded-full ${
+                status === 'completed' ? 'bg-status-success' :
+                status === 'failed' ? 'bg-status-error' :
+                'bg-status-running'
               }`}
             />
             <span className="text-sm font-medium capitalize">{status}</span>
@@ -499,4 +511,4 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       </CardContent>
     </Card>
   );
-}; 
+};

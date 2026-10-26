@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Bot, User, Send, Sparkles } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Terminal } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -73,17 +73,24 @@ export const ChatPanel = () => {
   };
 
   return (
-    <Card className="h-[600px] flex flex-col shadow-xl border-slate-200/60">
-      <CardHeader className="pb-4 border-b border-slate-200">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Bot className="h-5 w-5 text-blue-600" />
+    <Card className="flex h-[600px] flex-col border-border bg-card shadow-sm">
+      <CardHeader className="border-b border-border p-0">
+        <div className="flex items-center justify-between border-b border-background/15 terminal-surface px-4 py-2">
+          <div className="flex items-center gap-2">
+            <Terminal className="h-3.5 w-3.5 text-background/70" />
+            <span className="font-mono text-xs text-background/75">assistant-session.log</span>
+          </div>
+          <span className="font-mono text-[11px] text-background/50">interactive</span>
+        </div>
+        <CardTitle className="flex items-center gap-2 px-4 py-4 text-lg">
+          <Bot className="h-5 w-5 text-primary" />
           AI Assistant
-          <Sparkles className="h-4 w-4 text-yellow-500" />
+          <Sparkles className="h-4 w-4 text-status-warning" />
         </CardTitle>
       </CardHeader>
       
-      <CardContent className="flex-1 flex flex-col p-0">
-        <ScrollArea className="flex-1 p-4">
+      <CardContent className="flex flex-1 flex-col p-0">
+        <ScrollArea className="scrollbar-slim terminal-surface flex-1 p-4">
           <div className="space-y-4">
             {messages.map((message) => (
               <div
@@ -91,29 +98,29 @@ export const ChatPanel = () => {
                 className={`flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {message.type === 'assistant' && (
-                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <Bot className="h-4 w-4 text-blue-600" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background/10">
+                    <Bot className="h-4 w-4 text-background/80" />
                   </div>
                 )}
                 
                 <div
                   className={`max-w-[80%] p-3 rounded-lg ${
                     message.type === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 text-slate-800'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background/10 text-background/90'
                   }`}
                 >
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
-                  <span className={`text-xs mt-1 block ${
-                    message.type === 'user' ? 'text-blue-100' : 'text-slate-500'
+                  <p className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{message.content}</p>
+                  <span className={`mt-1 block font-mono text-xs ${
+                    message.type === 'user' ? 'text-primary-foreground/70' : 'text-background/55'
                   }`}>
                     {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
                 
                 {message.type === 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
-                    <User className="h-4 w-4 text-slate-600" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background/10">
+                    <User className="h-4 w-4 text-background/70" />
                   </div>
                 )}
               </div>
@@ -121,14 +128,14 @@ export const ChatPanel = () => {
             
             {isTyping && (
               <div className="flex gap-3 justify-start">
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <Bot className="h-4 w-4 text-blue-600" />
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background/10">
+                  <Bot className="h-4 w-4 text-background/80" />
                 </div>
-                <div className="bg-slate-100 p-3 rounded-lg">
+                <div className="rounded-lg bg-background/10 p-3">
                   <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-background/50"></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-background/50" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-background/50" style={{ animationDelay: '0.2s' }}></div>
                   </div>
                 </div>
               </div>
@@ -136,7 +143,7 @@ export const ChatPanel = () => {
           </div>
         </ScrollArea>
         
-        <div className="p-4 border-t border-slate-200">
+        <div className="border-t border-border bg-card p-4">
           <div className="flex gap-2">
             <Input
               value={inputValue}
@@ -150,7 +157,7 @@ export const ChatPanel = () => {
               onClick={sendMessage} 
               disabled={!inputValue.trim() || isTyping}
               size="icon"
-              className="bg-blue-600 hover:bg-blue-700"
+               className=""
             >
               <Send className="h-4 w-4" />
             </Button>

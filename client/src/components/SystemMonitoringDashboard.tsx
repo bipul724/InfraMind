@@ -116,13 +116,13 @@ export const SystemMonitoringDashboard: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'healthy':
-        return 'text-green-600';
+        return 'border-status-success/30 bg-status-success/10 text-status-success';
       case 'warning':
-        return 'text-yellow-600';
+        return 'border-status-warning/30 bg-status-warning/10 text-status-warning';
       case 'error':
-        return 'text-red-600';
+        return 'border-status-error/30 bg-status-error/10 text-status-error';
       default:
-        return 'text-gray-600';
+        return 'border-border bg-muted text-muted-foreground';
     }
   };
 
@@ -133,8 +133,8 @@ export const SystemMonitoringDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="flex items-center justify-center p-8">
+         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
       </div>
     );
   }
@@ -154,9 +154,9 @@ export const SystemMonitoringDashboard: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">System Monitoring</h2>
-        <Badge 
-          variant={healthStatus?.status === 'healthy' ? 'default' : 'destructive'}
-          className={`${getStatusColor(healthStatus?.status || 'unknown')} bg-opacity-10`}
+         <Badge
+           variant="outline"
+           className={getStatusColor(healthStatus?.status || 'unknown')}
         >
           <Activity className="h-3 w-3 mr-1" />
           {healthStatus?.status || 'Unknown'}
@@ -165,51 +165,51 @@ export const SystemMonitoringDashboard: React.FC = () => {
 
       {/* System Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
-              <Clock className="h-4 w-4 mr-2 text-blue-600" />
+               <Clock className="mr-2 h-4 w-4 text-primary" />
               Uptime
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{healthStatus?.uptime || '0h 0m'}</div>
-            <p className="text-xs text-gray-600">System running time</p>
+             <p className="text-xs text-muted-foreground">System running time</p>
           </CardContent>
         </Card>
 
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
-              <TrendingUp className="h-4 w-4 mr-2 text-green-600" />
+               <TrendingUp className="mr-2 h-4 w-4 text-status-success" />
               Requests
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{metrics?.requests.total || 0}</div>
-            <p className="text-xs text-gray-600">
+             <p className="text-xs text-muted-foreground">
               {metrics?.requests.successRate.toFixed(1) || 0}% success rate
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
-              <Users className="h-4 w-4 mr-2 text-blue-600" />
+               <Users className="mr-2 h-4 w-4 text-primary" />
               Active Sessions
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{metrics?.activeSessions || 0}</div>
-            <p className="text-xs text-gray-600">Currently processing</p>
+             <p className="text-xs text-muted-foreground">Currently processing</p>
           </CardContent>
         </Card>
 
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
-              <Server className="h-4 w-4 mr-2 text-orange-600" />
+               <Server className="mr-2 h-4 w-4 text-status-warning" />
               Response Time
             </CardTitle>
           </CardHeader>
@@ -217,7 +217,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
             <div className="text-2xl font-bold">
               {metrics?.requests.avgResponseTime.toFixed(0) || 0}ms
             </div>
-            <p className="text-xs text-gray-600">Average response time</p>
+             <p className="text-xs text-muted-foreground">Average response time</p>
           </CardContent>
         </Card>
       </div>
@@ -225,7 +225,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
       {/* Detailed Metrics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Memory Usage */}
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader>
             <CardTitle className="flex items-center">
               <HardDrive className="h-5 w-5 mr-2" />
@@ -243,11 +243,11 @@ export const SystemMonitoringDashboard: React.FC = () => {
             
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-gray-600">RSS:</span>
+                 <span className="text-muted-foreground">RSS:</span>
                 <span className="ml-2 font-medium">{metrics?.memory.formatted.rss || '0MB'}</span>
               </div>
               <div>
-                <span className="text-gray-600">Heap Total:</span>
+                 <span className="text-muted-foreground">Heap Total:</span>
                 <span className="ml-2 font-medium">{metrics?.memory.formatted.heapTotal || '0MB'}</span>
               </div>
             </div>
@@ -255,7 +255,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
         </Card>
 
         {/* Session Analytics */}
-        <Card>
+         <Card className="border-border bg-card">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Database className="h-5 w-5 mr-2" />
@@ -265,21 +265,21 @@ export const SystemMonitoringDashboard: React.FC = () => {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">
+                 <div className="text-2xl font-semibold text-primary">
                   {healthStatus?.sessionAnalytics.total || 0}
                 </div>
-                <p className="text-xs text-gray-600">Total Sessions</p>
+                 <p className="text-xs text-muted-foreground">Total Sessions</p>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
+                 <div className="text-2xl font-semibold text-status-success">
                   {healthStatus?.sessionAnalytics.avgDuration || '0ms'}
                 </div>
-                <p className="text-xs text-gray-600">Avg Duration</p>
+                 <p className="text-xs text-muted-foreground">Avg Duration</p>
               </div>
             </div>
             
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Analysis Phases:</span>
+               <span className="text-sm text-muted-foreground">Analysis Phases:</span>
               <Badge variant="outline">
                 {healthStatus?.sessionAnalytics.phases || 0} types
               </Badge>
@@ -289,7 +289,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
       </div>
 
       {/* System Health Alerts */}
-      <Card>
+       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center">
             <AlertTriangle className="h-5 w-5 mr-2" />
@@ -298,34 +298,36 @@ export const SystemMonitoringDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+             <div className="flex items-center justify-between rounded-md border border-status-success/30 bg-status-success/10 p-3">
               <div className="flex items-center">
-                <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
+                 <CheckCircle className="mr-2 h-5 w-5 text-status-success" />
                 <span className="text-sm font-medium">API Status</span>
               </div>
-              <Badge variant="default" className="bg-green-100 text-green-800">
+               <Badge variant="outline" className="border-status-success/30 text-status-success">
                 Healthy
               </Badge>
             </div>
             
-            <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+             <div className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 p-3">
               <div className="flex items-center">
-                <Cpu className="h-5 w-5 text-blue-600 mr-2" />
+                 <Cpu className="mr-2 h-5 w-5 text-primary" />
                 <span className="text-sm font-medium">Agent System</span>
               </div>
-              <Badge variant="default" className="bg-blue-100 text-blue-800">
+               <Badge variant="outline" className="border-primary/30 text-primary">
                 Active
               </Badge>
             </div>
             
-            <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+             <div className="flex items-center justify-between rounded-md border border-status-warning/30 bg-status-warning/10 p-3">
               <div className="flex items-center">
-                <HardDrive className="h-5 w-5 text-yellow-600 mr-2" />
+                 <HardDrive className="mr-2 h-5 w-5 text-status-warning" />
                 <span className="text-sm font-medium">Memory Usage</span>
               </div>
               <Badge 
                 variant="outline" 
-                className={`${getMemoryUsagePercentage() > 80 ? 'border-yellow-300 text-yellow-800' : 'border-green-300 text-green-800'}`}
+                 className={getMemoryUsagePercentage() > 80
+                   ? 'border-status-warning/30 text-status-warning'
+                   : 'border-status-success/30 text-status-success'}
               >
                 {getMemoryUsagePercentage().toFixed(1)}%
               </Badge>
@@ -336,7 +338,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
 
       {/* Last Updated */}
       <div className="text-right">
-        <p className="text-xs text-gray-500">
+         <p className="text-xs text-muted-foreground">
           Last updated: {new Date(metrics?.timestamp || Date.now()).toLocaleString()}
         </p>
       </div>
