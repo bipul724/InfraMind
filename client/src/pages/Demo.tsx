@@ -172,7 +172,7 @@ Would you like me to generate this Dockerfile for you?`;
     } else if (normalizedQuestion.includes('architecture') || normalizedQuestion.includes('structure')) {
       response = `I've analyzed the architecture of your repository. Here's the breakdown:
 
-📁 Project Structure:
+Project Structure:
 • /src - Main source code
   • /components - React components
   • /hooks - Custom hooks
@@ -181,7 +181,7 @@ Would you like me to generate this Dockerfile for you?`;
 • /tests - Test suites
 • /public - Static assets
 
-🔄 Data Flow:
+Data Flow:
 • Redux for state management
 • API service layer for backend communication
 • Custom hooks for business logic
@@ -191,14 +191,14 @@ Would you like me to suggest any architectural improvements?`;
     } else if (normalizedQuestion.includes('performance') || normalizedQuestion.includes('optimize')) {
       response = `I've identified several opportunities to optimize your application:
 
-🚀 Performance Improvements:
+Performance Improvements:
 • Implement React.memo() for expensive components
 • Add Suspense boundaries for code-splitting
 • Optimize image loading with next/image
 • Implement service worker for caching
 • Add Redis caching for API responses
 
-📊 Current Metrics:
+Current Metrics:
 • First Load JS: ~2.8MB
 • Lighthouse Score: 76
 • Time to Interactive: 3.2s
@@ -207,7 +207,7 @@ Would you like me to help implement any of these optimizations?`;
     } else if (normalizedQuestion.includes('test') || normalizedQuestion.includes('testing')) {
       response = `I've analyzed your testing setup. Here's what I found and recommend:
 
-🧪 Current Test Coverage:
+Current Test Coverage:
 • Unit Tests: 65%
 • Integration Tests: 40%
 • E2E Tests: Minimal
@@ -223,7 +223,7 @@ Would you like me to help set up any of these testing improvements?`;
     } else if (normalizedQuestion.includes('dependencies') || normalizedQuestion.includes('packages')) {
       response = `I've analyzed your package.json and found some opportunities:
 
-📦 Dependencies Analysis:
+Dependencies Analysis:
 • Outdated packages: 5
 • Security vulnerabilities: 2 moderate
 • Duplicate dependencies: 3
@@ -239,7 +239,7 @@ Would you like me to help update these dependencies?`;
     } else if (normalizedQuestion.includes('deploy') || normalizedQuestion.includes('deployment')) {
       response = `Based on your repository structure, here are my deployment recommendations:
 
-🚀 Deployment Options:
+Deployment Options:
 1. Vercel (Recommended)
    • Zero-config deployment
    • Automatic HTTPS
@@ -304,20 +304,20 @@ What specific aspect would you like to explore?`;
   );
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Demo Mode Banner */}
-      <div className="bg-yellow-500/10 border-b border-yellow-500/20 py-2">
+      <div className="border-b border-status-warning/30 bg-status-warning/10 py-2">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-yellow-700">
+            <div className="flex items-center space-x-2 text-status-warning">
               <Terminal className="h-4 w-4" />
-              <span className="text-sm font-medium">⚡ Running in Demo Mode</span>
+              <span className="text-sm font-medium">Running in Demo Mode</span>
             </div>
             <Button
               variant="outline"
               size="sm"
               onClick={() => navigate('/auth')}
-              className="text-yellow-700 border-yellow-500/30 hover:bg-yellow-500/10"
+              className="border-status-warning/30 text-status-warning hover:bg-status-warning/10"
             >
               Switch to Full Version
             </Button>
@@ -327,10 +327,10 @@ What specific aspect would you like to explore?`;
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
+        <div className="mx-auto max-w-[960px]">
           {/* Repository Input Section */}
           {!hasAnalyzed && (
-            <Card className="mb-6">
+            <Card className="mb-6 bg-card">
               <CardHeader>
                 <CardTitle>Analyze Repository</CardTitle>
                 <CardDescription>
@@ -340,7 +340,7 @@ What specific aspect would you like to explore?`;
               <CardContent>
                 <div className="flex space-x-2">
                   <div className="relative flex-1">
-                    <Github className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+                    <Github className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       placeholder="https://github.com/username/repo"
                       value={repoUrl}
@@ -369,7 +369,14 @@ What specific aspect would you like to explore?`;
 
           {/* Chat Interface */}
           {hasAnalyzed && (
-            <Card className="border-2">
+            <Card className="border-border bg-card">
+              <CardHeader className="border-b border-border py-4">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Terminal className="h-4 w-4 text-primary" />
+                  Repository analysis
+                  <span className="font-mono text-xs font-normal text-muted-foreground">interactive demo</span>
+                </CardTitle>
+              </CardHeader>
               <CardContent className="p-6">
                 {/* Messages Area */}
                 <ScrollArea className="h-[500px] pr-4" ref={chatContainerRef}>
@@ -383,24 +390,24 @@ What specific aspect would you like to explore?`;
                         }`}
                       >
                         {message.type === 'assistant' && (
-                          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center flex-shrink-0">
-                            <Bot className="h-5 w-5 text-white" />
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                            <Bot className="h-4 w-4" />
                           </div>
                         )}
                         <div className={`flex-1 ${message.type === 'user' ? 'text-right' : ''}`}>
                           <div
                             className={`rounded-lg p-4 shadow-sm ${
                               message.type === 'user'
-                                ? 'bg-slate-900 text-white ml-12'
-                                : 'bg-white text-slate-700'
+                                ? 'ml-12 bg-primary text-primary-foreground'
+                                : 'bg-muted text-foreground'
                             }`}
                           >
                             <p style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>
                             {message.isTyping && (
                               <div className="mt-2">
-                                <span className="animate-pulse">▪</span>
-                                <span className="animate-pulse delay-100">▪</span>
-                                <span className="animate-pulse delay-200">▪</span>
+                                <span className="animate-bounce text-muted-foreground">▪</span>
+                                <span className="animate-bounce text-muted-foreground delay-100">▪</span>
+                                <span className="animate-bounce text-muted-foreground delay-200">▪</span>
                               </div>
                             )}
                           </div>
@@ -441,4 +448,4 @@ What specific aspect would you like to explore?`;
       </div>
     </div>
   );
-}; 
+};
