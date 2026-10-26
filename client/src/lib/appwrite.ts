@@ -1,7 +1,7 @@
-import { Account, Client, ID } from 'appwrite';
+import { Account, Client, ID, OAuthProvider } from 'appwrite';
 
 // Appwrite configuration
-const APPWRITE_ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1';
+const APPWRITE_ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT || 'https://fra.cloud.appwrite.io/v1';
 const APPWRITE_PROJECT_ID = import.meta.env.VITE_APPWRITE_PROJECT_ID || 'your-project-id';
 
 // Initialize Appwrite client
@@ -34,10 +34,11 @@ export class AuthService {
   // Login with OAuth (Google)
   static async loginWithGoogle(): Promise<void> {
     try {
-      account.createOAuth2Session('google', 
-        `${window.location.origin}/dashboard`, // Success URL
-        `${window.location.origin}/login`      // Failure URL
-      );
+      account.createOAuth2Session({
+        provider: OAuthProvider.Google,
+        success: `${window.location.origin}/dashboard`,
+        failure: `${window.location.origin}/login`,
+      });
     } catch (error) {
       console.error('Google OAuth failed:', error);
       throw error;
@@ -47,10 +48,11 @@ export class AuthService {
   // Login with OAuth (GitHub)
   static async loginWithGitHub(): Promise<void> {
     try {
-      account.createOAuth2Session('github', 
-        `${window.location.origin}/dashboard`, // Success URL
-        `${window.location.origin}/login`      // Failure URL
-      );
+      account.createOAuth2Session({
+        provider: OAuthProvider.Github,
+        success: `${window.location.origin}/dashboard`,
+        failure: `${window.location.origin}/login`,
+      });
     } catch (error) {
       console.error('GitHub OAuth failed:', error);
       throw error;
@@ -60,7 +62,7 @@ export class AuthService {
   // Login with email and password
   static async loginWithEmail(email: string, password: string): Promise<User> {
     try {
-      await account.createEmailSession(email, password);
+      await account.createEmailPasswordSession({ email, password });
       return await account.get();
     } catch (error) {
       console.error('Email login failed:', error);
@@ -71,7 +73,7 @@ export class AuthService {
   // Register with email and password
   static async registerWithEmail(email: string, password: string, name: string): Promise<User> {
     try {
-      await account.create(ID.unique(), email, password, name);
+      await account.create({ userId: ID.unique(), email, password, name });
       return await this.loginWithEmail(email, password);
     } catch (error) {
       console.error('Registration failed:', error);
@@ -82,7 +84,7 @@ export class AuthService {
   // Logout
   static async logout(): Promise<void> {
     try {
-      await account.deleteSession('current');
+      await account.deleteSession({ sessionId: 'current' });
     } catch (error) {
       console.error('Logout failed:', error);
       throw error;
@@ -113,7 +115,7 @@ export class AuthService {
   // Update user preferences
   static async updatePreferences(prefs: Record<string, any>): Promise<User> {
     try {
-      return await account.updatePrefs(prefs);
+      return await account.updatePrefs({ prefs });
     } catch (error) {
       console.error('Failed to update preferences:', error);
       throw error;
