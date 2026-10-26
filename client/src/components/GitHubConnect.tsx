@@ -46,28 +46,28 @@ export const GitHubConnect = () => {
       <CardContent>
         {isGitHubUser ? (
           <div className="space-y-4">
-            <div className="flex items-center space-x-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <CheckCircle className="h-5 w-5 text-green-600" />
+            <div className="flex items-center space-x-3 rounded-md border border-status-success/30 bg-status-success/10 p-3">
+              <CheckCircle className="h-5 w-5 text-status-success" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-green-900">GitHub Connected</p>
+                <p className="text-sm font-medium text-status-success">GitHub Connected</p>
                 {githubUsername ? (
-                  <p className="text-sm text-green-700">Connected as @{githubUsername}</p>
+                  <p className="text-sm text-status-success">Connected as @{githubUsername}</p>
                 ) : (
-                  <p className="text-sm text-green-700">Successfully authenticated with GitHub</p>
+                  <p className="text-sm text-status-success">Successfully authenticated with GitHub</p>
                 )}
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => window.open('https://github.com', '_blank')}
-                className="text-green-700 border-green-300 hover:bg-green-100"
+                className="border-status-success/40 text-status-success hover:bg-status-success/10"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 View Profile
               </Button>
             </div>
             
-            <div className="text-sm text-slate-600">
+            <div className="text-sm text-muted-foreground">
               <p>✓ You can access public repositories</p>
               <p>✓ OAuth authentication active</p>
               <p>✓ Ready to generate CI/CD configurations</p>
@@ -75,21 +75,21 @@ export const GitHubConnect = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center space-x-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <AlertCircle className="h-5 w-5 text-blue-600" />
+            <div className="flex items-center space-x-3 rounded-md border border-primary/30 bg-primary/5 p-3">
+              <AlertCircle className="h-5 w-5 text-primary" />
               <div className="flex-1">
-                <p className="text-sm font-medium text-blue-900">Enhanced GitHub Integration Available</p>
-                <p className="text-sm text-blue-700">
+                <p className="text-sm font-medium text-primary">Enhanced GitHub Integration Available</p>
+                <p className="text-sm text-muted-foreground">
                   Sign in with GitHub for the best experience
                 </p>
               </div>
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-muted-foreground">
                 While you can manually enter repository URLs, signing in with GitHub provides:
               </p>
-              <ul className="text-sm text-slate-600 space-y-1 ml-4">
+              <ul className="ml-4 space-y-1 text-sm text-muted-foreground">
                 <li>• Faster repository access</li>
                 <li>• Automatic repository detection</li>
                 <li>• Enhanced security with OAuth</li>
@@ -112,7 +112,7 @@ export const GitHubConnect = () => {
               </Button>
             </div>
 
-            <p className="text-xs text-slate-500 text-center">
+            <p className="text-center text-xs text-muted-foreground">
               Your current email login will remain active after connecting GitHub
             </p>
           </div>
@@ -120,4 +120,4 @@ export const GitHubConnect = () => {
       </CardContent>
     </Card>
   );
-}; 
+};

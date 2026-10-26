@@ -13,7 +13,7 @@ import {
   ArrowLeft, 
   Github, 
   Mail,
-  Bot,
+  Terminal,
   Eye,
   EyeOff,
   Lock,
@@ -145,27 +145,27 @@ export const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-slate-50">
+    <div className="flex min-h-screen w-full flex-col bg-background text-foreground">
       {/* Header */}
       <div className="flex items-center justify-between p-6">
         <Button
           variant="ghost"
           onClick={() => navigate('/')}
-          className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+          className="flex items-center space-x-2 text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           <span>Back to Home</span>
         </Button>
         
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-            <Bot className="h-5 w-5 text-white animate-pulse" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <Terminal className="h-4 w-4" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-bold text-slate-900">
+            <span className="text-lg font-semibold tracking-tight">
               InfraMind
             </span>
-            <span className="text-xs text-slate-500 font-medium">Powered by Supabase</span>
+            <span className="text-xs font-medium text-muted-foreground">Powered by Supabase</span>
           </div>
         </div>
       </div>
@@ -173,15 +173,12 @@ export const Auth = () => {
       {/* Main Content */}
       <div className="flex-1 flex items-center justify-center px-4 py-8">
         <div className="w-full max-w-[450px] relative">
-          {/* Background Gradient Effect */}
-          <div className="absolute -inset-1 bg-slate-300 rounded-2xl blur opacity-20"></div>
-          
-          <Card className="relative shadow-xl border-slate-200/60 backdrop-blur-sm">
+          <Card className="border-border bg-card shadow-sm">
             <CardHeader className="text-center pb-4 space-y-2">
-              <CardTitle className="text-2xl font-bold text-slate-900">
+              <CardTitle className="text-2xl font-semibold tracking-tight">
                 {activeTab === 'signin' ? 'Welcome back!' : 'Create your account'}
               </CardTitle>
-              <CardDescription className="text-slate-600">
+              <CardDescription className="text-muted-foreground">
                 {activeTab === 'signin' 
                   ? 'Sign in to access your multi-agent AI dashboard powered by cutting-edge technology'
                   : 'Join thousands of developers automating DevOps with AI agents'
@@ -191,16 +188,16 @@ export const Auth = () => {
             
             <CardContent className="space-y-6">
               <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 p-1 bg-slate-100/80 rounded-lg">
+                <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger 
                     value="signin"
-                    className="data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm rounded-md transition-all duration-200"
+                    className="data-[state=active]:bg-background data-[state=active]:text-foreground"
                   >
                     Sign In
                   </TabsTrigger>
                   <TabsTrigger 
                     value="signup"
-                    className="data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm rounded-md transition-all duration-200"
+                    className="data-[state=active]:bg-background data-[state=active]:text-foreground"
                   >
                     Create Account
                   </TabsTrigger>
@@ -220,7 +217,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signin-email">Email</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-email"
                           type="email"
@@ -235,7 +232,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signin-password">Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-password"
                           type={showPassword ? "text" : "password"}
@@ -252,9 +249,9 @@ export const Auth = () => {
                           onClick={() => setShowPassword(!showPassword)}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4 text-slate-500" />
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <Eye className="h-4 w-4 text-slate-500" />
+                            <Eye className="h-4 w-4 text-muted-foreground" />
                           )}
                         </Button>
                       </div>
@@ -262,7 +259,7 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full bg-slate-900 hover:bg-slate-800"
+                      className="w-full"
                       disabled={loading}
                     >
                       {loading ? (
@@ -280,7 +277,7 @@ export const Auth = () => {
                         <span className="w-full border-t" />
                       </div>
                       <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-white px-2 text-slate-500">Or continue with</span>
+                        <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
                       </div>
                     </div>
 
@@ -330,7 +327,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-name">Full Name</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-name"
                           type="text"
@@ -345,7 +342,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-email">Email</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-email"
                           type="email"
@@ -360,7 +357,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-password">Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-password"
                           type={showPassword ? "text" : "password"}
@@ -377,9 +374,9 @@ export const Auth = () => {
                           onClick={() => setShowPassword(!showPassword)}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4 text-slate-500" />
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <Eye className="h-4 w-4 text-slate-500" />
+                            <Eye className="h-4 w-4 text-muted-foreground" />
                           )}
                         </Button>
                       </div>
@@ -388,7 +385,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-confirm-password">Confirm Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-confirm-password"
                           type={showConfirmPassword ? "text" : "password"}
@@ -405,9 +402,9 @@ export const Auth = () => {
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                         >
                           {showConfirmPassword ? (
-                            <EyeOff className="h-4 w-4 text-slate-500" />
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <Eye className="h-4 w-4 text-slate-500" />
+                            <Eye className="h-4 w-4 text-muted-foreground" />
                           )}
                         </Button>
                       </div>
@@ -415,7 +412,7 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full bg-slate-900 hover:bg-slate-800"
+                      className="w-full"
                       disabled={loading}
                     >
                       {loading ? (
@@ -433,7 +430,7 @@ export const Auth = () => {
                         <span className="w-full border-t" />
                       </div>
                       <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-white px-2 text-slate-500">Or continue with</span>
+                        <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
                       </div>
                     </div>
 
@@ -480,14 +477,14 @@ export const Auth = () => {
             </CardContent>
 
             <CardFooter className="flex flex-col items-center justify-center pt-0 pb-6">
-              <div className="flex items-center space-x-2 text-sm text-slate-500">
+              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                 <Shield className="h-4 w-4" />
                 <span>Secured by</span>
                 <a 
                   href="https://supabase.com" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                  className="font-semibold text-primary transition-colors hover:text-primary/80"
                 >
                   Supabase
                 </a>
@@ -498,4 +495,4 @@ export const Auth = () => {
       </div>
     </div>
   );
-}; 
+};

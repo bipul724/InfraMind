@@ -47,8 +47,8 @@ export const GitHubCallback = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
+      <Card className="w-full max-w-md bg-card">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Github className="h-5 w-5" />
@@ -58,15 +58,15 @@ export const GitHubCallback = () => {
         <CardContent className="space-y-4">
           {status === 'loading' && (
             <div className="text-center space-y-4">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-              <p className="text-gray-600">{message}</p>
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">{message}</p>
             </div>
           )}
 
           {status === 'success' && (
-            <Alert className="border-green-200 bg-green-50">
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-green-800">
+              <Alert className="border-status-success/30 bg-status-success/10">
+              <CheckCircle className="h-4 w-4 text-status-success" />
+              <AlertDescription className="text-status-success">
                 {message}
               </AlertDescription>
             </Alert>

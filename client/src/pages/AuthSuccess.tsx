@@ -52,8 +52,8 @@ const AuthSuccess: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
+      <Card className="w-full max-w-md bg-card">
         <CardHeader className="text-center">
           <CardTitle className="flex items-center justify-center gap-2">
             <Github className="h-6 w-6" />
@@ -63,15 +63,15 @@ const AuthSuccess: React.FC = () => {
         <CardContent className="space-y-4">
           {status === 'loading' && (
             <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+              <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
               <p className="text-muted-foreground">Processing authentication...</p>
             </div>
           )}
 
           {status === 'success' && (
-            <Alert className="border-green-200 bg-green-50">
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-green-800">
+              <Alert className="border-status-success/30 bg-status-success/10">
+              <CheckCircle className="h-4 w-4 text-status-success" />
+              <AlertDescription className="text-status-success">
                 <strong>Success!</strong> Your GitHub account has been connected. 
                 Redirecting to dashboard...
               </AlertDescription>
@@ -93,4 +93,4 @@ const AuthSuccess: React.FC = () => {
   );
 };
 
-export default AuthSuccess; 
+export default AuthSuccess;
