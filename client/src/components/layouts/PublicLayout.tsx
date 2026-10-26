@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Rocket } from 'lucide-react';
+import { ArrowLeft, Terminal } from 'lucide-react';
 
 interface PublicLayoutProps {
   children: React.ReactNode;
@@ -19,15 +19,16 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background text-foreground">
       {showHeader && (
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
+        <div className="border-b border-border/80 bg-background">
+          <div className="container mx-auto flex items-center px-4 py-5">
+            <div className="flex w-full items-center justify-between">
             {showBackButton && (
               <Button
                 variant="ghost"
                 onClick={() => navigate('/')}
-                className="flex items-center space-x-2"
+                className="flex items-center space-x-2 text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="h-4 w-4" />
                 <span>Back to Home</span>
@@ -35,13 +36,14 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
             )}
             
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-                <Rocket className="h-5 w-5 text-white" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <Terminal className="h-4 w-4" />
               </div>
-              <span className="text-xl font-bold text-slate-900">{headerTitle}</span>
+              <span className="text-lg font-semibold tracking-tight text-foreground">{headerTitle}</span>
             </div>
             
             {!showBackButton && <div />} {/* Spacer for center alignment */}
+            </div>
           </div>
         </div>
       )}
@@ -51,4 +53,4 @@ export const PublicLayout: React.FC<PublicLayoutProps> = ({
       </main>
     </div>
   );
-}; 
+};

@@ -111,10 +111,10 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
           <Card className="w-full max-w-2xl">
             <CardHeader>
-              <CardTitle className="flex items-center space-x-2 text-red-600">
+              <CardTitle className="flex items-center space-x-2 text-destructive">
                 <AlertTriangle className="h-6 w-6" />
                 <span>Something went wrong</span>
               </CardTitle>
@@ -127,8 +127,8 @@ export class ErrorBoundary extends Component<Props, State> {
                     <p className="font-medium">
                       {this.state.error?.message || 'An unexpected error occurred'}
                     </p>
-                    <p className="text-sm text-gray-600">
-                      Error ID: <code className="bg-gray-100 px-1 rounded">{this.state.errorId}</code>
+                    <p className="text-sm text-muted-foreground">
+                      Error ID: <code className="rounded border border-border bg-muted px-1 font-mono text-xs">{this.state.errorId}</code>
                     </p>
                   </div>
                 </AlertDescription>
@@ -138,7 +138,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 <div className="space-y-4">
                   <div>
                     <h3 className="font-medium text-sm mb-2">Error Details:</h3>
-                    <pre className="bg-gray-100 p-3 rounded text-xs overflow-auto max-h-40">
+                    <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted p-3 font-mono text-xs text-muted-foreground">
                       {this.state.error?.stack}
                     </pre>
                   </div>
@@ -146,7 +146,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   {this.state.errorInfo && (
                     <div>
                       <h3 className="font-medium text-sm mb-2">Component Stack:</h3>
-                      <pre className="bg-gray-100 p-3 rounded text-xs overflow-auto max-h-40">
+                      <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted p-3 font-mono text-xs text-muted-foreground">
                         {this.state.errorInfo}
                       </pre>
                     </div>
@@ -154,7 +154,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 </div>
               )}
 
-              <div className="flex space-x-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <Button onClick={this.handleRetry} className="flex-1">
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Try Again
@@ -179,7 +179,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
 
               <div className="text-center">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-muted-foreground">
                   If this problem persists, please contact our support team with the error ID above.
                 </p>
               </div>

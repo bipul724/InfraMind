@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { 
   LogOut, 
   User, 
-  Rocket,
+  Terminal,
   Bell,
   HelpCircle,
   Github,
@@ -47,18 +47,18 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   const userEmail = user?.email || '';
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200/60 sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
+      <header className="sticky top-0 z-50 border-b border-border/80 bg-background/95">
+        <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             {/* Logo and Title */}
             <div className="flex items-center space-x-4">
-              <Link to="/dashboard" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-                  <Rocket className="h-5 w-5 text-white" />
+              <Link to="/dashboard" className="flex items-center space-x-2 text-foreground transition-opacity hover:opacity-80">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Terminal className="h-4 w-4" />
                 </div>
-                <h1 className="text-2xl font-bold text-slate-900">InfraMind</h1>
+                <h1 className="text-lg font-semibold tracking-tight">InfraMind</h1>
               </Link>
               <Badge variant="secondary" className="hidden sm:inline-flex">
                 {title}
@@ -91,7 +91,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
               {/* GitHub Username Display */}
               {user?.prefs?.githubUsername && (
-                <div className="hidden sm:flex items-center text-sm text-slate-600">
+                <div className="hidden items-center font-mono text-xs text-muted-foreground sm:flex">
                   <Github className="h-4 w-4 mr-1" />
                   {user.prefs.githubUsername}
                 </div>
@@ -143,11 +143,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       <main className="container mx-auto px-4 py-8">
         <div className="space-y-8">
           <GitHubConnect />
-          <div className="max-w-7xl mx-auto">
+          <div className="mx-auto max-w-[1180px]">
             {subtitle && (
               <div className="mb-8">
-                <h2 className="text-3xl font-bold text-slate-900">{title}</h2>
-                <p className="text-slate-600 mt-2">{subtitle}</p>
+                <h2 className="text-3xl font-semibold tracking-tight">{title}</h2>
+                <p className="mt-2 text-muted-foreground">{subtitle}</p>
               </div>
             )}
             {children}
@@ -156,4 +156,4 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       </main>
     </div>
   );
-}; 
+};
