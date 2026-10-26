@@ -17,7 +17,7 @@ export const MOCK_CHAT_QA = [
 
 - **LLM**: Meta Llama 3 70B Instruct, served through Novita.ai's OpenAI-compatible API
 - **Agents**: A Node.js + Express server clones your repository and runs four agents in sequence (planner, analyzer, generator, verifier) to produce a Dockerfile, a GitHub Actions workflow and a .env.example
-- **Live progress**: Socket.io streams each agent's progress to the dashboard
+- **Live progress**: Socket.io sends progress updates to the dashboard as the repository is cloned, analyzed and completed
 - **Auth**: Supabase Auth with email/password, Google and GitHub sign-in
 - **Database**: Supabase PostgreSQL stores the files you save, with Row Level Security so you can only access your own files
 - **Frontend**: React + TypeScript, built with Vite`,

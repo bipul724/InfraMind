@@ -9,7 +9,7 @@ AI-powered DevOps assistant backend function that generates production-grade Doc
 - **Environment file templates** with common variables
 - **Deployment instructions** fetched via Tavily API
 - **Memory storage** using Mem0 for session tracking
-- **Appwrite Cloud Functions** compatible
+- **Used by the Express server** as the fallback for `POST /api/devpilot` when the request sets `useAgents: false` (the web client always sends `useAgents: true`)
 
 ## 📋 Requirements
 
@@ -94,18 +94,11 @@ npm test
 npm run dev
 ```
 
-### Appwrite Cloud Functions
+### Inside the Express Server
 
-1. Use the `appwrite.js` file as your function entry point
-2. Configure environment variables in Appwrite dashboard
-3. Deploy using Appwrite CLI:
+`devPilotAI` is a named export of `index.js`. `server.js` loads it on demand for `POST /api/devpilot` requests that set `useAgents: false`, so it deploys with the server and needs no separate deployment.
 
-```bash
-appwrite functions createDeployment \
-  --functionId=your-function-id \
-  --entrypoint=appwrite.js \
-  --code=.
-```
+> Earlier versions also shipped an `appwrite.js` entry point for deploying this as an Appwrite Cloud Function. It was removed when the project moved from Appwrite to Supabase in October 2026.
 
 ## 🔧 Function Architecture
 

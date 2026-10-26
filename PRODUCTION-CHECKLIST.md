@@ -3,11 +3,14 @@
 ## ✅ **VERIFIED WORKING COMPONENTS**
 
 ### 1. Authentication & User Management
-- [x] **Appwrite Authentication** - Email/password + OAuth (Google & GitHub)
-- [x] **User Sessions** - Persistent login state management
+> Authentication moved from Appwrite to Supabase in October 2026. The items below that changed are unticked until the Supabase flows have been tested end to end.
+
+- [ ] **Supabase Authentication** - Email/password + OAuth (Google & GitHub)
+- [ ] **User Sessions** - Persistent login state managed by the Supabase JS client
 - [x] **Auth Context** - React context properly implemented
 - [x] **Protected Routes** - Dashboard access control
-- [x] **OAuth Flows** - Google and GitHub login working
+- [ ] **OAuth Flows** - Google and GitHub login working
+- [ ] **Saved Files** - `public.saved_files` with Row Level Security (save, list, download)
 
 ### 2. GitHub Integration
 - [x] **Repository Discovery** - Fetching user's repositories
@@ -57,8 +60,8 @@
 ### Frontend Environment Variables (.env)
 ```bash
 VITE_API_URL=https://dev-pilot.onrender.com
-VITE_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-VITE_APPWRITE_PROJECT_ID=your-appwrite-project-id
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
 ```
 
 ### Backend Environment Variables (.env)
@@ -68,10 +71,7 @@ PORT=3001
 NODE_ENV=production
 CLIENT_URL=https://dev-pilot.vercel.app
 
-# Appwrite (Authentication & Database)
-APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-APPWRITE_PROJECT_ID=your-appwrite-project-id
-APPWRITE_API_KEY=your-appwrite-api-key
+# No Supabase variables: the server does not access Supabase
 
 # GitHub API (Repository Operations)
 GITHUB_CLIENT_ID=your-github-oauth-app-client-id
@@ -87,7 +87,7 @@ KEYWORDS_AI_API_KEY=your-keywords-ai-observability-key
 ```
 
 ### External Service Setup
-- [x] **Appwrite Project** - Authentication and database configured
+- [ ] **Supabase Project** - `saved_files` table + RLS created; Google, GitHub and email providers enabled; production URL in Site URL and Redirect URLs (see DEPLOYMENT-GUIDE.md)
 - [x] **GitHub OAuth App** - Repository access permissions
 - [x] **Novita.ai Account** - Llama 3 70B API access
 - [x] **Tavily API** - Real-time search and documentation
@@ -128,6 +128,7 @@ git push origin main
 - [ ] **AI Analysis** - Full agent pipeline execution
 - [ ] **Real-time Updates** - WebSocket progress tracking
 - [ ] **File Generation** - Download generated CI/CD files
+- [ ] **Saved Files** - Save a file, see it in Saved Files, and confirm another user can't see it
 - [ ] **Error Handling** - Test failure scenarios
 
 ### Performance Testing:
@@ -155,7 +156,7 @@ git push origin main
 - **Keywords AI** - AI agent performance monitoring
 - **Render Logs** - Server-side error tracking
 - **Vercel Analytics** - Frontend performance metrics
-- **Appwrite Console** - User and session analytics
+- **Supabase Dashboard** - Auth users and request logs
 
 ## 🎯 **HACKATHON SUBMISSION CHECKLIST**
 
@@ -173,7 +174,7 @@ git push origin main
 ### Performance Enhancements:
 1. **Caching** - Implement Redis for session management
 2. **CDN** - Static asset delivery optimization
-3. **Database Indexing** - Appwrite query optimization
+3. **Database Indexing** - `saved_files` is indexed on `(user_id, created_at desc)`; add indexes if new query patterns are introduced
 4. **API Throttling** - Rate limiting for AI services
 
 ### Security Hardening:
@@ -191,7 +192,7 @@ Your InfraMind platform is **PRODUCTION READY** with all critical features worki
 ✅ **Multi-agent AI system** generating production-quality CI/CD configurations  
 ✅ **Real-time progress tracking** with beautiful WebSocket integration  
 ✅ **Comprehensive GitHub integration** supporting public and private repositories  
-✅ **Secure authentication** powered by Appwrite with OAuth support  
+✅ **Secure authentication** powered by Supabase Auth with Google and GitHub OAuth  
 ✅ **Modern UI/UX** with responsive design and intuitive workflows  
 ✅ **Scalable architecture** ready for high-traffic deployment  
 

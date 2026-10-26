@@ -1,6 +1,6 @@
 # 🤖 AI Agent-Based DevOps Automation System
 
-A true AI agent-based DevOps automation system that uses LangGraph and multi-agent architecture to analyze codebases and generate production-ready CI/CD configurations.
+A true AI agent-based DevOps automation system that uses a sequential multi-agent pipeline (no LangGraph) to analyze codebases and generate production-ready CI/CD configurations.
 
 ## 🎯 Features
 
@@ -12,8 +12,8 @@ A true AI agent-based DevOps automation system that uses LangGraph and multi-age
 
 ### 🔄 Real-Time Processing
 - **📂 GitHub Repository Cloning**: Supports both public and private repositories
-- **📡 WebSocket Communication**: Live progress updates from each agent
-- **⏱️ Step-by-Step Progress**: Visual progress tracking with detailed agent logs
+- **📡 WebSocket Communication**: Progress updates at milestones (cloning, analysis start, pipeline result, completion)
+- **⏱️ Step-by-Step Progress**: Visual progress tracking, with agent logs delivered when the pipeline finishes
 - **🚨 Error Handling**: Comprehensive error reporting and recovery
 
 ### 📊 Intelligent Analysis
@@ -27,7 +27,7 @@ A true AI agent-based DevOps automation system that uses LangGraph and multi-age
 ### Prerequisites
 
 1. **Node.js 18+**
-2. **OpenAI API Key** (for GPT-4)
+2. **Novita.ai API Key** (for Llama 3 70B, set as `LLAMA_API_KEY`)
 3. **Git** (for repository cloning)
 
 ### 1. Server Setup
@@ -40,10 +40,10 @@ cd server
 npm install
 
 # Create environment file
-cp env.example .env
+cp .env.example .env
 
-# Add your OpenAI API key to .env
-OPENAI_API_KEY=your_openai_api_key_here
+# Add your Novita.ai API key to .env
+LLAMA_API_KEY=your_novita_ai_api_key_here
 PORT=3001
 CLIENT_URL=http://localhost:5173
 
@@ -60,8 +60,8 @@ cd client
 # Install dependencies
 npm install
 
-# Add server URL to environment
-echo "VITE_SERVER_URL=http://localhost:3001" > .env.local
+# Add server URL to environment (also set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY; see README.md)
+echo "VITE_API_URL=http://localhost:3001" >> .env.local
 
 # Start the React client
 npm run dev
@@ -141,18 +141,18 @@ Open your browser and navigate to `http://localhost:5173`
 ```
 ├── server/
 │   ├── agents/
-│   │   └── index.js          # Multi-agent system (LangGraph)
+│   │   └── index.js          # Multi-agent system (sequential pipeline)
 │   ├── server.js             # Express server with WebSocket
 │   ├── index.js              # Legacy function (fallback)
 │   ├── package.json          # Server dependencies
-│   └── env.example           # Environment template
+│   └── .env.example          # Environment template
 ├── client/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── AgentProgress.tsx      # Real-time progress UI
 │   │   │   └── AgentGenerationForm.tsx # Enhanced form
 │   │   ├── lib/
-│   │   │   └── agentApi.ts            # WebSocket API client
+│   │   │   └── agentApi.ts            # WebSocket API client (not currently imported; reads VITE_SERVER_URL)
 │   │   └── pages/
 │   │       └── EnhancedDashboard.tsx  # Updated dashboard
 │   └── package.json          # Client dependencies
@@ -165,17 +165,23 @@ Open your browser and navigate to `http://localhost:5173`
 
 ```bash
 # Required
-OPENAI_API_KEY=your_openai_api_key_here
+LLAMA_API_KEY=your_novita_ai_api_key_here
 PORT=3001
 CLIENT_URL=http://localhost:5173
 
-# Optional (for observability)
+# GitHub repository access (repo listing and private repos via GitHub OAuth)
+GITHUB_CLIENT_ID=your_github_oauth_app_client_id
+GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
+GITHUB_REDIRECT_URI=http://localhost:3001/auth/github/callback
+JWT_SECRET=your_jwt_secret
+
+# Optional (legacy useAgents:false generator only)
 MEM0_API_KEY=your_mem0_api_key_here
 KEYWORDS_AI_API_KEY=your_keywords_ai_api_key_here
-
-# Optional (for private repos)
-GITHUB_TOKEN=your_github_token_here
+TAVILY_API_KEY=your_tavily_api_key_here
 ```
+
+Private repositories are cloned with the signed-in user's GitHub OAuth token. There is no server-wide `GITHUB_TOKEN` variable.
 
 ### Tech Stack Support
 
@@ -190,16 +196,18 @@ The system automatically detects and supports:
 ## 📊 Real-Time Features
 
 ### Progress Tracking
+Socket.IO `progress` events are sent at these milestones (`server/server.js`):
 ```
-[1/5] 📂 Cloning repository... (25%)
-[2/5] 🤔 Planner Agent analyzing... (35%)
-[3/5] 🔍 Analyzer detecting tech stack... (55%)
-[4/5] ⚡ Generator creating CI/CD... (80%)
-[5/5] ✅ Verifier validating... (100%)
+📂 Cloning repository... (10%)
+📂 Repository cloned successfully (25%)
+🤖 Starting AI agent analysis... (30%)
+📋 Pipeline result: all agent messages, tech stack, errors
+✅ Analysis complete! (100%)
 ```
+The individual agents do not emit progress; their messages arrive together once the pipeline finishes.
 
-### Live Agent Logs
-- Real-time messages from each agent
+### Agent Logs
+- Messages from each agent (delivered with the pipeline result)
 - Timestamped activity log
 - Error reporting and recovery
 - Tech stack detection results
@@ -214,18 +222,20 @@ The system automatically detects and supports:
 
 ### Custom Agent Configuration
 
-```javascript
-// Extend the agent system
-import { createAgentWorkflow } from './agents/index.js';
+`createAgentWorkflow()` takes no options. To add an agent, write an `async (state) => state` function in `server/agents/index.js` and add it to the sequence in `createAgentWorkflow`'s `invoke`:
 
-const customWorkflow = createAgentWorkflow({
-  additionalAgents: ['security', 'performance'],
-  customPrompts: { ... },
-  advancedFeatures: true
-});
+```javascript
+// server/agents/index.js
+state = await plannerAgent(state);
+state = await analyzerAgent(state);
+state = await generatorAgent(state);
+state = await verifierAgent(state);
+// state = await yourNewAgent(state);
 ```
 
 ### WebSocket Integration
+
+`AgentAPI` (`client/src/lib/agentApi.ts`) exists but no page imports it today, and it reads `VITE_SERVER_URL` rather than `VITE_API_URL`. The running UI connects through `AgentProgress.tsx` using `VITE_API_URL`.
 
 ```javascript
 // Frontend WebSocket usage
@@ -242,27 +252,27 @@ const result = await AgentAPI.runCompleteWorkflow(repoUrl);
 
 ### Common Issues
 
-1. **OpenAI API Key Issues**
+1. **LLM API Key Issues**
    ```bash
-   Error: OpenAI API key not configured
-   Solution: Add OPENAI_API_KEY to your .env file
+   Error: Llama API Error: 401 ... (agent calls fail)
+   Solution: Add a valid Novita.ai key as LLAMA_API_KEY in server/.env
    ```
 
 2. **Repository Access Issues**
    ```bash
    Error: Repository not accessible
-   Solution: Add GITHUB_TOKEN for private repos
+   Solution: For private repos, connect GitHub in the app (GitHub OAuth) and check GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and GITHUB_REDIRECT_URI
    ```
 
 3. **WebSocket Connection Issues**
    ```bash
    Error: Cannot connect to server
-   Solution: Ensure server is running on correct port
+   Solution: Ensure the server is running and VITE_API_URL matches its URL and port (3001 locally)
    ```
 
 ### Performance Optimization
 
-- **Concurrent Processing**: Agents run in parallel where possible
+- **Sequential Processing**: Agents run one at a time, in a fixed order
 - **Caching**: Repository analysis results are cached
 - **Cleanup**: Automatic cleanup of temporary files
 - **Error Recovery**: Graceful handling of agent failures
@@ -287,4 +297,4 @@ MIT License - see LICENSE file for details
 
 ---
 
-**Built with ❤️ using LangGraph, OpenAI GPT-4, and modern web technologies** 
+**Built with ❤️ using Llama 3 70B (Novita.ai), Socket.IO, and modern web technologies** 

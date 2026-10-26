@@ -72,14 +72,7 @@ export class DevPilotAPI {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
-      
-      // Handle Appwrite function response format
-      if (result.responseBody) {
-        return JSON.parse(result.responseBody);
-      }
-      
-      return result;
+      return response.json();
     } catch (error) {
       console.error('API request failed:', error);
       throw new Error(error instanceof Error ? error.message : 'Failed to generate CI/CD setup');

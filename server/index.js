@@ -769,9 +769,4 @@ async function storeInteraction(userId, interactionData) {
     console.error('Error storing interaction in Mem0:', error);
     // Don't throw error to avoid breaking the main function
   }
-}
-
-// For Appwrite Cloud Functions compatibility
-export default async function(req, res) {
-  return await devPilotAI(req, res);
 } 

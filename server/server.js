@@ -841,7 +841,7 @@ async function startServer() {
       console.log(`🚀 DevOps AI Agent Server running on port ${PORT}`);
       console.log(`📁 Temp directory: ${TEMP_DIR}`);
       console.log(`🔗 Client URL: ${process.env.CLIENT_URL || "http://localhost:5173"}`);
-      console.log('🤖 Multi-agent system: LangGraph + OpenAI');
+      console.log('🤖 Multi-agent system: 4 sequential agents + Llama 3 70B (Novita.ai)');
       console.log('✅ Server startup complete!');
     });
     

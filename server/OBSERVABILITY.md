@@ -112,7 +112,7 @@ KEYWORDS_AI_BASE_URL=https://api.keywordsai.co
 
 ### Direct API Integration
 - Uses HTTP calls instead of SDK for maximum compatibility
-- Works in all Node.js environments (including Appwrite)
+- Works in any Node.js environment
 - No additional dependencies required
 
 ## 📋 Testing
@@ -157,7 +157,7 @@ Once Keywords AI API key is configured, you can monitor:
 
 2. **Deploy with Observability**
    ```bash
-   # Set in Appwrite environment variables
+   # Set in server/.env locally, or in your host's environment settings (e.g. Render) in production
    KEYWORDS_AI_API_KEY=your_actual_key_here
    ```
 
