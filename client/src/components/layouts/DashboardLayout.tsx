@@ -41,7 +41,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
     }
   };
 
-  // Get user avatar - in Appwrite, we might not have imageUrl by default
+  // Get user avatar - filled from Google/GitHub profiles, empty for email sign-ups
   const avatarUrl = user?.prefs?.avatarUrl || undefined;
   const userName = user?.name || 'User';
   const userEmail = user?.email || '';

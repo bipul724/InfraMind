@@ -41,7 +41,6 @@
     "helmet": "^8.1.0",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
-    "node-appwrite": "^11.1.0",
     "node-fetch": "^3.3.2",
     "simple-git": "^3.20.0",
     "socket.io": "^4.7.4",

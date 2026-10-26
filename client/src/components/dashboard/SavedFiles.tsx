@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { AppwriteAPI, SavedFile } from '@/lib/api';
+import { SavedFilesAPI, SavedFile } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Download, Trash2, RefreshCw, FilePlus } from 'lucide-react';
@@ -15,13 +15,13 @@ export const SavedFiles: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchSavedFiles = async () => {
-    if (!user?.$id) return;
+    if (!user?.id) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const savedFiles = await AppwriteAPI.getSavedFiles(user.$id);
+      const savedFiles = await SavedFilesAPI.getSavedFiles();
       setFiles(savedFiles);
     } catch (err) {
       console.error('Error fetching saved files:', err);
@@ -42,23 +42,14 @@ export const SavedFiles: React.FC = () => {
     }
   }, [user]);
 
-  const handleDownload = async (fileId: string, fileName: string) => {
-    try {
-      const downloadUrl = await AppwriteAPI.getFileDownloadUrl(fileId);
-      
-      // Create a temporary link and trigger download
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = fileName;
-      a.click();
-    } catch (err) {
-      console.error('Error downloading file:', err);
-      toast({
-        title: 'Download Failed',
-        description: 'Failed to download the file',
-        variant: 'destructive',
-      });
-    }
+  const handleDownload = (file: SavedFile) => {
+    const blob = new Blob([file.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const getFileTypeColor = (type: string) => {
@@ -118,7 +109,7 @@ export const SavedFiles: React.FC = () => {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-xl">Saved Files</CardTitle>
-          <CardDescription>Your files stored in Appwrite</CardDescription>
+          <CardDescription>Files you've saved to your account</CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={fetchSavedFiles} disabled={loading}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
@@ -137,14 +128,14 @@ export const SavedFiles: React.FC = () => {
             <FilePlus className="h-12 w-12 mx-auto text-slate-300" />
             <p className="text-slate-600">No saved files found</p>
             <p className="text-slate-400 text-sm">
-              Generated files can be saved using the "Save to Appwrite" button
+              Generated files can be saved using the "Save" button
             </p>
           </div>
         ) : (
           <div className="space-y-4">
             {files.map((file) => (
               <div
-                key={file.$id}
+                key={file.id}
                 className="border rounded-lg p-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
               >
                 <div className="space-y-1">
@@ -167,7 +158,7 @@ export const SavedFiles: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleDownload(file.fileId, file.name)}
+                    onClick={() => handleDownload(file)}
                   >
                     <Download className="h-4 w-4" />
                     <span className="sr-only">Download</span>

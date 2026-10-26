@@ -13,14 +13,14 @@ export const MOCK_CHAT_QA = [
   {
     id: 'tech',
     question: 'What technologies does it use?',
-    answer: `InfraMind leverages cutting-edge AI and cloud technologies:
+    answer: `InfraMind combines a multi-agent AI pipeline with a lightweight web stack:
 
-- **AI & Search**: Tavily for code analysis, Mem0 for context retention
-- **Image Generation**: DALL·E for architecture diagrams
-- **Backend**: Appwrite for scalable serverless functions
-- **Auth**: Clerk.dev for secure authentication
-- **LLM**: Anthropic Claude for intelligent code generation
-- **Development**: React + TypeScript for a robust frontend`,
+- **LLM**: Meta Llama 3 70B Instruct, served through Novita.ai's OpenAI-compatible API
+- **Agents**: A Node.js + Express server clones your repository and runs four agents in sequence (planner, analyzer, generator, verifier) to produce a Dockerfile, a GitHub Actions workflow and a .env.example
+- **Live progress**: Socket.io streams each agent's progress to the dashboard
+- **Auth**: Supabase Auth with email/password, Google and GitHub sign-in
+- **Database**: Supabase PostgreSQL stores the files you save, with Row Level Security so you can only access your own files
+- **Frontend**: React + TypeScript, built with Vite`,
   },
   {
     id: 'nodejs',

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { AuthService, User } from '@/lib/appwrite';
+import { AuthService, User } from '@/lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -34,6 +34,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     checkUserSession();
+    // Picks up OAuth redirects, token refreshes and sign-outs from other tabs
+    return AuthService.onAuthChange(setUser);
   }, []);
 
   const checkUserSession = async () => {

@@ -36,9 +36,6 @@ try {
   await import('./github.js');
   console.log('✅ GitHub service imported successfully');
   
-  await import('./appwrite.js');
-  console.log('✅ Appwrite service imported successfully');
-  
   await import('./agents/index.js');
   console.log('✅ Agents module imported successfully');
   

@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import appwriteService from './appwrite.js';
 import githubService from './github.js';
 
 // Create express app
@@ -59,97 +58,6 @@ app.post('/api/devpilot', (req, res) => {
       { title: "Mock Documentation", content: "This is placeholder content until the full server is operational" }
     ]
   });
-});
-
-// Appwrite service already imported at the top
-
-// Save to Appwrite endpoint
-app.post('/api/save-to-appwrite', async (req, res) => {
-  try {
-    const { userId, content, name, type, repoUrl } = req.body;
-    
-    // Validate required fields
-    if (!userId || !content || !name || !type) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        requiredFields: ['userId', 'content', 'name', 'type']
-      });
-    }
-    
-    // Save file to Appwrite
-    const result = await appwriteService.saveGeneratedFile(
-      userId,
-      content,
-      name,
-      type,
-      repoUrl || 'Not specified'
-    );
-    
-    res.status(200).json({
-      success: true,
-      message: `${name} saved to Appwrite successfully`,
-      result
-    });
-  } catch (error) {
-    console.error('Error saving to Appwrite:', error);
-    res.status(500).json({
-      error: 'Failed to save to Appwrite',
-      message: error.message
-    });
-  }
-});
-
-// Get saved files endpoint
-app.get('/api/saved-files/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const limit = parseInt(req.query.limit) || 50;
-    
-    if (!userId) {
-      return res.status(400).json({
-        error: 'User ID is required'
-      });
-    }
-    
-    const files = await appwriteService.getSavedFiles(userId, limit);
-    
-    res.status(200).json({
-      success: true,
-      files
-    });
-  } catch (error) {
-    console.error('Error fetching saved files:', error);
-    res.status(500).json({
-      error: 'Failed to fetch saved files',
-      message: error.message
-    });
-  }
-});
-
-// Get file download URL
-app.get('/api/file-download/:fileId', async (req, res) => {
-  try {
-    const { fileId } = req.params;
-    
-    if (!fileId) {
-      return res.status(400).json({
-        error: 'File ID is required'
-      });
-    }
-    
-    const downloadUrl = await appwriteService.getFileDownloadUrl(fileId);
-    
-    res.status(200).json({
-      success: true,
-      downloadUrl
-    });
-  } catch (error) {
-    console.error('Error getting file download URL:', error);
-    res.status(500).json({
-      error: 'Failed to get file download URL',
-      message: error.message
-    });
-  }
 });
 
 // GitHub Integration Endpoints
@@ -242,7 +150,7 @@ app.get('/auth/github/callback', async (req, res) => {
       githubId: userInfo.id,
       username: userInfo.login,
       accessToken,
-      userId: state // The Appwrite user ID passed as state
+      userId: state // The Supabase user ID passed as state
     });
     
     // Set cookie and redirect to frontend

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Copy, Download, FileText, Settings, Play, Book, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DevPilotResponse } from '@/lib/api';
-import { AppwriteAPI, SaveToAppwriteRequest } from '@/lib/api';
+import { SavedFilesAPI, SaveFileRequest } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface OutputDisplayProps {
@@ -18,7 +18,7 @@ export const OutputDisplay = ({ techStack, apiResponse, repoUrl }: OutputDisplay
   const { toast } = useToast();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('dockerfile');
-  const [savingToAppwrite, setSavingToAppwrite] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   const copyToClipboard = (content: string, type: string) => {
     navigator.clipboard.writeText(content);
@@ -28,42 +28,42 @@ export const OutputDisplay = ({ techStack, apiResponse, repoUrl }: OutputDisplay
     });
   };
   
-  const saveToAppwrite = async (content: string, name: string, type: string) => {
-    if (!user?.$id) {
+  const saveFile = async (content: string, name: string, type: string) => {
+    if (!user?.id) {
       toast({
         title: "Authentication required",
-        description: "Please sign in to save files to Appwrite.",
+        description: "Please sign in to save files.",
         variant: "destructive"
       });
       return;
     }
     
     try {
-      setSavingToAppwrite(prev => ({ ...prev, [type]: true }));
+      setSaving(prev => ({ ...prev, [type]: true }));
       
-      const request: SaveToAppwriteRequest = {
-        userId: user.$id,
+      const request: SaveFileRequest = {
+        userId: user.id,
         content,
         name,
         type,
         repoUrl
       };
       
-      const response = await AppwriteAPI.saveToAppwrite(request);
+      await SavedFilesAPI.saveFile(request);
       
       toast({
-        title: "Saved to Appwrite",
-        description: `${name} has been saved to your Appwrite storage.`,
+        title: "File saved",
+        description: `${name} has been saved to your account.`,
       });
     } catch (error) {
-      console.error('Failed to save to Appwrite:', error);
+      console.error('Failed to save file:', error);
       toast({
         title: "Save failed",
-        description: error instanceof Error ? error.message : "Failed to save to Appwrite",
+        description: error instanceof Error ? error.message : "Failed to save file",
         variant: "destructive"
       });
     } finally {
-      setSavingToAppwrite(prev => ({ ...prev, [type]: false }));
+      setSaving(prev => ({ ...prev, [type]: false }));
     }
   };
 
@@ -157,11 +157,11 @@ export const OutputDisplay = ({ techStack, apiResponse, repoUrl }: OutputDisplay
                     <Button 
                       variant="outline"
                       size="sm"
-                      onClick={() => saveToAppwrite(tab.content, tab.fileName, tab.value)}
-                      disabled={savingToAppwrite[tab.value]}
+                      onClick={() => saveFile(tab.content, tab.fileName, tab.value)}
+                      disabled={saving[tab.value]}
                     >
                       <Save className="h-4 w-4 mr-1" />
-                      {savingToAppwrite[tab.value] ? 'Saving...' : 'Save to Appwrite'}
+                      {saving[tab.value] ? 'Saving...' : 'Save'}
                     </Button>
                   </div>
                 </div>

@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 export interface DevPilotRequest {
   repoUrl: string;
   techStack: string;
@@ -36,8 +38,8 @@ export interface AnalyticsData {
 // API Base URL
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:10000';
 
-// Define interfaces for saving files to Appwrite
-export interface SaveToAppwriteRequest {
+// Define interfaces for saving generated files to Supabase
+export interface SaveFileRequest {
   userId: string;
   content: string;
   name: string;
@@ -45,24 +47,13 @@ export interface SaveToAppwriteRequest {
   repoUrl?: string;
 }
 
-export interface SaveToAppwriteResponse {
-  success: boolean;
-  message: string;
-  result: {
-    fileId: string;
-    recordId: string;
-    name: string;
-    type: string;
-  };
-}
-
 export interface SavedFile {
-  $id: string;
+  id: string;
   userId: string;
-  fileId: string;
   name: string;
   type: string;
-  repoUrl: string;
+  repoUrl: string | null;
+  content: string;
   createdAt: string;
 }
 
@@ -108,60 +99,6 @@ export class DevPilotAPI {
     }
 
     return this.makeRequest({ repoUrl, techStack, userId });
-  }
-}
-
-export class AuthAPI {
-  static async login(data: AuthRequest): Promise<any> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-        credentials: 'include',
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
-  }
-
-  static async signup(data: AuthRequest): Promise<any> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/signup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-        credentials: 'include',
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    } catch (error) {
-      console.error('Signup failed:', error);
-      throw error;
-    }
-  }
-
-  static async logout(): Promise<void> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    } catch (error) {
-      console.error('Logout failed:', error);
-      throw error;
-    }
   }
 }
 
@@ -321,64 +258,49 @@ export class GitHubAPI {
   }
 }
 
-export class AppwriteAPI {
-  static async saveToAppwrite(data: SaveToAppwriteRequest): Promise<SaveToAppwriteResponse> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/save-to-appwrite`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-        credentials: 'include',
-      });
+export class SavedFilesAPI {
+  static async saveFile(data: SaveFileRequest): Promise<SavedFile> {
+    const { data: row, error } = await supabase
+      .from('saved_files')
+      .insert({
+        user_id: data.userId,
+        content: data.content,
+        name: data.name,
+        type: data.type,
+        repo_url: data.repoUrl || null,
+      })
+      .select()
+      .single();
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return response.json();
-    } catch (error) {
-      console.error('Failed to save to Appwrite:', error);
-      throw new Error(error instanceof Error ? error.message : 'Failed to save to Appwrite');
+    if (error) {
+      console.error('Failed to save file:', error);
+      throw new Error(error.message);
     }
+    return toSavedFile(row);
   }
 
-  static async getSavedFiles(userId: string): Promise<SavedFile[]> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/saved-files/${userId}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
+  static async getSavedFiles(limit = 50): Promise<SavedFile[]> {
+    // Row-level security limits results to the signed-in user's files
+    const { data, error } = await supabase
+      .from('saved_files')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      return result.files;
-    } catch (error) {
+    if (error) {
       console.error('Failed to fetch saved files:', error);
-      throw new Error(error instanceof Error ? error.message : 'Failed to fetch saved files');
+      throw new Error(error.message);
     }
+    return data.map(toSavedFile);
   }
+}
 
-  static async getFileDownloadUrl(fileId: string): Promise<string> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/file-download/${fileId}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      return result.downloadUrl;
-    } catch (error) {
-      console.error('Failed to get file download URL:', error);
-      throw new Error(error instanceof Error ? error.message : 'Failed to get file download URL');
-    }
-  }
-} 
+const toSavedFile = (row: any): SavedFile => ({
+  id: row.id,
+  userId: row.user_id,
+  name: row.name,
+  type: row.type,
+  repoUrl: row.repo_url,
+  content: row.content,
+  createdAt: row.created_at,
+});

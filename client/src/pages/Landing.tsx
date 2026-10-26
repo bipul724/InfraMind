@@ -101,10 +101,10 @@ export const Landing = () => {
     },
     {
       icon: <Shield className="h-6 w-6" />,
-      title: "Appwrite Backend Infrastructure",
-      description: "Secure, scalable backend powered by Appwrite with built-in authentication, real-time databases, and enterprise-grade security compliance.",
+      title: "Supabase Backend Infrastructure",
+      description: "Secure, scalable backend powered by Supabase with built-in authentication, a Postgres database, and row-level security that keeps each user's files private.",
       color: "from-slate-700 to-slate-900",
-      tech: "Appwrite Cloud",
+      tech: "Supabase",
       highlight: "SECURE"
     },
     {
@@ -151,12 +151,12 @@ export const Landing = () => {
       provider: "Mem0"
     },
     { 
-      name: "Appwrite", 
-      description: "Open-source backend-as-a-service platform",
+      name: "Supabase", 
+      description: "Open-source Postgres development platform",
       logo: "⚡",
       category: "Backend Services",
-      features: ["Authentication", "Database", "Real-time APIs", "Cloud Storage"],
-      provider: "Appwrite Cloud"
+      features: ["Authentication", "Postgres Database", "Row-Level Security", "OAuth Providers"],
+      provider: "Supabase"
     },
     { 
       name: "Keywords AI", 
@@ -247,7 +247,7 @@ export const Landing = () => {
                 <span className="text-xl font-bold text-slate-900 tracking-tight">
                   InfraMind
                 </span>
-                <span className="text-xs text-slate-500 font-medium">Powered by Appwrite</span>
+                <span className="text-xs text-slate-500 font-medium">Powered by Supabase</span>
               </div>
             </div>
             
@@ -333,7 +333,7 @@ export const Landing = () => {
           </div>
           <p className="text-xl md:text-2xl text-slate-600 mb-8 max-w-3xl mx-auto leading-relaxed">
             Four specialized AI agents collaborate to understand, analyze, and automate your entire DevOps pipeline. 
-            <span className="font-semibold text-slate-900"> Powered by Llama 3 70B and Appwrite.</span>
+            <span className="font-semibold text-slate-900"> Powered by Llama 3 70B and Supabase.</span>
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
             <Button 
@@ -602,7 +602,7 @@ export const Landing = () => {
               </p>
               <div className="text-[11px] text-slate-400 space-y-0.5">
                 <div>AI Core: Llama 3 70B • LangGraph • Tavily • Mem0</div>
-                <div>Backend: Appwrite Cloud Infrastructure</div>
+                <div>Backend: Supabase Cloud Infrastructure</div>
               </div>
             </div>
             
@@ -621,7 +621,7 @@ export const Landing = () => {
               <div className="space-y-2 text-xs text-slate-400">
                 <div>LangGraph Framework</div>
                 <div>Llama 3 70B Model</div>
-                <div>Appwrite Backend</div>
+                <div>Supabase Backend</div>
                 <div>Docker & GitHub Actions</div>
               </div>
             </div>
@@ -638,7 +638,7 @@ export const Landing = () => {
           </div>
           
           <div className="border-t border-slate-800/80 mt-10 pt-6 text-center text-xs text-slate-400">
-            <p>&copy; 2024 InfraMind. Built with Appwrite and modern AI technologies.</p>
+            <p>&copy; 2024 InfraMind. Built with Supabase and modern AI technologies.</p>
           </div>
         </div>
       </footer>

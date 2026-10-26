@@ -9,7 +9,6 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { runAgentPipeline } from './agents/index.js';
 import GitHubService from './github.js';
-import AppwriteService from './appwrite.js';
 import { logger } from './utils/logger.js';
 import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
 import { performanceMonitor, getHealthStatus } from './utils/performance.js';
@@ -793,47 +792,6 @@ setInterval(async () => {
     }
   }
 }, 60 * 60 * 1000); // Run every hour
-
-// Auth Routes
-app.post('/auth/signup', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    // Create user in Appwrite
-    const user = await AppwriteService.createUser(email, password);
-    
-    res.json({ success: true, user });
-  } catch (error) {
-    console.error('Signup error:', error);
-    res.status(400).json({ error: error.message || 'Failed to create user' });
-  }
-});
-
-app.post('/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    // Login user in Appwrite
-    const session = await AppwriteService.createSession(email, password);
-    
-    res.json({ success: true, session });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(401).json({ error: error.message || 'Invalid credentials' });
-  }
-});
-
-app.post('/auth/logout', async (req, res) => {
-  try {
-    // Delete current session in Appwrite
-    await AppwriteService.deleteCurrentSession();
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({ error: error.message || 'Failed to logout' });
-  }
-});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

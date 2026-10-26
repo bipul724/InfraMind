@@ -165,7 +165,7 @@ export const Auth = () => {
             <span className="text-xl font-bold text-slate-900">
               InfraMind
             </span>
-            <span className="text-xs text-slate-500 font-medium">Powered by Appwrite</span>
+            <span className="text-xs text-slate-500 font-medium">Powered by Supabase</span>
           </div>
         </div>
       </div>
@@ -484,12 +484,12 @@ export const Auth = () => {
                 <Shield className="h-4 w-4" />
                 <span>Secured by</span>
                 <a 
-                  href="https://appwrite.io" 
+                  href="https://supabase.com" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="font-semibold text-[#F02E65] hover:text-[#d41a51] transition-colors"
+                  className="font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
                 >
-                  Appwrite
+                  Supabase
                 </a>
               </div>
             </CardFooter>

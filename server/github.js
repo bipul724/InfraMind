@@ -2,7 +2,7 @@
  * GitHub API Service
  * 
  * This service handles GitHub repository operations AFTER user authentication.
- * It is NOT used for user authentication (that's handled by Appwrite).
+ * It is NOT used for user authentication (that's handled by Supabase).
  * 
  * Purpose:
  * - Connect to user's GitHub account for repository access
@@ -11,7 +11,7 @@
  * - Handle GitHub API interactions
  * 
  * Authentication Flow:
- * 1. User logs in via Appwrite (email/password or OAuth)
+ * 1. User logs in via Supabase (email/password or OAuth)
  * 2. User connects GitHub account through this service for repo access
  * 3. GitHub token is used for repository operations only
  * 

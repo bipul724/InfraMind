@@ -92,12 +92,12 @@ export const EnhancedDashboard = () => {
     setError(null);
     
     try {
-      const response = await DevPilotAPI.generateCICD(repoUrl, techStack, user.$id);
+      const response = await DevPilotAPI.generateCICD(repoUrl, techStack, user.id);
       setApiResponse(response);
       setShowOutput(true);
       setShowChat(true);
       
-      // Store repo URL for "Save to Appwrite" functionality
+      // Store repo URL for the "Save" functionality
       localStorage.setItem('lastRepoUrl', repoUrl);
       
       // Add to projects list
