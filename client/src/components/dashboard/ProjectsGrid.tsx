@@ -108,13 +108,13 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
         <div>
-          <h2 className="text-3xl font-bold text-slate-900">My Projects</h2>
-          <p className="text-slate-600">Manage your CI/CD configurations and deployments</p>
+          <h2 className="text-3xl font-semibold tracking-tight">My Projects</h2>
+          <p className="text-muted-foreground">Manage your CI/CD configurations and deployments</p>
         </div>
         
         <Button 
           onClick={onCreateNew}
-          className="bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-sm"
+          className="font-medium shadow-sm"
         >
           <Plus className="h-4 w-4 mr-2" />
           New Project
@@ -125,7 +125,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
         {/* Search */}
         <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="text"
             placeholder="Search projects..."
@@ -137,11 +137,11 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
         
         {/* Status Filter */}
         <div className="flex items-center space-x-2">
-          <Filter className="h-4 w-4 text-slate-600" />
+          <Filter className="h-4 w-4 text-muted-foreground" />
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm"
+            className="rounded-md border border-input bg-card px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="all">All Status ({statusCounts.all})</option>
             <option value="completed">Completed ({statusCounts.completed})</option>
@@ -156,7 +156,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             variant="outline"
             size="sm"
             onClick={() => toggleSort('createdAt')}
-            className={sortField === 'createdAt' ? 'bg-slate-100 border-slate-300 text-slate-900' : ''}
+            className={sortField === 'createdAt' ? 'border-border bg-muted text-foreground' : ''}
           >
             Date
             {sortField === 'createdAt' && (
@@ -167,7 +167,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             variant="outline"
             size="sm"
             onClick={() => toggleSort('name')}
-            className={sortField === 'name' ? 'bg-slate-100 border-slate-300 text-slate-900' : ''}
+            className={sortField === 'name' ? 'border-border bg-muted text-foreground' : ''}
           >
             Name
             {sortField === 'name' && (
@@ -193,15 +193,15 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
           ))}
         </div>
       ) : (
-        <Card className="border-slate-200/60">
+        <Card className="border-border bg-card">
           <CardContent className="text-center py-12">
             <div className="space-y-4">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
-                <FolderOpen className="h-8 w-8 text-slate-400" />
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                 <FolderOpen className="h-8 w-8 text-muted-foreground" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">No projects found</h3>
-                <p className="text-slate-600">
+                <h3 className="text-lg font-semibold">No projects found</h3>
+                <p className="text-muted-foreground">
                   {searchTerm || filterStatus !== 'all' 
                     ? 'Try adjusting your search or filter criteria'
                     : 'Create your first CI/CD setup to get started'
@@ -211,7 +211,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
               {!searchTerm && filterStatus === 'all' && (
                 <Button 
                   onClick={onCreateNew}
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-medium shadow-sm"
+                  className="font-medium shadow-sm"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Generate Your First Setup
@@ -223,4 +223,4 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
       )}
     </div>
   );
-}; 
+};

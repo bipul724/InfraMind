@@ -37,7 +37,7 @@ export const TechStackSelector: React.FC<TechStackSelectorProps> = ({ value, onC
                   <Icon className="h-4 w-4" />
                   <div>
                     <div className="font-medium">{stack.label}</div>
-                    <div className="text-xs text-slate-500">{stack.description}</div>
+                    <div className="text-xs text-muted-foreground">{stack.description}</div>
                   </div>
                 </div>
               </SelectItem>

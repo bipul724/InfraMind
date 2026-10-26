@@ -149,7 +149,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
 
   if (!isConnected) {
     return (
-      <Card className="w-full max-w-2xl mx-auto">
+      <Card className="mx-auto w-full max-w-2xl border-border bg-card">
         <CardHeader className="text-center">
           <CardTitle className="flex items-center justify-center gap-2">
             <Github className="h-6 w-6" />
@@ -180,7 +180,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
     <div className="space-y-6">
       {/* User Info */}
       {user && (
-        <Card>
+        <Card className="border-border bg-card">
           <CardContent className="flex items-center gap-4 p-4">
             <Avatar className="h-12 w-12">
               <AvatarImage src={user.avatarUrl} alt={user.name || user.login} />
@@ -199,7 +199,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
       )}
 
       {/* Repository Browser */}
-      <Card>
+      <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle>Select Repository</CardTitle>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -257,7 +257,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
           {loading && repositories.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
                 <p className="text-muted-foreground">Loading repositories...</p>
               </div>
             </div>
@@ -275,7 +275,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                   {filteredRepositories.map((repo) => (
                     <div
                       key={repo.id}
-                      className="border rounded-lg p-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                      className="cursor-pointer rounded-md border border-border bg-card p-4 transition-colors hover:bg-muted/50"
                       onClick={() => onRepositorySelect(repo)}
                     >
                       <div className="flex items-start justify-between">
@@ -345,4 +345,4 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   );
 };
 
-export default RepositorySelector; 
+export default RepositorySelector;

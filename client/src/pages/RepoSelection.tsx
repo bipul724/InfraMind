@@ -149,18 +149,18 @@ export const RepoSelection = () => {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 text-foreground">
       <div className="space-y-8">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Repository Selection</h1>
-          <p className="text-slate-600 mt-2">
+          <h1 className="text-3xl font-semibold tracking-tight">Repository Selection</h1>
+          <p className="mt-2 text-muted-foreground">
             Enter a GitHub repository URL to generate CI/CD configuration
           </p>
         </div>
 
         <div className="max-w-4xl mx-auto space-y-6">
           {/* Repository Selection Tabs */}
-          <Card>
+          <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Github className="h-5 w-5" />
@@ -191,13 +191,13 @@ export const RepoSelection = () => {
                     onConnect={connectGitHub}
                   />
                   {selectedRepository && (
-                    <div className="mt-4 p-4 bg-muted rounded-lg">
-                      <h4 className="font-medium mb-2">Selected Repository:</h4>
+                    <div className="mt-4 rounded-md border border-border bg-muted/50 p-4">
+                      <h4 className="mb-2 font-medium">Selected Repository:</h4>
                       <div className="flex items-center gap-2">
                         <Github className="h-4 w-4" />
                         <span className="font-mono text-sm">{selectedRepository.fullName}</span>
                         {selectedRepository.private && (
-                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Private</span>
+                           <span className="rounded border border-status-warning/30 bg-status-warning/10 px-2 py-1 text-xs text-status-warning">Private</span>
                         )}
                       </div>
                     </div>
@@ -207,7 +207,7 @@ export const RepoSelection = () => {
                 <TabsContent value="manual" className="mt-6">
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <label htmlFor="repo-url" className="text-sm font-medium text-slate-700">
+                      <label htmlFor="repo-url" className="text-sm font-medium text-foreground">
                         Repository URL
                       </label>
                       <Input
@@ -218,7 +218,7 @@ export const RepoSelection = () => {
                         onChange={(e) => setRepoUrl(e.target.value)}
                         className="w-full"
                       />
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-muted-foreground">
                         Example: https://github.com/facebook/react
                       </p>
                     </div>
@@ -235,7 +235,7 @@ export const RepoSelection = () => {
                 >
                   {loading ? (
                     <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                       <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"></div>
                       Processing Repository...
                     </>
                   ) : (
@@ -250,7 +250,7 @@ export const RepoSelection = () => {
           </Card>
 
           {/* Example Repositories */}
-          <Card>
+          <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle className="text-lg">Example Repositories</CardTitle>
               <CardDescription>
@@ -262,18 +262,18 @@ export const RepoSelection = () => {
                 {exampleRepos.map((example, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between p-3 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                    className="flex cursor-pointer items-center justify-between rounded-md border border-border bg-card p-3 transition-colors hover:bg-muted"
                     onClick={() => handleExampleSelect(example)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <GitBranch className="h-4 w-4 text-slate-500" />
-                        <span className="font-medium text-slate-900">{example.name}</span>
-                        <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
+                         <GitBranch className="h-4 w-4 text-muted-foreground" />
+                         <span className="font-medium">{example.name}</span>
+                         <span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
                           {example.language}
                         </span>
                       </div>
-                      <p className="text-sm text-slate-600 mt-1">{example.description}</p>
+                       <p className="mt-1 text-sm text-muted-foreground">{example.description}</p>
                     </div>
                     <Button variant="ghost" size="sm">
                       Use This
@@ -285,13 +285,13 @@ export const RepoSelection = () => {
           </Card>
 
           {/* GitHub Connection Notice */}
-          <Card className="border-blue-200 bg-blue-50">
+          <Card className="border-primary/30 bg-primary/5">
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
-                <Globe className="h-5 w-5 text-blue-600 mt-0.5" />
+                 <Globe className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
-                  <h3 className="font-medium text-blue-900">Repository Access</h3>
-                  <p className="text-sm text-blue-700 mt-1">
+                   <h3 className="font-medium text-primary">Repository Access</h3>
+                   <p className="mt-1 text-sm text-muted-foreground">
                     Currently supporting public GitHub repositories. For private repositories, 
                     you can still generate CI/CD configurations by entering the repository URL.
                   </p>
@@ -303,4 +303,4 @@ export const RepoSelection = () => {
       </div>
     </div>
   );
-}; 
+};

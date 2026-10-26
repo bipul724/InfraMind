@@ -47,10 +47,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-100 text-green-800 border-green-200';
-      case 'generating': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'failed': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'completed': return 'bg-status-success/10 text-status-success border-status-success/30';
+      case 'generating': return 'bg-status-warning/10 text-status-warning border-status-warning/30';
+      case 'failed': return 'bg-status-error/10 text-status-error border-status-error/30';
+      default: return 'bg-muted text-muted-foreground border-border';
     }
   };
 
@@ -72,7 +72,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   };
 
   return (
-    <Card className="border-slate-200/60 hover:shadow-lg transition-all duration-200 group">
+    <Card className="group border-border bg-card transition-shadow duration-200 hover:shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="space-y-1 flex-1 min-w-0">
@@ -90,7 +90,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       
       <CardContent className="space-y-4">
         {/* Repository URL */}
-        <div className="flex items-center space-x-2 text-sm text-slate-600">
+        <div className="flex items-center space-x-2 text-sm text-muted-foreground">
           <Github className="h-4 w-4 flex-shrink-0" />
           <span className="truncate flex-1">{project.repoUrl.replace('https://github.com/', '')}</span>
           <Button 
@@ -106,21 +106,21 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         {/* Project Stats */}
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="text-slate-500">Created:</span>
-            <p className="font-medium text-slate-900">{formatDate(project.createdAt)}</p>
+              <span className="text-muted-foreground">Created:</span>
+              <p className="font-medium">{formatDate(project.createdAt)}</p>
           </div>
           {project.deploymentCount && (
             <div>
-              <span className="text-slate-500">Deployments:</span>
-              <p className="font-medium text-slate-900">{project.deploymentCount}</p>
+                <span className="text-muted-foreground">Deployments:</span>
+                <p className="font-medium">{project.deploymentCount}</p>
             </div>
           )}
         </div>
         
         {project.lastGenerated && (
           <div className="text-sm">
-            <span className="text-slate-500">Last updated:</span>
-            <p className="font-medium text-slate-900">{formatDate(project.lastGenerated)}</p>
+            <span className="text-muted-foreground">Last updated:</span>
+            <p className="font-medium">{formatDate(project.lastGenerated)}</p>
           </div>
         )}
         
@@ -187,7 +187,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
             <Button 
               variant="ghost" 
               size="sm" 
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+               className="text-status-error hover:bg-status-error/10 hover:text-status-error"
               onClick={() => onDelete?.(project.id)}
             >
               <Trash2 className="h-4 w-4" />
@@ -197,4 +197,4 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       </CardContent>
     </Card>
   );
-}; 
+};

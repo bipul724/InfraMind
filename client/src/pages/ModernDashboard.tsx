@@ -169,40 +169,40 @@ export const ModernDashboard = () => {
 
   const getLanguageColor = (language: string) => {
     const colors: { [key: string]: string } = {
-      TypeScript: 'bg-blue-100 text-blue-800',
-      JavaScript: 'bg-yellow-100 text-yellow-800',
-      Python: 'bg-green-100 text-green-800',
-      Java: 'bg-red-100 text-red-800',
-      Go: 'bg-cyan-100 text-cyan-800',
-      Rust: 'bg-orange-100 text-orange-800',
+      TypeScript: 'bg-primary/10 text-primary border-primary/20',
+      JavaScript: 'bg-status-warning/10 text-status-warning border-status-warning/30',
+      Python: 'bg-status-success/10 text-status-success border-status-success/30',
+      Java: 'bg-status-error/10 text-status-error border-status-error/30',
+      Go: 'bg-muted text-muted-foreground border-border',
+      Rust: 'bg-secondary text-secondary-foreground border-border',
     };
-    return colors[language] || 'bg-gray-100 text-gray-800';
+    return colors[language] || 'bg-muted text-muted-foreground border-border';
   };
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-background text-foreground">
         {/* Modern Header */}
-        <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-50">
+        <header className="sticky top-0 z-40 border-b border-border bg-background">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               {/* Logo */}
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center">
-                  <Rocket className="h-5 w-5 text-white" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Rocket className="h-5 w-5" />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">InfraMind</h1>
-                  <p className="text-xs text-gray-500">AI-Powered DevOps</p>
+                  <h1 className="text-xl font-semibold tracking-tight">InfraMind</h1>
+                  <p className="text-xs text-muted-foreground">AI-Powered DevOps</p>
                 </div>
               </div>
 
               {/* User Menu */}
               <div className="flex items-center space-x-4">
                 {githubConnected && githubUsername && (
-                  <div className="flex items-center space-x-2 px-3 py-1 bg-green-50 rounded-full">
-                    <Github className="h-4 w-4 text-green-600" />
-                    <span className="text-sm font-medium text-green-800">@{githubUsername}</span>
+                  <div className="flex items-center space-x-2 rounded-full border border-status-success/30 bg-status-success/10 px-3 py-1">
+                    <Github className="h-4 w-4 text-status-success" />
+                    <span className="text-sm font-medium text-status-success">@{githubUsername}</span>
                   </div>
                 )}
                 
@@ -215,7 +215,7 @@ export const ModernDashboard = () => {
                     variant="ghost"
                     size="sm"
                     onClick={handleLogout}
-                    className="text-gray-600 hover:text-gray-900"
+                    className="text-muted-foreground hover:text-foreground"
                   >
                     <LogOut className="h-4 w-4" />
                   </Button>
@@ -230,17 +230,17 @@ export const ModernDashboard = () => {
           <div className="space-y-8">
             {/* Welcome Section */}
             <div className="text-center space-y-4">
-              <h2 className="text-4xl font-bold text-gray-900">
+              <h2 className="text-4xl font-semibold tracking-tight">
                 Welcome back, {user?.name?.split(' ')[0]}!
               </h2>
-              <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
                 Generate production-ready CI/CD configurations with our AI-powered agents
               </p>
             </div>
 
             {/* Main Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-              <TabsList className="grid w-full grid-cols-4 max-w-xl mx-auto">
+              <TabsList className="mx-auto grid w-full max-w-xl grid-cols-2 md:grid-cols-4">
                 <TabsTrigger value="generate" className="flex items-center space-x-2">
                   <Zap className="h-4 w-4" />
                   <span>Generate</span>
@@ -261,22 +261,22 @@ export const ModernDashboard = () => {
 
               {/* Generate Tab */}
               <TabsContent value="generate" className="space-y-6">
-                <Card className="max-w-4xl mx-auto">
+                  <Card className="mx-auto max-w-4xl border-border bg-card">
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
-                      <Zap className="h-5 w-5 text-blue-600" />
+                      <Zap className="h-5 w-5 text-primary" />
                       <span>AI Agent Generation</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     {!githubConnected ? (
                       <div className="text-center space-y-6 py-8">
-                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-                          <Github className="h-8 w-8 text-gray-400" />
+                        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                          <Github className="h-8 w-8 text-muted-foreground" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Connect GitHub for Best Experience</h3>
-                          <p className="text-gray-600 mt-2">
+                          <h3 className="text-lg font-semibold">Connect GitHub for Best Experience</h3>
+                          <p className="mt-2 text-muted-foreground">
                             Connect your GitHub account to browse repositories and get enhanced features
                           </p>
                         </div>
@@ -284,7 +284,7 @@ export const ModernDashboard = () => {
                           <Button
                             onClick={handleGitHubConnect}
                             disabled={isLoading}
-                            className="bg-gray-900 hover:bg-gray-800"
+                            className=""
                           >
                             <Github className="h-4 w-4 mr-2" />
                             {isLoading ? 'Connecting...' : 'Connect GitHub'}
@@ -310,15 +310,15 @@ export const ModernDashboard = () => {
 
               {/* Repositories Tab */}
               <TabsContent value="repositories" className="space-y-6">
-                <Card>
+                  <Card className="border-border bg-card">
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <GitBranch className="h-5 w-5 text-blue-600" />
+                        <GitBranch className="h-5 w-5 text-primary" />
                         <span>Your Repositories</span>
                       </div>
                       {githubConnected && (
-                        <Badge variant="secondary" className="bg-green-100 text-green-800">
+                          <Badge variant="secondary" className="border border-status-success/30 bg-status-success/10 text-status-success">
                           GitHub Connected
                         </Badge>
                       )}
@@ -329,7 +329,7 @@ export const ModernDashboard = () => {
                       <div className="space-y-4">
                         {/* Search */}
                         <div className="relative">
-                          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                           <Input
                             placeholder="Search repositories..."
                             value={searchTerm}
@@ -344,7 +344,7 @@ export const ModernDashboard = () => {
                             <Card
                               key={repo.id}
                               className={`cursor-pointer transition-all hover:shadow-md ${
-                                selectedRepo?.id === repo.id ? 'ring-2 ring-blue-500' : ''
+                                 selectedRepo?.id === repo.id ? 'ring-2 ring-primary' : ''
                               }`}
                               onClick={() => handleRepoSelect(repo)}
                             >
@@ -352,10 +352,10 @@ export const ModernDashboard = () => {
                                 <div className="space-y-3">
                                   <div className="flex items-start justify-between">
                                     <div className="flex-1">
-                                      <h3 className="font-semibold text-gray-900 truncate">
+                                      <h3 className="truncate font-semibold">
                                         {repo.name}
                                       </h3>
-                                      <p className="text-sm text-gray-500 truncate">
+                                      <p className="truncate text-sm text-muted-foreground">
                                         {repo.fullName}
                                       </p>
                                     </div>
@@ -367,7 +367,7 @@ export const ModernDashboard = () => {
                                   </div>
                                   
                                   {repo.description && (
-                                    <p className="text-sm text-gray-600 line-clamp-2">
+                                     <p className="line-clamp-2 text-sm text-muted-foreground">
                                       {repo.description}
                                     </p>
                                   )}
@@ -377,7 +377,7 @@ export const ModernDashboard = () => {
                                       <Badge className={getLanguageColor(repo.language)}>
                                         {repo.language}
                                       </Badge>
-                                      <div className="flex items-center space-x-1 text-sm text-gray-500">
+                                       <div className="flex items-center space-x-1 text-sm text-muted-foreground">
                                         <Star className="h-3 w-3" />
                                         <span>{repo.stars}</span>
                                       </div>
@@ -403,14 +403,14 @@ export const ModernDashboard = () => {
                       </div>
                     ) : (
                       <div className="text-center py-8">
-                        <Github className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold text-gray-900">No GitHub Connection</h3>
-                        <p className="text-gray-600 mt-2">
+                         <Github className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                         <h3 className="text-lg font-semibold">No GitHub Connection</h3>
+                         <p className="mt-2 text-muted-foreground">
                           Connect your GitHub account to browse repositories
                         </p>
                         <Button
                           onClick={handleGitHubConnect}
-                          className="mt-4 bg-gray-900 hover:bg-gray-800"
+                           className="mt-4"
                         >
                           <Github className="h-4 w-4 mr-2" />
                           Connect GitHub
@@ -423,19 +423,19 @@ export const ModernDashboard = () => {
 
               {/* Projects Tab */}
               <TabsContent value="projects" className="space-y-6">
-                <Card>
+                  <Card className="border-border bg-card">
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
-                      <Activity className="h-5 w-5 text-blue-600" />
+                      <Activity className="h-5 w-5 text-primary" />
                       <span>Your Projects</span>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     {projects.length === 0 ? (
                       <div className="text-center py-8">
-                        <Code className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold text-gray-900">No Projects Yet</h3>
-                        <p className="text-gray-600 mt-2">
+                        <Code className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+                         <h3 className="text-lg font-semibold">No Projects Yet</h3>
+                         <p className="mt-2 text-muted-foreground">
                           Generate your first CI/CD configuration to get started
                         </p>
                         <Button
@@ -449,15 +449,15 @@ export const ModernDashboard = () => {
                     ) : (
                       <div className="space-y-4">
                         {projects.map((project) => (
-                          <Card key={project.id} className="p-4">
+                           <Card key={project.id} className="border-border bg-card p-4">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center space-x-3">
-                                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                  <Code className="h-5 w-5 text-blue-600" />
+                                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+                                   <Code className="h-5 w-5 text-primary" />
                                 </div>
                                 <div>
-                                  <h3 className="font-semibold text-gray-900">{project.name}</h3>
-                                  <p className="text-sm text-gray-500">{project.techStack}</p>
+                                   <h3 className="font-semibold">{project.name}</h3>
+                                   <p className="text-sm text-muted-foreground">{project.techStack}</p>
                                 </div>
                               </div>
                               <div className="flex items-center space-x-3">
@@ -465,8 +465,8 @@ export const ModernDashboard = () => {
                                   variant={project.status === 'completed' ? 'default' : 'secondary'}
                                   className={
                                     project.status === 'completed'
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-yellow-100 text-yellow-800'
+                                       ? 'border border-status-success/30 bg-status-success/10 text-status-success'
+                                       : 'border border-status-warning/30 bg-status-warning/10 text-status-warning'
                                   }
                                 >
                                   {project.status === 'completed' ? (

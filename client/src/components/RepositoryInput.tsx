@@ -13,7 +13,7 @@ export const RepositoryInput = ({ value, onChange, placeholder }: RepositoryInpu
 
   return (
     <div className="space-y-3">
-      <Label htmlFor="repo-url" className="text-base font-semibold text-slate-700 flex items-center gap-2">
+      <Label htmlFor="repo-url" className="flex items-center gap-2 text-base font-semibold text-foreground">
         <Github className="h-5 w-5" />
         Repository URL
       </Label>
@@ -24,22 +24,22 @@ export const RepositoryInput = ({ value, onChange, placeholder }: RepositoryInpu
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className={`h-12 text-base pl-4 pr-12 border-2 transition-all duration-200 ${
-            value && !isValidUrl 
-              ? 'border-red-300 focus:border-red-500' 
-              : value && isValidUrl
-              ? 'border-green-300 focus:border-green-500'
-              : 'border-slate-200 focus:border-blue-500'
-          }`}
+           className={`h-12 border-2 pl-4 pr-12 text-base transition-all duration-200 ${
+             value && !isValidUrl
+               ? 'border-status-error/50 focus:border-status-error'
+               : value && isValidUrl
+               ? 'border-status-success/50 focus:border-status-success'
+               : 'border-input focus:border-primary'
+           }`}
         />
         {value && (
-          <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-3 h-3 rounded-full ${
-            isValidUrl ? 'bg-green-500' : 'bg-red-500'
-          }`} />
+           <div className={`absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full ${
+             isValidUrl ? 'bg-status-success' : 'bg-status-error'
+           }`} />
         )}
       </div>
       {value && !isValidUrl && (
-        <p className="text-sm text-red-600">Please enter a valid GitHub, GitLab, or Bitbucket URL</p>
+        <p className="text-sm text-status-error">Please enter a valid GitHub, GitLab, or Bitbucket URL</p>
       )}
     </div>
   );

@@ -79,15 +79,15 @@ export const SavedFiles: React.FC = () => {
   const getFileTypeColor = (type: string) => {
     switch (type) {
       case 'dockerfile':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-primary/10 text-primary border-primary/20';
       case 'github-actions':
-        return 'bg-slate-100 text-slate-800';
+        return 'bg-muted text-muted-foreground border-border';
       case 'env':
-        return 'bg-green-100 text-green-800';
+        return 'bg-status-success/10 text-status-success border-status-success/30';
       case 'docs':
-        return 'bg-amber-100 text-amber-800';
+        return 'bg-status-warning/10 text-status-warning border-status-warning/30';
       default:
-        return 'bg-slate-100 text-slate-800';
+        return 'bg-muted text-muted-foreground border-border';
     }
   };
 
@@ -119,7 +119,7 @@ export const SavedFiles: React.FC = () => {
 
   if (!user) {
     return (
-      <Card>
+      <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle>Saved Files</CardTitle>
           <CardDescription>Please sign in to view your saved files</CardDescription>
@@ -129,7 +129,7 @@ export const SavedFiles: React.FC = () => {
   }
 
   return (
-    <Card>
+    <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-xl">Saved Files</CardTitle>
@@ -142,16 +142,16 @@ export const SavedFiles: React.FC = () => {
       </CardHeader>
       <CardContent>
         {error && (
-          <div className="bg-red-50 text-red-800 p-3 rounded-md mb-4">
+          <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-status-error">
             {error}
           </div>
         )}
         
         {files.length === 0 && !loading ? (
           <div className="text-center py-8 space-y-4">
-            <FilePlus className="h-12 w-12 mx-auto text-slate-300" />
-            <p className="text-slate-600">No saved files found</p>
-            <p className="text-slate-400 text-sm">
+             <FilePlus className="mx-auto h-12 w-12 text-muted-foreground/50" />
+             <p className="text-muted-foreground">No saved files found</p>
+             <p className="text-sm text-muted-foreground">
               Save generated files from a completed generation to see them here
             </p>
           </div>
@@ -160,7 +160,7 @@ export const SavedFiles: React.FC = () => {
             {files.map((file) => (
               <div
                 key={file.id}
-                className="border rounded-lg p-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                 className="flex flex-col gap-4 rounded-md border border-border bg-card p-4 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -169,11 +169,11 @@ export const SavedFiles: React.FC = () => {
                       {getFileTypeLabel(file.type)}
                     </Badge>
                   </div>
-                  <p className="text-xs text-slate-500">
+                   <p className="text-xs text-muted-foreground">
                     Created: {formatDate(file.createdAt)}
                   </p>
                   {file.repoUrl && (
-                    <p className="text-xs text-slate-500 truncate max-w-md">
+                     <p className="max-w-md truncate text-xs text-muted-foreground">
                       Repo: {file.repoUrl}
                     </p>
                   )}
@@ -204,4 +204,4 @@ export const SavedFiles: React.FC = () => {
       </CardContent>
     </Card>
   );
-}; 
+};
