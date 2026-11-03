@@ -8,7 +8,7 @@
  * - Connect to user's GitHub account for repository access
  * - Fetch user's repositories and organizations
  * - Check repository access before cloning
- * - Revoke the OAuth grant when a user disconnects
+ * - Revoke a user's OAuth token when it is no longer needed
  * 
  * Authentication Flow:
  * 1. User logs in via Supabase (email/password or OAuth)
@@ -296,13 +296,14 @@ class GitHubService {
     }
   }
 
-  // Revoke the OAuth grant (all tokens of this app for the GitHub user).
+  // Revoke one OAuth token. Other tokens of this app for the same GitHub account
+  // (for example another InfraMind user's connection) stay valid.
   // Best effort: returns { ok, status } and never throws. Logs no request details.
-  async revokeGrant(accessToken) {
+  async revokeToken(accessToken) {
     const clientId = this.clientId || '';
     const credentials = Buffer.from(`${clientId}:${this.clientSecret || ''}`).toString('base64');
     try {
-      const response = await fetch(`${this.apiBaseUrl}/applications/${encodeURIComponent(clientId)}/grant`, {
+      const response = await fetch(`${this.apiBaseUrl}/applications/${encodeURIComponent(clientId)}/token`, {
         method: 'DELETE',
         headers: {
           Authorization: `Basic ${credentials}`,

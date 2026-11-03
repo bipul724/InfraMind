@@ -288,39 +288,66 @@ export function createConnectionStoreFromEnv(env = process.env, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// One-time tokens (connect tickets, OAuth states)
+// One-time tokens (connect tickets, OAuth states, pending connect completions)
 
-// Random 32-byte hex tokens mapped to a user id. Each token can be consumed once.
-// issue() returns null when the store is full of unexpired entries.
-export function createOneTimeTokenStore({ ttlMs, maxEntries = 1000, now = Date.now } = {}) {
-  const entries = new Map(); // token -> { userId, expiresAt }
+// Random 32-byte hex tokens mapped to a user id, optionally with a server-side payload.
+// Each token can be consumed once. issue() returns null when the store is full of
+// unexpired entries.
+// - consume(token) returns only the user id (tickets and OAuth states).
+// - consumeEntry(token) returns { userId, payload } (connect completions).
+// - onExpire(entry) is called once for every entry removed because it expired, so
+//   a payload holding a credential can be cleaned up (revoked). Errors it throws
+//   are swallowed so one failure cannot stop the sweep.
+export function createOneTimeTokenStore({ ttlMs, maxEntries = 1000, now = Date.now, onExpire = null } = {}) {
+  const entries = new Map(); // token -> { userId, payload, expiresAt }
 
   function sweep() {
     const current = now();
     for (const [token, entry] of entries) {
-      if (entry.expiresAt <= current) entries.delete(token);
+      if (entry.expiresAt <= current) {
+        entries.delete(token);
+        if (onExpire) {
+          try {
+            onExpire({ userId: entry.userId, payload: entry.payload, expiresAt: entry.expiresAt });
+          } catch {
+            // best effort
+          }
+        }
+      }
     }
   }
 
+  // Deletes the token whatever the outcome; returns its entry only if unexpired
+  function take(token) {
+    sweep();
+    if (typeof token !== 'string' || token === '') return null;
+    const entry = entries.get(token);
+    if (!entry) return null;
+    entries.delete(token);
+    return entry.expiresAt > now() ? entry : null;
+  }
+
   return {
-    issue(userId) {
+    issue(userId, payload = undefined) {
       assertUserId(userId);
       sweep();
       if (entries.size >= maxEntries) return null;
       const token = crypto.randomBytes(32).toString('hex');
-      entries.set(token, { userId, expiresAt: now() + ttlMs });
+      entries.set(token, { userId, payload, expiresAt: now() + ttlMs });
       return token;
     },
 
-    // Deletes the token whatever the outcome; returns its user id only if unexpired
     consume(token) {
-      sweep();
-      if (typeof token !== 'string' || token === '') return null;
-      const entry = entries.get(token);
-      if (!entry) return null;
-      entries.delete(token);
-      return entry.expiresAt > now() ? entry.userId : null;
+      const entry = take(token);
+      return entry ? entry.userId : null;
     },
+
+    consumeEntry(token) {
+      const entry = take(token);
+      return entry ? { userId: entry.userId, payload: entry.payload } : null;
+    },
+
+    sweep,
 
     get size() {
       return entries.size;

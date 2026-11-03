@@ -193,10 +193,62 @@ const connectTickets = createOneTimeTokenStore({ ttlMs: CONNECT_TICKET_TTL_MS, m
 // OAuth state -> the Supabase user who started the flow, consumed by the callback
 const pendingStates = createOneTimeTokenStore({ ttlMs: OAUTH_STATE_TTL_MS, maxEntries: MAX_PENDING_CONNECTS });
 
+// Best-effort revocation of a single GitHub token. Logs only the outcome class,
+// never the token or the request.
+async function revokeQuietly(accessToken) {
+  if (typeof accessToken !== 'string' || accessToken === '') return;
+  const revocation = await GitHubService.revokeToken(accessToken);
+  if (!revocation.ok) {
+    const reason = typeof revocation.status === 'number' ? `HTTP ${revocation.status}` : revocation.status;
+    console.warn(`token revocation failed: ${reason}`);
+  }
+}
+
+// Completion lifetime. GITHUB_CONNECT_COMPLETION_TTL_MS exists so tests can use a short
+// value; it is validated to 1000-300000 ms, so it can only shorten the 5-minute default.
+const DEFAULT_COMPLETION_TTL_MS = 5 * 60 * 1000;
+function readCompletionTtlMs() {
+  const raw = process.env.GITHUB_CONNECT_COMPLETION_TTL_MS;
+  if (raw === undefined || raw === '') return DEFAULT_COMPLETION_TTL_MS;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1000 || value > DEFAULT_COMPLETION_TTL_MS) {
+    console.warn(`⚠️ GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer from 1000 to ${DEFAULT_COMPLETION_TTL_MS}; using the default`);
+    return DEFAULT_COMPLETION_TTL_MS;
+  }
+  return value;
+}
+
+// Completion id -> { userId of the ticket owner, payload: { record } } from a finished
+// OAuth callback. The record holds the plaintext token, in memory only, until the
+// ticket owner claims it (POST /api/github/connect/complete). Expired entries are
+// revoked at GitHub.
+const COMPLETION_SWEEP_INTERVAL_MS = 60 * 1000;
+const pendingCompletions = createOneTimeTokenStore({
+  ttlMs: readCompletionTtlMs(),
+  maxEntries: MAX_PENDING_CONNECTS,
+  onExpire: (entry) => {
+    console.log('github connect completion expired');
+    void revokeQuietly(entry.payload?.record?.accessToken);
+  }
+});
+setInterval(() => pendingCompletions.sweep(), COMPLETION_SWEEP_INTERVAL_MS).unref();
+
+const COMPLETION_PATTERN = /^[0-9a-f]{64}$/i;
+const readCompletion = (req) => {
+  const completion = req.body?.completion;
+  return typeof completion === 'string' && COMPLETION_PATTERN.test(completion) ? completion : null;
+};
+
 const GITHUB_AUTH_REQUIRED_BODY = { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' };
 const GITHUB_AUTH_INVALID_BODY = { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' };
 const GITHUB_STORE_UNAVAILABLE_BODY = { error: 'GitHub connection service unavailable', code: 'GITHUB_STORE_UNAVAILABLE' };
 const GITHUB_CONNECT_BUSY_BODY = { error: 'Too many pending GitHub connections. Please try again shortly.', code: 'GITHUB_CONNECT_BUSY' };
+const INVALID_REQUEST_BODY = { error: 'Invalid request', code: 'INVALID_REQUEST' };
+const GITHUB_CONNECT_EXPIRED_BODY = { error: 'The connection link expired. Please connect GitHub again.', code: 'GITHUB_CONNECT_EXPIRED' };
+const GITHUB_CONNECT_MISMATCH_BODY = {
+  error: 'This GitHub connection was started from a different InfraMind account. Nothing was connected. Please connect GitHub again.',
+  code: 'GITHUB_CONNECT_MISMATCH'
+};
 
 const sendStoreUnavailable = (res) => res.status(503).json(GITHUB_STORE_UNAVAILABLE_BODY);
 
@@ -302,8 +354,9 @@ app.get('/auth/github', (req, res) => {
   }
 });
 
-// Step 3: GitHub OAuth callback. The connection is stored for the user bound to the
-// state, never for anyone identified by this request.
+// Step 3: GitHub OAuth callback. Stores nothing: the browser finishing the flow may not
+// belong to the user who obtained the ticket (linking CSRF). The result is parked under
+// a one-time completion id that only the ticket owner can claim (step 4).
 app.get('/auth/github/callback', async (req, res) => {
   const { code, state, error: oauthError } = req.query;
   const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
@@ -326,30 +379,93 @@ app.get('/auth/github/callback', async (req, res) => {
     return redirectWithError(res, 'github_auth_failed');
   }
   
+  let accessToken = null;
   try {
     // Exchange code for access token
-    const { accessToken, scope } = await GitHubService.getAccessToken(code);
+    const exchanged = await GitHubService.getAccessToken(code);
+    accessToken = exchanged.accessToken;
     
     // Get user information
     const userInfo = await GitHubService.getUserInfo(accessToken);
     
-    await connectionStore.put(userId, {
+    const record = {
       githubUserId: userInfo.id,
       login: userInfo.login,
       name: userInfo.name,
       avatarUrl: userInfo.avatar_url,
-      scopes: scope,
+      scopes: exchanged.scope,
       accessToken,
       connectedAt: new Date()
-    });
+    };
+    const completion = pendingCompletions.issue(userId, { record });
+    if (!completion) {
+      console.warn('GitHub OAuth callback error: too many pending connect completions');
+      await revokeQuietly(accessToken);
+      return redirectWithError(res, 'github_auth_failed');
+    }
     
-    // No token or JWT in the redirect: the client asks /api/github/status
-    redirectToClient(res, 'status=connected');
+    // Only the completion id travels to the browser; no token or JWT
+    redirectToClient(res, `complete=${completion}`);
     
   } catch (error) {
-    console.error(`GitHub OAuth callback error: ${error instanceof StoreUnavailableError ? 'connection store unavailable' : error.message}`);
+    console.error(`GitHub OAuth callback error: ${error.message}`);
+    // A token issued before the failure is never used: revoke it
+    await revokeQuietly(accessToken);
     redirectWithError(res, 'github_auth_failed');
   }
+});
+
+// Step 4 (authenticated): claim a completion. The only place a connection is stored,
+// and only for the user who obtained the ticket. Every other outcome discards the
+// result, and a token that will not be stored is revoked.
+app.post('/api/github/connect/complete', async (req, res) => {
+  const completion = readCompletion(req);
+  if (!completion) {
+    return res.status(400).json(INVALID_REQUEST_BODY);
+  }
+
+  // Single use: consumed whatever happens next
+  const entry = pendingCompletions.consumeEntry(completion);
+  if (!entry) {
+    return res.status(400).json(GITHUB_CONNECT_EXPIRED_BODY);
+  }
+  const { record } = entry.payload;
+
+  if (entry.userId !== req.user.id) {
+    await revokeQuietly(record.accessToken);
+    console.warn('github connect completion refused: account mismatch');
+    return res.status(403).json(GITHUB_CONNECT_MISMATCH_BODY);
+  }
+
+  let previous;
+  try {
+    previous = await connectionStore.get(req.user.id);
+    await connectionStore.put(req.user.id, record);
+  } catch (error) {
+    await revokeQuietly(record.accessToken);
+    if (error instanceof StoreUnavailableError) return sendStoreUnavailable(res);
+    console.error(`GitHub connect completion error: ${redactSecrets(error, [record.accessToken])}`);
+    return res.status(500).json({ error: 'Failed to connect GitHub' });
+  }
+
+  // Reconnecting replaced an older token: it is no longer used anywhere
+  if (previous && previous.accessToken !== record.accessToken) {
+    await revokeQuietly(previous.accessToken);
+  }
+
+  res.set('Cache-Control', 'no-store');
+  res.json({ connected: true, user: { login: record.login, name: record.name ?? null, avatarUrl: record.avatarUrl ?? null } });
+});
+
+// Public: lets the page burn a completion when nobody is signed in. Always 204, and the
+// revocation runs in the background, so the response never reveals whether the id existed.
+app.post('/auth/github/discard', (req, res) => {
+  const completion = readCompletion(req);
+  if (completion) {
+    const entry = pendingCompletions.consumeEntry(completion);
+    if (entry) void revokeQuietly(entry.payload?.record?.accessToken);
+  }
+  res.status(204).end();
 });
 
 // Connection status for the signed-in user. Makes no GitHub API call.
@@ -371,17 +487,12 @@ app.get('/api/github/status', async (req, res) => {
   }
 });
 
-// Disconnect: revoke the grant at GitHub (best effort), then always forget the token
+// Disconnect: revoke the token at GitHub (best effort), then always forget it
 app.delete('/api/github/connection', async (req, res) => {
   try {
     const connection = await connectionStore.get(req.user.id);
     if (connection) {
-      const revocation = await GitHubService.revokeGrant(connection.accessToken);
-      if (!revocation.ok) {
-        // Only the HTTP status (or "timeout" / "network error"); never the request
-        const reason = typeof revocation.status === 'number' ? `HTTP ${revocation.status}` : revocation.status;
-        console.warn(`grant revocation failed: ${reason}`);
-      }
+      await revokeQuietly(connection.accessToken);
       await connectionStore.delete(req.user.id);
     }
     res.status(204).end();

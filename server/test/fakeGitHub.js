@@ -43,6 +43,8 @@ export async function startFakeGitHub() {
   const issuedTokens = [];
   const issuedCodes = [];
   const revoked = new Set();
+  const tokenRevocations = []; // { authorization, body } for every DELETE /applications/:id/token
+  const grantCalls = []; // any call to the grant endpoint (must stay empty since B1.3b)
   const sockets = new Set();
   let revokeStatus = 204;
   let apiFailureStatus = null;
@@ -86,10 +88,19 @@ export async function startFakeGitHub() {
         return send(res, 200, { access_token: token, token_type: 'bearer', scope: GRANTED_SCOPE });
       }
 
-      // Grant revocation (Basic client_id:client_secret)
-      const grant = url.pathname.match(/^\/applications\/([^/]+)\/grant$/);
-      if (req.method === 'DELETE' && grant) {
+      // Single-token revocation (Basic client_id:client_secret)
+      const tokenRevocation = url.pathname.match(/^\/applications\/([^/]+)\/token$/);
+      if (req.method === 'DELETE' && tokenRevocation) {
+        tokenRevocations.push({ authorization: req.headers.authorization, body, clientId: decodeURIComponent(tokenRevocation[1]) });
         if (revokeStatus === 204 && body?.access_token) revoked.add(body.access_token);
+        return send(res, revokeStatus, revokeStatus === 204 ? undefined : { message: 'fake failure' });
+      }
+
+      // Whole-grant revocation: still answered and recorded, so tests can assert it is never used
+      const grant = url.pathname.match(/^\/applications\/([^/]+)\/grant$/);
+      if (grant) {
+        grantCalls.push({ method: req.method, authorization: req.headers.authorization, body });
+        if (req.method === 'DELETE' && revokeStatus === 204 && body?.access_token) revoked.add(body.access_token);
         return send(res, revokeStatus, revokeStatus === 204 ? undefined : { message: 'fake failure' });
       }
 
@@ -132,6 +143,12 @@ export async function startFakeGitHub() {
     requests,
     issuedTokens,
     issuedCodes,
+    tokenRevocations,
+    grantCalls,
+    // Tokens revoked through DELETE /applications/:id/token, in order
+    revokedViaTokenEndpoint() {
+      return tokenRevocations.map((r) => r.body?.access_token);
+    },
     // A one-time authorization code that the token exchange maps to `user`
     issueCode(user = GITHUB_USER_A) {
       const code = randomAlphanumeric(20);
@@ -146,6 +163,7 @@ export async function startFakeGitHub() {
     isRevoked(token) {
       return revoked.has(token);
     },
+    // Status for the revocation endpoints (/token, and /grant if anything calls it)
     setRevokeStatus(status) {
       revokeStatus = status;
     },

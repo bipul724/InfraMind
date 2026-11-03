@@ -406,3 +406,104 @@ describe('request log redaction', () => {
     assert.equal(redactUrl('/auth/github/callback?code=abc&state=def'), '/auth/github/callback?code=REDACTED&state=REDACTED');
   });
 });
+
+describe('one-time store with payloads (B1.3b connect completions)', () => {
+  const clock = () => {
+    let current = 5_000_000;
+    return { now: () => current, advance: (ms) => { current += ms; } };
+  };
+  const payloadFor = (n) => ({ record: { login: `user-${n}`, accessToken: `gho_test_${n}` } });
+
+  test('payload round trip through consumeEntry; consume never exposes the payload', () => {
+    const { now } = clock();
+    const store = createOneTimeTokenStore({ ttlMs: 1000, now });
+    const payload = payloadFor(1);
+    const withPayload = store.issue(USER_A, payload);
+    assert.match(withPayload, /^[0-9a-f]{64}$/);
+    assert.deepEqual(store.consumeEntry(withPayload), { userId: USER_A, payload });
+
+    const viaConsume = store.issue(USER_B, payloadFor(2));
+    assert.equal(store.consume(viaConsume), USER_B, 'consume returns only the user id');
+  });
+
+  test('single use: a consumed entry is gone for both consume methods', () => {
+    const store = createOneTimeTokenStore({ ttlMs: 1000 });
+    const first = store.issue(USER_A, payloadFor(1));
+    assert.ok(store.consumeEntry(first));
+    assert.equal(store.consumeEntry(first), null);
+    assert.equal(store.consume(first), null);
+
+    const second = store.issue(USER_A, payloadFor(2));
+    assert.equal(store.consume(second), USER_A);
+    assert.equal(store.consumeEntry(second), null);
+  });
+
+  test('expiry calls onExpire exactly once per entry, with its payload', () => {
+    const { now, advance } = clock();
+    const expired = [];
+    const store = createOneTimeTokenStore({ ttlMs: 1000, now, onExpire: (entry) => expired.push(entry) });
+    const tokens = [1, 2, 3].map((n) => store.issue(USER_A, payloadFor(n)));
+    advance(500);
+    const survivor = store.issue(USER_B, payloadFor(4));
+
+    store.sweep();
+    assert.equal(expired.length, 0, 'nothing has expired yet');
+
+    advance(500); // the first three reach their expiry; the survivor has 500 ms left
+    store.sweep();
+    assert.deepEqual(expired.map((e) => e.payload.record.login).sort(), ['user-1', 'user-2', 'user-3']);
+    assert.ok(expired.every((e) => e.userId === USER_A));
+
+    store.sweep();
+    store.issue(USER_A, payloadFor(5));
+    for (const token of tokens) assert.equal(store.consumeEntry(token), null);
+    assert.equal(expired.length, 3, 'no entry is reported twice');
+
+    advance(500);
+    assert.equal(store.consumeEntry(survivor), null, 'consuming an expired entry fails...');
+    assert.equal(expired.filter((e) => e.payload.record.login === 'user-4').length, 1, '...and reports it once');
+  });
+
+  test('consumed entries are never reported as expired', () => {
+    const { now, advance } = clock();
+    const expired = [];
+    const store = createOneTimeTokenStore({ ttlMs: 1000, now, onExpire: (entry) => expired.push(entry) });
+    const token = store.issue(USER_A, payloadFor(1));
+    assert.ok(store.consumeEntry(token));
+    advance(5000);
+    store.sweep();
+    assert.deepEqual(expired, []);
+  });
+
+  test('a throwing onExpire does not stop the sweep', () => {
+    const { now, advance } = clock();
+    let calls = 0;
+    const store = createOneTimeTokenStore({ ttlMs: 1000, now, onExpire: () => { calls++; throw new Error('boom'); } });
+    store.issue(USER_A, payloadFor(1));
+    store.issue(USER_A, payloadFor(2));
+    advance(1000);
+    store.sweep();
+    assert.equal(calls, 2);
+    assert.equal(store.size, 0);
+  });
+
+  test('the bound is still enforced with payloads; expiry frees room and reports the entries', () => {
+    const { now, advance } = clock();
+    const expired = [];
+    const store = createOneTimeTokenStore({ ttlMs: 1000, maxEntries: 1000, now, onExpire: (entry) => expired.push(entry) });
+    for (let i = 0; i < 1000; i++) assert.ok(store.issue(USER_A, payloadFor(i)));
+    assert.equal(store.issue(USER_A, payloadFor('x')), null, 'entry 1,001 with nothing expired is refused');
+    assert.equal(expired.length, 0);
+    advance(1000);
+    assert.ok(store.issue(USER_A, payloadFor('y')));
+    assert.equal(expired.length, 1000);
+    assert.equal(store.size, 1);
+  });
+});
+
+describe('request log redaction (B1.3b)', () => {
+  test('the completion id is redacted', () => {
+    const completion = crypto.randomBytes(32).toString('hex');
+    assert.equal(redactUrl(`/auth/success?complete=${completion}`), '/auth/success?complete=REDACTED');
+  });
+});

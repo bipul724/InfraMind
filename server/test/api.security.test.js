@@ -136,7 +136,7 @@ describe('authenticated clone path (repositoryData)', () => {
   test('path traversal and a local cloneUrl are rejected before anything touches disk or GitHub', async () => {
     // A real stored connection, so only input validation can stop this request
     const connected = await connectGitHubFor(server, fakes.tokens.A);
-    assert.equal(connected.location, 'http://localhost:5173/auth/success?status=connected');
+    assert.equal(connected.claim.status, 200, 'connected through the B1.3b claim step');
     const githubRequestsBefore = fakes.github.requests.length;
 
     const fixtureParent = await makeTempDir('inframind-fixture-');

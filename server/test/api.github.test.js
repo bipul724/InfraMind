@@ -1,4 +1,4 @@
-// Integration tests for B1.3: server-side GitHub connections.
+// Integration tests for B1.3 and B1.3b: server-side GitHub connections and the claim step.
 // Spawned servers + fake Supabase (with PostgREST) + fake GitHub, fully offline.
 
 import { describe, test, before, after } from 'node:test';
@@ -11,6 +11,7 @@ import {
   allCapturedLogs,
   authHeaders,
   closeFakes,
+  claimCompletion,
   connectGitHubFor,
   cookieHeaderFrom,
   getFakes,
@@ -20,6 +21,7 @@ import {
   randomAlphanumeric,
   randomSecret,
   runServerExpectingExit,
+  startConnectFlow,
   startServer
 } from './helpers.js';
 import { GITHUB_USER_A, GITHUB_USER_B, GRANTED_SCOPE } from './fakeGitHub.js';
@@ -27,7 +29,8 @@ import { FAKE_SERVICE_KEY } from './fakePostgrest.js';
 import { buildCloneArgs } from '../utils/git.js';
 
 const CLIENT = 'http://localhost:5173';
-const CONNECTED_LOCATION = `${CLIENT}/auth/success?status=connected`;
+// B1.3b: the callback delivers only a one-time completion id, claimed by the client
+const COMPLETE_LOCATION = /^http:\/\/localhost:5173\/auth\/success\?complete=[0-9a-f]{64}$/;
 const errorLocation = (code) => `${CLIENT}/auth/success?error=${code}`;
 const GITHUB_AUTH_REQUIRED_BODY = { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' };
 const GITHUB_AUTH_INVALID_BODY = { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' };
@@ -71,10 +74,18 @@ async function request(baseUrl, method, route, { headers = {}, body } = {}) {
 
 const status = (server, user) => request(server.baseUrl, 'GET', '/api/github/status', { headers: user.auth });
 
+// Full flow including the claim by the same user
 async function connect(server, user, options) {
   const result = await connectGitHubFor(server, user.token, options);
-  remember(result.ticket, result.state, result.code);
-  return { ...result, accessToken: fakes.github.issuedTokens.at(-1) };
+  remember(result.ticket, result.state, result.code, result.completion);
+  return result;
+}
+
+// Flow up to the callback only; the completion is left unclaimed
+async function startFlowFor(server, ticketOwner, options) {
+  const result = await startConnectFlow(server, ticketOwner.token, options);
+  remember(result.ticket, result.state, result.code, result.completion);
+  return result;
 }
 
 // Start a flow up to the GitHub redirect (ticket consumed, state cookie issued)
@@ -116,9 +127,8 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     userB = newUser();
   });
 
-  test('1. connect: the callback redirects to /auth/success?status=connected with no token', async () => {
-    const result = await connect(server, userA);
-    connectedA = result;
+  test('1. connect: the callback stores nothing and redirects with only a completion id; the claim stores it', async () => {
+    const result = await startFlowFor(server, userA);
 
     assert.equal(result.startStatus, 302);
     assert.equal(`${result.authorizeUrl.origin}${result.authorizeUrl.pathname}`, `${fakes.github.url}/login/oauth/authorize`);
@@ -128,10 +138,24 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     assert.match(result.cookie, /^oauth_state=[0-9a-f]{64}$/);
 
     assert.equal(result.callbackStatus, 302);
-    assert.equal(result.location, CONNECTED_LOCATION);
+    assert.match(result.location, COMPLETE_LOCATION);
     assertNoSecretShapes(result.location, 'callback Location');
     assert.ok(result.callbackSetCookie.some((c) => /^oauth_state=;/.test(c)), 'the state cookie is cleared');
     assert.match(result.accessToken, /^gho_/);
+
+    // Nothing is stored before the claim
+    assert.deepEqual((await status(server, userA)).json, { connected: false });
+
+    const claim = await claimCompletion(server, userA.token, result.completion);
+    assert.equal(claim.status, 200, claim.text);
+    assert.deepEqual(claim.json, {
+      connected: true,
+      user: { login: GITHUB_USER_A.login, name: GITHUB_USER_A.name, avatarUrl: GITHUB_USER_A.avatar_url }
+    });
+    assert.equal(claim.headers.get('cache-control'), 'no-store');
+    assertNoSecretShapes(claim.text, 'claim body');
+    assert.ok(!claim.text.includes(result.completion));
+    connectedA = result;
   });
 
   test('1. status: A is connected (from the stored record), B is not, and no GitHub call is made', async () => {
@@ -281,12 +305,14 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     code = fakes.github.issueCode(GITHUB_USER_A);
     remember(code);
     const success = await callback(server, `code=${code}&state=${flow.state}`, flow.cookie);
-    assert.equal(success.location, CONNECTED_LOCATION);
+    assert.match(success.location, COMPLETE_LOCATION);
+    remember(new URL(success.location).searchParams.get('complete'));
     const replay = await callback(server, `code=${code}&state=${flow.state}`, flow.cookie);
     assert.equal(replay.location, errorLocation('invalid_state'));
+    assert.deepEqual((await status(server, user)).json, { connected: false }, 'an unclaimed callback stores nothing');
   });
 
-  test('5. cross-user binding: a flow started with X\'s ticket is stored under X even if B finishes it', async () => {
+  test('5. linking CSRF: a flow started with X\'s ticket and finished in B\'s browser connects nobody', async () => {
     const userX = newUser();
     const ticketResponse = await request(server.baseUrl, 'POST', '/api/github/connect', { headers: userX.auth });
     const { ticket } = ticketResponse.json;
@@ -305,15 +331,19 @@ describe('connect flow, status, listing and binding (memory store)', () => {
       headers: { ...userB.auth, Cookie: cookieHeaderFrom(start) }
     });
     assert.equal(fakes.supabase.callCount, supabaseCalls, '/auth/github* never reads a Supabase token');
-    assert.equal(done.headers.get('location'), CONNECTED_LOCATION);
+    assert.match(done.headers.get('location'), COMPLETE_LOCATION);
+    const completion = new URL(done.headers.get('location')).searchParams.get('complete');
+    remember(completion);
 
-    const x = await status(server, userX);
-    assert.equal(x.json.connected, true);
-    assert.equal(x.json.user.login, GITHUB_USER_B.login);
+    // B's page claims it as B: refused, and nothing is stored for anyone
+    const claim = await claimCompletion(server, userB.token, completion);
+    assert.equal(claim.status, 403);
+    assert.equal(claim.json.code, 'GITHUB_CONNECT_MISMATCH');
+    assert.deepEqual((await status(server, userX)).json, { connected: false });
     assert.deepEqual((await status(server, userB)).json, { connected: false });
   });
 
-  test('6. disconnect revokes the grant, deletes the record and is idempotent', async () => {
+  test('6. disconnect revokes the single token, deletes the record and is idempotent', async () => {
     const user = newUser();
     const { accessToken } = await connect(server, user);
     const otherUser = newUser();
@@ -327,7 +357,7 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     const revocations = fakes.github.requestsSince(start).filter((r) => r.method === 'DELETE');
     assert.equal(revocations.length, 1);
     const [revocation] = revocations;
-    assert.equal(revocation.path, `/applications/${server.env.GITHUB_CLIENT_ID}/grant`);
+    assert.equal(revocation.path, `/applications/${server.env.GITHUB_CLIENT_ID}/token`);
     const expectedBasic = Buffer.from(`${server.env.GITHUB_CLIENT_ID}:${server.env.GITHUB_CLIENT_SECRET}`).toString('base64');
     assert.equal(revocation.headers.authorization, `Basic ${expectedBasic}`);
     assert.deepEqual(revocation.body, { access_token: accessToken });
@@ -335,6 +365,9 @@ describe('connect flow, status, listing and binding (memory store)', () => {
 
     assert.deepEqual((await status(server, user)).json, { connected: false });
     assert.equal((await status(server, otherUser)).json.connected, true, "another user's connection is untouched");
+    // Both users connected the same GitHub account: the other user's token still works
+    const otherListing = await request(server.baseUrl, 'GET', '/api/github/repositories', { headers: otherUser.auth });
+    assert.equal(otherListing.status, 200);
 
     const again = fakes.github.requests.length;
     const second = await request(server.baseUrl, 'DELETE', '/api/github/connection', { headers: user.auth });
@@ -355,7 +388,7 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     }
     assert.deepEqual((await status(server, user)).json, { connected: false });
     const newLogs = server.logs().slice(logStart);
-    assert.ok(newLogs.includes('grant revocation failed: HTTP 500'), newLogs);
+    assert.ok(newLogs.includes('token revocation failed: HTTP 500'), newLogs);
   });
 
   test('7. a token revoked at GitHub: the next call is GITHUB_AUTH_INVALID and the connection is dropped', async () => {
@@ -430,6 +463,227 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     const logs = server.logs();
     assert.ok(logs.includes('/auth/github?ticket=REDACTED'), 'ticket is redacted');
     assert.ok(/\/auth\/github\/callback\?code=REDACTED&state=REDACTED/.test(logs), 'code and state are redacted');
+  });
+});
+
+async function waitFor(predicate, timeoutMs = 3000, label = 'condition') {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+const MISMATCH_BODY = {
+  error: 'This GitHub connection was started from a different InfraMind account. Nothing was connected. Please connect GitHub again.',
+  code: 'GITHUB_CONNECT_MISMATCH'
+};
+const EXPIRED_BODY = { error: 'The connection link expired. Please connect GitHub again.', code: 'GITHUB_CONNECT_EXPIRED' };
+const discard = (server, body) => request(server.baseUrl, 'POST', '/auth/github/discard', { body });
+
+describe('B1.3b claim step (memory store)', () => {
+  let server;
+  before(async () => { server = await launch(); });
+
+  test('2. linking CSRF regression: the victim\'s token is never stored for the attacker, and is revoked', async () => {
+    const attacker = newUser();
+    const victim = newUser();
+    const stderrStart = server.output.stderr.length;
+    const stdoutStart = server.output.stdout.length;
+
+    // The attacker obtains a ticket; the victim's browser finishes the flow with the victim's GitHub account
+    const flow = await startFlowFor(server, attacker, { githubUser: GITHUB_USER_B, callbackHeaders: victim.auth });
+    assert.match(flow.location, COMPLETE_LOCATION);
+    assert.match(flow.accessToken, /^gho_/);
+
+    const claim = await claimCompletion(server, victim.token, flow.completion);
+    assert.equal(claim.status, 403);
+    assert.deepEqual(claim.json, MISMATCH_BODY);
+    for (const leak of [attacker.id, attacker.email, attacker.token, GITHUB_USER_B.login, flow.accessToken, flow.completion]) {
+      assert.ok(!claim.text.includes(leak), 'the mismatch response reveals nothing about either account');
+    }
+
+    assert.ok(fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), "the victim's token was revoked via /token");
+    assert.deepEqual((await status(server, attacker)).json, { connected: false });
+    assert.deepEqual((await status(server, victim)).json, { connected: false });
+    const attackerListing = await request(server.baseUrl, 'GET', '/api/github/repositories', { headers: attacker.auth });
+    assert.equal(attackerListing.status, 401);
+    assert.deepEqual(attackerListing.json, GITHUB_AUTH_REQUIRED_BODY);
+
+    const newLogs = `${server.output.stdout.slice(stdoutStart)}\n${server.output.stderr.slice(stderrStart)}`;
+    assert.ok(newLogs.includes('github connect completion refused: account mismatch'));
+    for (const leak of [attacker.id, attacker.email, victim.id, victim.email, GITHUB_USER_B.login]) {
+      assert.ok(!newLogs.includes(leak), 'the mismatch log names nobody');
+    }
+  });
+
+  test('3. single use: a second claim, or a claim after a mismatch, is GITHUB_CONNECT_EXPIRED', async () => {
+    const owner = newUser();
+    const flow = await startFlowFor(server, owner);
+    assert.equal((await claimCompletion(server, owner.token, flow.completion)).status, 200);
+    const second = await claimCompletion(server, owner.token, flow.completion);
+    assert.equal(second.status, 400);
+    assert.deepEqual(second.json, EXPIRED_BODY);
+
+    // A mismatch burns the completion: the rightful owner cannot claim it afterwards
+    const owner2 = newUser();
+    const stranger = newUser();
+    const flow2 = await startFlowFor(server, owner2);
+    assert.equal((await claimCompletion(server, stranger.token, flow2.completion)).status, 403);
+    const late = await claimCompletion(server, owner2.token, flow2.completion);
+    assert.equal(late.status, 400);
+    assert.deepEqual(late.json, EXPIRED_BODY);
+    assert.deepEqual((await status(server, owner2)).json, { connected: false });
+
+    const unknown = await claimCompletion(server, owner.token, crypto.randomBytes(32).toString('hex'));
+    assert.deepEqual(unknown.json, EXPIRED_BODY);
+  });
+
+  test('5. discard: a live completion is burned and revoked; unknown, garbage and bad bodies are 204 with no revocation', async () => {
+    const owner = newUser();
+    const flow = await startFlowFor(server, owner);
+    const live = await discard(server, { completion: flow.completion });
+    assert.equal(live.status, 204);
+    assert.equal(live.text, '');
+    await waitFor(() => fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 3000, 'the discard revocation');
+    const claim = await claimCompletion(server, owner.token, flow.completion);
+    assert.equal(claim.status, 400);
+    assert.deepEqual(claim.json, EXPIRED_BODY);
+
+    const revocationsBefore = fakes.github.tokenRevocations.length;
+    const responses = [];
+    for (const body of [
+      { completion: crypto.randomBytes(32).toString('hex') }, // unknown
+      { completion: 'garbage' },
+      { completion: 42 },
+      {},
+      [flow.completion]
+    ]) {
+      responses.push(await discard(server, body));
+    }
+    for (const response of responses) {
+      assert.equal(response.status, 204);
+      assert.equal(response.text, '');
+    }
+    // Unknown and live ids answer byte-for-byte the same
+    assert.equal(responses[0].headers.get('content-length'), live.headers.get('content-length'));
+
+    const malformed = await fetch(`${server.baseUrl}/auth/github/discard`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{bad' });
+    assert.equal(malformed.status, 400, 'malformed JSON is rejected by the global JSON parser, as for every route');
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(fakes.github.tokenRevocations.length, revocationsBefore, 'no revocation for unknown or invalid ids');
+  });
+
+  test('8. reconnecting replaces the connection and revokes only the old token', async () => {
+    const user = newUser();
+    const first = await connect(server, user, { githubUser: GITHUB_USER_A });
+    assert.equal(first.claim.status, 200);
+    const revocationsBefore = fakes.github.tokenRevocations.length;
+
+    const second = await connect(server, user, { githubUser: GITHUB_USER_B });
+    assert.equal(second.claim.status, 200);
+    assert.notEqual(first.accessToken, second.accessToken);
+
+    assert.equal((await status(server, user)).json.user.login, GITHUB_USER_B.login);
+    const revoked = fakes.github.tokenRevocations.slice(revocationsBefore).map((r) => r.body.access_token);
+    assert.deepEqual(revoked, [first.accessToken], 'exactly the old token was revoked');
+
+    const listing = await request(server.baseUrl, 'GET', '/api/github/repositories', { headers: user.auth });
+    assert.equal(listing.status, 200, 'the new token works');
+  });
+
+  test('9. revocation uses /applications/:client_id/token with Basic auth and the token', async () => {
+    const user = newUser();
+    const { accessToken } = await connect(server, user);
+    const before = fakes.github.tokenRevocations.length;
+    assert.equal((await request(server.baseUrl, 'DELETE', '/api/github/connection', { headers: user.auth })).status, 204);
+    const [revocation] = fakes.github.tokenRevocations.slice(before);
+    assert.equal(revocation.clientId, server.env.GITHUB_CLIENT_ID);
+    const expectedBasic = Buffer.from(`${server.env.GITHUB_CLIENT_ID}:${server.env.GITHUB_CLIENT_SECRET}`).toString('base64');
+    assert.equal(revocation.authorization, `Basic ${expectedBasic}`);
+    assert.deepEqual(revocation.body, { access_token: accessToken });
+  });
+
+  test('10. a getUserInfo failure after the code exchange revokes the issued token', async () => {
+    const user = newUser();
+    fakes.github.failApiWith(500);
+    let flow;
+    try {
+      flow = await startFlowFor(server, user);
+    } finally {
+      fakes.github.failApiWith(null);
+    }
+    assert.equal(flow.location, errorLocation('github_auth_failed'));
+    assert.match(flow.accessToken, /^gho_/, 'the code exchange did issue a token');
+    assert.ok(fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken));
+    assert.deepEqual((await status(server, user)).json, { connected: false });
+  });
+
+  test('11. a completion id in a server URL is logged as complete=REDACTED', async () => {
+    const completion = crypto.randomBytes(32).toString('hex');
+    remember(completion);
+    await fetch(`${server.baseUrl}/auth/success?complete=${completion}`);
+    // The request log line is written when the response finishes
+    await waitFor(() => server.logs().includes('/auth/success?complete=REDACTED'), 3000, 'the redacted request log line');
+    assert.ok(!server.logs().includes(completion));
+  });
+
+  test('12. CORS allows the claim and the discard from the client origin', async () => {
+    for (const route of ['/api/github/connect/complete', '/auth/github/discard']) {
+      const response = await fetch(`${server.baseUrl}${route}`, {
+        method: 'OPTIONS',
+        headers: { Origin: CLIENT, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization' }
+      });
+      assert.equal(response.status, 204, route);
+      assert.equal(response.headers.get('access-control-allow-origin'), CLIENT);
+      const methods = (response.headers.get('access-control-allow-methods') || '').split(',');
+      assert.ok(methods.includes('POST'), route);
+      const allowed = (response.headers.get('access-control-allow-headers') || '').toLowerCase().split(',').map((h) => h.trim());
+      assert.ok(allowed.includes('content-type') && allowed.includes('authorization'), allowed.join(','));
+      assert.ok(!allowed.includes('x-github-token'));
+    }
+  });
+});
+
+describe('4. completion expiry (GITHUB_CONNECT_COMPLETION_TTL_MS=1000)', () => {
+  let server;
+  before(async () => { server = await launch({ envOverrides: { GITHUB_CONNECT_COMPLETION_TTL_MS: '1000' } }); });
+
+  test('an expired completion is revoked by the next sweep and can no longer be claimed', async () => {
+    const user = newUser();
+    const flow = await startFlowFor(server, user);
+    assert.match(flow.location, COMPLETE_LOCATION);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.ok(!fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 'not revoked before any sweep');
+
+    // Any access to the completion store sweeps it: here an unrelated discard. The
+    // test never sends this completion id anywhere before the revocation is seen.
+    assert.ok(!server.output.stdout.includes('github connect completion expired'));
+    assert.equal((await discard(server, { completion: crypto.randomBytes(32).toString('hex') })).status, 204);
+    await waitFor(() => fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 3000, 'the expiry revocation');
+    await waitFor(() => server.output.stdout.includes('github connect completion expired'), 3000, 'the expiry log line');
+
+    const claim = await claimCompletion(server, user.token, flow.completion);
+    assert.equal(claim.status, 400);
+    assert.deepEqual(claim.json, EXPIRED_BODY);
+    assert.deepEqual((await status(server, user)).json, { connected: false });
+  });
+
+  test('an out-of-range TTL falls back to 5 minutes with a warning', async () => {
+    const tuned = await launch({ envOverrides: { GITHUB_CONNECT_COMPLETION_TTL_MS: '999' } });
+    assert.ok(tuned.logs().includes('GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer from 1000 to 300000; using the default'));
+    const user = newUser();
+    const flow = await startFlowFor(tuned, user);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal((await claimCompletion(tuned, user.token, flow.completion)).status, 200, 'still valid after 1.1 s');
+  });
+
+  test('an invalid TTL is reported without its value', async () => {
+    const value = `ttl-${randomAlphanumeric(12)}`;
+    const tuned = await launch({ envOverrides: { GITHUB_CONNECT_COMPLETION_TTL_MS: value } });
+    assert.ok(tuned.logs().includes('GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer'));
+    assert.ok(!tuned.logs().includes(value));
   });
 });
 
@@ -517,6 +771,7 @@ describe('8. clone path with a stored connection (offline: git goes through an u
 
 describe('10. supabase store: works end to end, and an outage never fails open', () => {
   let server;
+  let otherAfterOutage;
   before(async () => {
     server = await launch({ envOverrides: { GITHUB_TOKEN_STORE: 'supabase', SUPABASE_SERVICE_ROLE_KEY: FAKE_SERVICE_KEY } });
   });
@@ -525,8 +780,9 @@ describe('10. supabase store: works end to end, and an outage never fails open',
   test('a connection is stored as ciphertext only, with the service key, and read back', async () => {
     const user = newUser();
     const requestStart = fakes.postgrest.requests.length;
-    const { accessToken, location } = await connect(server, user);
-    assert.equal(location, CONNECTED_LOCATION);
+    const { accessToken, location, claim } = await connect(server, user);
+    assert.match(location, COMPLETE_LOCATION);
+    assert.equal(claim.status, 200, claim.text);
 
     const row = fakes.postgrest.rows.get(user.id);
     assert.ok(row, 'a row exists for the user');
@@ -548,7 +804,7 @@ describe('10. supabase store: works end to end, and an outage never fails open',
     assert.equal(fakes.postgrest.rows.has(user.id), false);
   });
 
-  test('PostgREST 500: status, listing, clone and disconnect are 503; the callback reports github_auth_failed', async () => {
+  test('PostgREST 500: status, listing, clone, disconnect and the claim are 503; nothing fails open', async () => {
     const user = newUser();
     const { accessToken } = await connect(server, user);
     for (const recorded of fakes.postgrest.requests) {
@@ -573,13 +829,48 @@ describe('10. supabase store: works end to end, and an outage never fails open',
       assert.equal(fakes.github.requests.length, githubRequests, 'no GitHub call is made without the store');
       assert.ok(!fakes.github.isRevoked(accessToken), 'disconnect did not pretend to succeed');
 
+      // B1.3b: the callback no longer touches the store; the claim does (F.3.7)
       const other = newUser();
-      const result = await connect(server, other);
-      assert.equal(result.location, errorLocation('github_auth_failed'));
+      const flow = await startFlowFor(server, other);
+      assert.match(flow.location, COMPLETE_LOCATION);
+      const claim = await claimCompletion(server, other.token, flow.completion);
+      assert.equal(claim.status, 503);
+      assert.deepEqual(claim.json, STORE_UNAVAILABLE_BODY);
+      assert.ok(fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 'the unstored token was revoked');
+      assert.ok(fakes.github.isRevoked(flow.accessToken));
+      otherAfterOutage = other;
     } finally {
       fakes.postgrest.setMode('ok');
     }
     assert.equal((await status(server, user)).json.connected, true, 'the outage did not delete the connection');
+    assert.deepEqual((await status(server, otherAfterOutage)).json, { connected: false }, 'nothing was stored for the claim that failed');
+  });
+
+  test('6. claim validation: anonymous is 401; malformed completions are 400 INVALID_REQUEST with no store or GitHub call', async () => {
+    const user = newUser();
+    const anonymous = await claimCompletion(server, null, crypto.randomBytes(32).toString('hex'));
+    assert.equal(anonymous.status, 401);
+    assert.deepEqual(anonymous.json, { error: 'Authentication required', code: 'AUTH_REQUIRED' });
+
+    const storeRequests = fakes.postgrest.requests.length;
+    const githubRequests = fakes.github.requests.length;
+    const hex = crypto.randomBytes(32).toString('hex');
+    for (const body of [
+      {},
+      { completion: null },
+      { completion: 42 },
+      { completion: [hex] },
+      { completion: hex.slice(0, 63) },
+      { completion: `${hex}0` },
+      { completion: 'g'.repeat(64) },
+      { completion: `${hex.slice(0, 62)} ` }
+    ]) {
+      const response = await request(server.baseUrl, 'POST', '/api/github/connect/complete', { headers: user.auth, body });
+      assert.equal(response.status, 400, JSON.stringify(body));
+      assert.deepEqual(response.json, { error: 'Invalid request', code: 'INVALID_REQUEST' });
+    }
+    assert.equal(fakes.postgrest.requests.length, storeRequests, 'no store call');
+    assert.equal(fakes.github.requests.length, githubRequests, 'no GitHub call');
   });
 });
 
@@ -657,12 +948,16 @@ describe('13. NEW-01: .env is loaded before modules read the GitHub configuratio
 });
 
 // Runs last: covers every server spawned in this file
-test('11. no log contains a GitHub token, ciphertext, ticket, state, code, encryption key or service key', async () => {
+test('11. no log contains a GitHub token, ciphertext, ticket, state, code, completion id, encryption key or service key; no /grant call', async () => {
   for (const server of servers) await server.stop();
   remember(...fakes.github.issuedTokens, ...fakes.github.issuedCodes, FAKE_SERVICE_KEY);
   assert.ok(fakes.github.issuedTokens.length >= 5);
   assert.ok(secrets.size >= 20, `collected ${secrets.size} secrets`);
   assert.ok(allCapturedLogs.length >= servers.length);
+
+  assert.equal(fakes.github.grantCalls.length, 0, 'nothing ever calls the /grant endpoint');
+  assert.ok(!fakes.github.requests.some((r) => r.path.endsWith('/grant')));
+  assert.ok(fakes.github.tokenRevocations.length >= 5, 'revocations went through /token');
 
   for (const { output } of allCapturedLogs) {
     const text = `${output.stdout}\n${output.stderr}`;

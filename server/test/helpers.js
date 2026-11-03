@@ -238,30 +238,41 @@ export function cookieHeaderFrom(response) {
   return response.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ');
 }
 
-// Run the full connect flow (prompt D.2) for the Supabase user holding userToken:
-// POST /api/github/connect -> GET /auth/github?ticket -> fake GitHub code -> callback.
-// Options let tests complete the flow from another browser or tamper with any step.
-export async function connectGitHubFor(server, userToken, {
+// Run the connect flow up to and including the OAuth callback, for the Supabase user
+// holding ticketOwnerToken: POST /api/github/connect -> GET /auth/github?ticket ->
+// fake GitHub code -> callback. Stops there and returns the callback's Location and
+// the completion id it carries, so a test can claim as anyone (or not at all).
+// Options let tests finish the flow from another browser or tamper with any step.
+export async function startConnectFlow(server, ticketOwnerToken, {
   githubUser = GITHUB_USER_A,
   completeWithCookie,
-  callbackQuery
+  callbackQuery,
+  callbackHeaders = {}
 } = {}) {
   const { github } = await getFakes();
-  const connect = await fetch(`${server.baseUrl}/api/github/connect`, { method: 'POST', headers: authHeaders(userToken) });
+  const connect = await fetch(`${server.baseUrl}/api/github/connect`, { method: 'POST', headers: authHeaders(ticketOwnerToken) });
   if (connect.status !== 200) throw new Error(`connect failed with HTTP ${connect.status}`);
   const { ticket } = await connect.json();
 
-  const start = await fetch(`${server.baseUrl}/auth/github?ticket=${encodeURIComponent(ticket)}`, { redirect: 'manual' });
+  const start = await fetch(`${server.baseUrl}/auth/github?ticket=${encodeURIComponent(ticket)}`, { redirect: 'manual', headers: callbackHeaders });
   const authorizeUrl = new URL(start.headers.get('location'));
   const state = authorizeUrl.searchParams.get('state');
   const cookie = cookieHeaderFrom(start);
   const code = github.issueCode(githubUser);
+  const tokensBefore = github.issuedTokens.length;
 
   const query = callbackQuery ?? `code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
   const callback = await fetch(`${server.baseUrl}/auth/github/callback?${query}`, {
     redirect: 'manual',
-    headers: { Cookie: completeWithCookie ?? cookie }
+    headers: { ...callbackHeaders, Cookie: completeWithCookie ?? cookie }
   });
+  const location = callback.headers.get('location');
+  let completion = null;
+  try {
+    completion = new URL(location).searchParams.get('complete');
+  } catch {
+    // no Location
+  }
 
   return {
     ticket,
@@ -271,7 +282,35 @@ export async function connectGitHubFor(server, userToken, {
     startStatus: start.status,
     authorizeUrl,
     callbackStatus: callback.status,
-    location: callback.headers.get('location'),
+    location,
+    completion,
+    // The GitHub token issued by this flow's code exchange, if one was issued
+    accessToken: github.issuedTokens.length > tokensBefore ? github.issuedTokens.at(-1) : null,
     callbackSetCookie: callback.headers.getSetCookie()
   };
+}
+
+// POST /api/github/connect/complete as the user holding userToken (or anonymously with null)
+export async function claimCompletion(server, userToken, completion) {
+  const headers = { 'Content-Type': 'application/json', ...(userToken ? authHeaders(userToken) : {}) };
+  const response = await fetch(`${server.baseUrl}/api/github/connect/complete`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ completion })
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // not JSON
+  }
+  return { status: response.status, text, json, headers: response.headers };
+}
+
+// The full connect flow, including the claim by the same user who obtained the ticket
+export async function connectGitHubFor(server, userToken, options = {}) {
+  const flow = await startConnectFlow(server, userToken, options);
+  const claim = flow.completion ? await claimCompletion(server, userToken, flow.completion) : null;
+  return { ...flow, claim };
 }

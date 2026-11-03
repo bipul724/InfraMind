@@ -125,8 +125,9 @@ class Logger {
 export const logger = new Logger();
 
 // OAuth callbacks carry authorization codes, state and tokens in the query string,
-// and /auth/github carries the one-time connect ticket; never write those values to logs
-const SENSITIVE_QUERY_PARAMS = ['code', 'state', 'token', 'access_token', 'ticket'];
+// /auth/github carries the one-time connect ticket and /auth/success the one-time
+// completion id; never write those values to logs
+const SENSITIVE_QUERY_PARAMS = ['code', 'state', 'token', 'access_token', 'ticket', 'complete'];
 
 export const redactUrl = (url = '') => {
   const queryStart = url.indexOf('?');
