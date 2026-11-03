@@ -7,45 +7,63 @@
  * Purpose:
  * - Connect to user's GitHub account for repository access
  * - Fetch user's repositories and organizations
- * - Clone repositories for AI analysis
- * - Handle GitHub API interactions
+ * - Check repository access before cloning
+ * - Revoke the OAuth grant when a user disconnects
  * 
  * Authentication Flow:
  * 1. User logs in via Supabase (email/password or OAuth)
  * 2. User connects GitHub account through this service for repo access
- * 3. GitHub token is used for repository operations only
+ * 3. The GitHub token is stored encrypted on the server (utils/githubConnections.js)
+ *    and is used for repository operations only
  * 
- * Environment Variables Required:
+ * Environment Variables:
  * - GITHUB_CLIENT_ID: GitHub OAuth app client ID
  * - GITHUB_CLIENT_SECRET: GitHub OAuth app client secret  
  * - GITHUB_REDIRECT_URI: OAuth callback URL
- * - JWT_SECRET: For signing GitHub session tokens
+ * - GITHUB_OAUTH_BASE_URL (optional): default https://github.com
+ * - GITHUB_API_BASE_URL (optional): default https://api.github.com
+ *   Both exist so the OAuth flow can be tested against local fakes. They never
+ *   influence the git clone URL, which is always https://github.com/{owner}/{repo}.git
  */
 
 import axios from 'axios';
-import jwt from 'jsonwebtoken';
+import { describeServiceUrlProblem } from './utils/auth.js';
 
 // Axios errors carry the request config (client secret, auth code, access token),
 // so log only the message and HTTP status
 const describeError = (error) =>
   `${error.message}${error.response ? ` (HTTP ${error.response.status})` : ''}`;
 
-// Placeholder values shipped in docs and examples; never acceptable as a real secret
-export const JWT_SECRET_PLACEHOLDERS = [
-  'your-jwt-secret-change-in-production',
-  'your-jwt-secret-for-github-sessions',
-  'your_jwt_secret_here'
-];
-export const MIN_JWT_SECRET_LENGTH = 32;
+export const DEFAULT_GITHUB_OAUTH_BASE_URL = 'https://github.com';
+export const DEFAULT_GITHUB_API_BASE_URL = 'https://api.github.com';
+const REVOKE_TIMEOUT_MS = 5000;
 
-// Returns a short description of what is wrong with the secret, or null if it is usable.
-// Never includes the value itself.
-export function describeJwtSecretProblem(secret) {
-  if (typeof secret !== 'string' || secret.length === 0) return 'is not set';
-  if (JWT_SECRET_PLACEHOLDERS.includes(secret)) return 'is set to a known placeholder value';
-  if (secret.length < MIN_JWT_SECRET_LENGTH) return `is shorter than ${MIN_JWT_SECRET_LENGTH} characters`;
-  return null;
+const warnedInvalidBaseUrls = new Set();
+
+// Reads an optional base URL override. An invalid value falls back to the default
+// with a warning that names the variable but never prints the value.
+function resolveBaseUrl(name, fallback) {
+  const value = process.env[name];
+  if (value === undefined || value === '') return fallback;
+  const problem = describeServiceUrlProblem(value);
+  if (problem) {
+    if (!warnedInvalidBaseUrls.has(name)) {
+      warnedInvalidBaseUrls.add(name);
+      console.warn(`⚠️ ${name} ${problem}; using the default`);
+    }
+    return fallback;
+  }
+  return value.replace(/\/+$/, '');
 }
+
+// GitHub answers 401 for a revoked or expired token
+function unauthorizedError() {
+  const unauthorized = new Error('GitHub token is invalid or expired');
+  unauthorized.code = 'GITHUB_UNAUTHORIZED';
+  return unauthorized;
+}
+
+const isUnauthorized = (error) => error?.response?.status === 401;
 
 class GitHubService {
   // Configuration is read lazily so it always reflects the loaded environment,
@@ -62,13 +80,12 @@ class GitHubService {
     return process.env.GITHUB_REDIRECT_URI;
   }
 
-  get jwtSecret() {
-    const secret = process.env.JWT_SECRET;
-    const problem = describeJwtSecretProblem(secret);
-    if (problem) {
-      throw new Error(`JWT_SECRET ${problem}`);
-    }
-    return secret;
+  get oauthBaseUrl() {
+    return resolveBaseUrl('GITHUB_OAUTH_BASE_URL', DEFAULT_GITHUB_OAUTH_BASE_URL);
+  }
+
+  get apiBaseUrl() {
+    return resolveBaseUrl('GITHUB_API_BASE_URL', DEFAULT_GITHUB_API_BASE_URL);
   }
 
   // Generate GitHub OAuth URL
@@ -79,13 +96,14 @@ class GitHubService {
       scope: 'repo,user:email',
       state
     });
-    return `https://github.com/login/oauth/authorize?${params.toString()}`;
+    return `${this.oauthBaseUrl}/login/oauth/authorize?${params.toString()}`;
   }
 
-  // Exchange authorization code for access token
+  // Exchange authorization code for an access token.
+  // Returns { accessToken, scope }; scope is the granted scope list, or null.
   async getAccessToken(code) {
     try {
-      const response = await axios.post('https://github.com/login/oauth/access_token', {
+      const response = await axios.post(`${this.oauthBaseUrl}/login/oauth/access_token`, {
         client_id: this.clientId,
         client_secret: this.clientSecret,
         code: code,
@@ -102,7 +120,10 @@ class GitHubService {
         throw new Error(`GitHub rejected the authorization code: ${response.data.error || 'no access token returned'}`);
       }
 
-      return response.data.access_token;
+      return {
+        accessToken: response.data.access_token,
+        scope: typeof response.data.scope === 'string' ? response.data.scope : null
+      };
     } catch (error) {
       console.error('Error exchanging code for token:', describeError(error));
       throw new Error('Failed to authenticate with GitHub');
@@ -112,7 +133,7 @@ class GitHubService {
   // Get user information from GitHub
   async getUserInfo(accessToken) {
     try {
-      const response = await axios.get('https://api.github.com/user', {
+      const response = await axios.get(`${this.apiBaseUrl}/user`, {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -129,7 +150,7 @@ class GitHubService {
   // Get user repositories
   async getUserRepositories(accessToken, page = 1, perPage = 50) {
     try {
-      const response = await axios.get(`https://api.github.com/user/repos`, {
+      const response = await axios.get(`${this.apiBaseUrl}/user/repos`, {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -162,6 +183,7 @@ class GitHubService {
         }
       }));
     } catch (error) {
+      if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching repositories:', describeError(error));
       throw new Error('Failed to fetch repositories');
     }
@@ -170,7 +192,7 @@ class GitHubService {
   // Get organization repositories
   async getOrgRepositories(accessToken, org, page = 1, perPage = 50) {
     try {
-      const response = await axios.get(`https://api.github.com/orgs/${encodeURIComponent(org)}/repos`, {
+      const response = await axios.get(`${this.apiBaseUrl}/orgs/${encodeURIComponent(org)}/repos`, {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -203,6 +225,7 @@ class GitHubService {
         }
       }));
     } catch (error) {
+      if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching org repositories:', describeError(error));
       throw new Error('Failed to fetch organization repositories');
     }
@@ -211,7 +234,7 @@ class GitHubService {
   // Get user organizations
   async getUserOrganizations(accessToken) {
     try {
-      const response = await axios.get('https://api.github.com/user/orgs', {
+      const response = await axios.get(`${this.apiBaseUrl}/user/orgs`, {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -226,24 +249,9 @@ class GitHubService {
         url: org.url
       }));
     } catch (error) {
+      if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching organizations:', describeError(error));
       throw new Error('Failed to fetch organizations');
-    }
-  }
-
-  // Generate JWT token for user session
-  generateJWT(userData) {
-    return jwt.sign(userData, this.jwtSecret, { expiresIn: '7d' });
-  }
-
-  // Verify JWT token
-  verifyJWT(token) {
-    // Read outside the try so a missing secret is a configuration error, not "Invalid token"
-    const secret = this.jwtSecret;
-    try {
-      return jwt.verify(token, secret);
-    } catch (error) {
-      throw new Error('Invalid token');
     }
   }
 
@@ -253,7 +261,7 @@ class GitHubService {
   async checkRepoAccess(accessToken, owner, repo) {
     try {
       const response = await axios.get(
-        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        `${this.apiBaseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
         {
           headers: {
             'Authorization': `token ${accessToken}`,
@@ -281,12 +289,33 @@ class GitHubService {
         return { hasAccess: false, error: 'Repository not found or no access' };
       }
       if (status === 401) {
-        const unauthorized = new Error('GitHub token is invalid or expired');
-        unauthorized.code = 'GITHUB_UNAUTHORIZED';
-        throw unauthorized;
+        throw unauthorizedError();
       }
       console.error('Error checking repository access:', describeError(error));
       throw new Error('Failed to check repository access');
+    }
+  }
+
+  // Revoke the OAuth grant (all tokens of this app for the GitHub user).
+  // Best effort: returns { ok, status } and never throws. Logs no request details.
+  async revokeGrant(accessToken) {
+    const clientId = this.clientId || '';
+    const credentials = Buffer.from(`${clientId}:${this.clientSecret || ''}`).toString('base64');
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/applications/${encodeURIComponent(clientId)}/grant`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ access_token: accessToken }),
+        signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS)
+      });
+      await response.text().catch(() => {});
+      return { ok: response.status === 204, status: response.status };
+    } catch (error) {
+      return { ok: false, status: error?.name === 'TimeoutError' ? 'timeout' : 'network error' };
     }
   }
 }

@@ -19,6 +19,8 @@ const S1 = crypto.randomUUID();
 const S2 = crypto.randomUUID();
 const extraSessionsOfA = Array.from({ length: MAX_ROOMS_PER_SOCKET + 1 }, () => crypto.randomUUID());
 const openClients = new Set();
+// Added to the realtime module's clock (not the verifier's) to simulate token expiry
+let clockOffsetMs = 0;
 
 before(async () => {
   fake = await startFakeSupabase();
@@ -29,7 +31,7 @@ before(async () => {
   httpServer = http.createServer();
   ioServer = new Server(httpServer);
   const verifier = createSupabaseVerifier({ supabaseUrl: fake.url, anonKey: fake.anonKey });
-  realtime = attachRealtime(ioServer, { verifier, getSession: (id) => sessions.get(id) });
+  realtime = attachRealtime(ioServer, { verifier, getSession: (id) => sessions.get(id), now: () => Date.now() + clockOffsetMs });
   await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
   url = `http://127.0.0.1:${httpServer.address().port}`;
 });
@@ -197,5 +199,90 @@ describe('subscriptions and private rooms', () => {
     await settle();
     assert.equal(events.length, 0);
     a.close();
+  });
+});
+
+describe('T-118: refused subscriptions and token expiry', () => {
+  test('a refused subscribe never delivers the snapshot of a session that has one', async () => {
+    realtime.emitProgress(S1, { step: 'snapshot for the owner only', progress: 50, status: 'analyzing' });
+    assert.ok(sessions.get(S1).lastProgress, 'S1 has a snapshot');
+
+    const b = await connect({ token: fake.issueToken(USER_B) });
+    const bEvents = record(b);
+    assert.deepEqual(await subscribe(b, S1), { ok: false, error: 'Session not found' });
+    await settle(300);
+    assert.equal(bEvents.length, 0, 'B must receive no progress event for S1');
+
+    // Control: the owner does get the snapshot on the same server
+    const a = await connect({ token: fake.issueToken(USER_A) });
+    const aEvents = record(a);
+    assert.deepEqual(await subscribe(a, S1), { ok: true });
+    await waitFor(() => aEvents.length >= 1);
+    assert.equal(aEvents[0].step, 'snapshot for the owner only');
+    a.close();
+    b.close();
+  });
+
+  test('a socket whose token has expired gets auth_expired and is disconnected on its next subscribe', async () => {
+    const a = await connect({ token: fake.issueToken(USER_A) });
+    const events = record(a);
+    let expiredEvents = 0;
+    a.on('auth_expired', () => { expiredEvents++; });
+    const disconnected = new Promise((resolve) => a.once('disconnect', resolve));
+
+    assert.deepEqual(await subscribe(a, S1), { ok: true }, 'works while the token is valid');
+    await waitFor(() => events.length >= 1);
+    events.length = 0;
+
+    clockOffsetMs = 2 * 60 * 60 * 1000; // the 1 h token is now expired
+    try {
+      assert.deepEqual(await subscribe(a, S1), { ok: false, error: 'Authentication expired' });
+      assert.equal(await disconnected, 'io server disconnect');
+    } finally {
+      clockOffsetMs = 0;
+    }
+    assert.equal(expiredEvents, 1);
+    assert.equal(events.length, 0, 'no snapshot is sent to an expired socket');
+  });
+
+  test('a connected socket is disconnected by the timer at its token expiry', { timeout: 10000 }, async () => {
+    const a = await connect({ token: fake.issueToken(USER_A, { expiresInSeconds: 2 }) });
+    let expiredEvents = 0;
+    a.on('auth_expired', () => { expiredEvents++; });
+    const started = Date.now();
+    const reason = await new Promise((resolve) => a.once('disconnect', resolve));
+    const elapsed = Date.now() - started;
+
+    assert.equal(reason, 'io server disconnect');
+    assert.equal(expiredEvents, 1);
+    assert.ok(elapsed <= 3500, `disconnected after ${elapsed} ms`);
+  });
+
+  test('closing a socket before expiry clears its expiry timer', async () => {
+    // Watch timers in this process: the expiry timer is the one scheduled for about 600 s
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const expiryTimers = new Set();
+    const cleared = new Set();
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const handle = realSetTimeout(fn, delay, ...args);
+      if (delay > 590000 && delay <= 600000) expiryTimers.add(handle);
+      return handle;
+    };
+    globalThis.clearTimeout = (handle) => {
+      if (expiryTimers.has(handle)) cleared.add(handle);
+      return realClearTimeout(handle);
+    };
+    try {
+      const before = ioServer.of('/').sockets.size;
+      const a = await connect({ token: fake.issueToken(USER_A, { expiresInSeconds: 600 }) });
+      assert.equal(expiryTimers.size, 1, 'one expiry timer was scheduled');
+      a.close();
+      await waitFor(() => ioServer.of('/').sockets.size === before);
+      assert.equal(cleared.size, 1, 'the expiry timer was cleared on disconnect');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
   });
 });

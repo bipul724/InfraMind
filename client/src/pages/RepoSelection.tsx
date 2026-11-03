@@ -14,7 +14,7 @@ import { apiFetch } from '@/lib/apiClient';
 
 export const RepoSelection = () => {
   const { user } = useAuth();
-  const { isConnected, token, connectGitHub } = useGitHub();
+  const { isConnected, connectGitHub } = useGitHub();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [repoUrl, setRepoUrl] = useState('');
@@ -65,14 +65,14 @@ export const RepoSelection = () => {
 
     setLoading(true);
     try {
-      // Clone repository using the new backend endpoint
+      // Clone repository; for repositoryData the server uses this user's stored GitHub connection
       const cloneResponse = await apiFetch('/api/clone-repo', {
         method: 'POST',
         body: JSON.stringify({
           repoUrl: finalRepoUrl,
           repositoryData
         }),
-      }, { githubToken: token });
+      });
 
       if (!cloneResponse.ok) {
         throw new Error('Failed to clone repository');
@@ -180,7 +180,6 @@ export const RepoSelection = () => {
                   <RepositorySelector
                     onRepositorySelect={handleRepositorySelect}
                     isConnected={isConnected}
-                    userToken={token}
                     onConnect={connectGitHub}
                   />
                   {selectedRepository && (

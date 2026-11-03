@@ -150,19 +150,21 @@ export function createSupabaseVerifier({
     }
   }
 
+  // Resolves with { id, email, expiresAt }, where expiresAt is the token's exp in ms (or null)
   async function verify(token) {
     const payload = preCheck(token);
     if (!payload) throw new AuthError('AUTH_REQUIRED');
+    const expiresAt = typeof payload.exp === 'number' ? payload.exp * 1000 : null;
 
     const key = hashToken(token);
     const cached = cache.get(key);
     if (cached) {
-      if (cached.expiresAt > now()) return { ...cached.user };
+      if (cached.expiresAt > now()) return { ...cached.user, expiresAt };
       cache.delete(key);
     }
 
     const pending = inFlight.get(key);
-    if (pending) return { ...(await pending) };
+    if (pending) return { ...(await pending), expiresAt };
 
     if (activeLookups >= maxConcurrent) {
       throw new AuthError('AUTH_UNAVAILABLE');
@@ -174,7 +176,7 @@ export function createSupabaseVerifier({
     try {
       const user = await promise;
       remember(key, user, payload);
-      return { ...user };
+      return { ...user, expiresAt };
     } finally {
       activeLookups--;
       inFlight.delete(key);

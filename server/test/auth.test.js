@@ -32,6 +32,10 @@ function recordingFetch(respond = () => jsonResponse(200, USER)) {
   return { calls, fetchImpl };
 }
 
+// verify() resolves with the Supabase user plus the token's exp in milliseconds
+const expiresAtOf = (token) => jwt.decode(token).exp * 1000;
+const userFor = (token) => ({ ...USER, expiresAt: expiresAtOf(token) });
+
 const verifierWith = (fetchImpl, options = {}) =>
   createSupabaseVerifier({ supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, fetchImpl, ...options });
 
@@ -66,12 +70,21 @@ describe('authoritative Supabase check', () => {
     const token = makeToken();
     const user = await verifierWith(fetchImpl).verify(token);
 
-    assert.deepEqual(user, USER);
+    assert.deepEqual(user, userFor(token));
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, `${SUPABASE_URL}/auth/v1/user`);
     assert.equal(calls[0].options.headers.apikey, ANON_KEY);
     assert.equal(calls[0].options.headers.Authorization, `Bearer ${token}`);
     assert.ok(calls[0].options.signal, 'request must carry a timeout signal');
+  });
+
+  test('expiresAt is the token exp in milliseconds, or null without exp', async () => {
+    const { fetchImpl } = recordingFetch();
+    const expSeconds = Math.floor(Date.now() / 1000) + 120;
+    const withExp = await verifierWith(fetchImpl).verify(makeToken({ expSeconds }));
+    assert.equal(withExp.expiresAt, expSeconds * 1000);
+    const withoutExp = await verifierWith(fetchImpl).verify(makeToken({ expSeconds: null }));
+    assert.equal(withoutExp.expiresAt, null);
   });
 
   test('a second call within the TTL is served from a hashed cache', async () => {
@@ -80,7 +93,7 @@ describe('authoritative Supabase check', () => {
     const token = makeToken();
 
     await verifier.verify(token);
-    assert.deepEqual(await verifier.verify(token), USER);
+    assert.deepEqual(await verifier.verify(token), userFor(token));
     assert.equal(calls.length, 1);
 
     const keys = verifier._cacheKeysForTest();
@@ -220,8 +233,8 @@ describe('concurrency', () => {
     const token = makeToken();
 
     const [first, second] = await Promise.all([verifier.verify(token), verifier.verify(token)]);
-    assert.deepEqual(first, USER);
-    assert.deepEqual(second, USER);
+    assert.deepEqual(first, userFor(token));
+    assert.deepEqual(second, userFor(token));
     assert.equal(fetchCount, 1);
   });
 });
@@ -241,7 +254,7 @@ describe('requireUser middleware', () => {
   };
 
   test('sets req.user and calls next on success', async () => {
-    const { req, nextCalled } = await run({ verify: async () => ({ ...USER, extra: 'x' }) }, { authorization: 'Bearer abc' });
+    const { req, nextCalled } = await run({ verify: async () => ({ ...USER, expiresAt: Date.now() + 1000, extra: 'x' }) }, { authorization: 'Bearer abc' });
     assert.equal(nextCalled, true);
     assert.deepEqual(req.user, USER);
   });

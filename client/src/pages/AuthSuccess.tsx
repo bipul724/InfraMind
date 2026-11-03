@@ -1,55 +1,41 @@
 import React, { useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useGitHub } from '../contexts/GitHubContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Github, CheckCircle, XCircle } from 'lucide-react';
 
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid_state: 'Invalid authentication state. Please try again.',
+  github_auth_failed: 'GitHub authentication failed. Please try again.',
+  connect_expired: 'The connection link expired. Please try again.',
+  access_denied: 'GitHub access was not granted.'
+};
+const GENERIC_ERROR_MESSAGE = 'Authentication failed. Please try again.';
+
+// The server redirects here with ?status=connected or ?error=<code>, never a token.
+// The page is reached by a full-page redirect, so GitHubContext's own mount effect
+// makes the single status request; this page makes none.
 const AuthSuccess: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { setTokenFromCallback } = useGitHub();
   const [status, setStatus] = React.useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = React.useState<string>('');
 
   useEffect(() => {
-    const token = searchParams.get('token');
+    const statusParam = searchParams.get('status');
     const errorParam = searchParams.get('error');
 
-    if (errorParam) {
-      setStatus('error');
-      setError(getErrorMessage(errorParam));
-      setTimeout(() => navigate('/'), 3000);
-      return;
-    }
-
-    if (token) {
-      try {
-        setTokenFromCallback(token);
-        setStatus('success');
-        setTimeout(() => navigate('/dashboard'), 2000);
-      } catch (error) {
-        setStatus('error');
-        setError('Failed to process authentication token');
-        setTimeout(() => navigate('/'), 3000);
-      }
+    let timer: ReturnType<typeof setTimeout>;
+    if (statusParam === 'connected' && !errorParam) {
+      setStatus('success');
+      timer = setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
     } else {
       setStatus('error');
-      setError('No authentication token received');
-      setTimeout(() => navigate('/'), 3000);
+      setError((errorParam && ERROR_MESSAGES[errorParam]) || GENERIC_ERROR_MESSAGE);
+      timer = setTimeout(() => navigate('/dashboard', { replace: true }), 3000);
     }
-  }, [searchParams, setTokenFromCallback, navigate]);
-
-  const getErrorMessage = (errorCode: string): string => {
-    switch (errorCode) {
-      case 'invalid_state':
-        return 'Invalid authentication state. Please try again.';
-      case 'github_auth_failed':
-        return 'GitHub authentication failed. Please try again.';
-      default:
-        return 'Authentication failed. Please try again.';
-    }
-  };
+    return () => clearTimeout(timer);
+  }, [searchParams, navigate]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">

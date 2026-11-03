@@ -53,14 +53,12 @@ interface Organization {
 interface RepositorySelectorProps {
   onRepositorySelect: (repository: Repository) => void;
   isConnected: boolean;
-  userToken: string | null;
   onConnect: () => void;
 }
 
 export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   onRepositorySelect,
   isConnected,
-  userToken,
   onConnect
 }) => {
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -74,8 +72,9 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   const [hasMore, setHasMore] = useState(false);
 
   // Fetch user repositories
+  // The server uses the signed-in user's stored GitHub connection
   const fetchRepositories = async (page = 1, orgName = '') => {
-    if (!userToken) return;
+    if (!isConnected) return;
 
     setLoading(true);
     setError(null);
@@ -85,7 +84,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
         ? `/api/github/organizations/${encodeURIComponent(orgName)}/repositories?page=${page}&per_page=20`
         : `/api/github/repositories?page=${page}&per_page=20`;
 
-      const response = await apiFetch(endpoint, {}, { githubToken: userToken });
+      const response = await apiFetch(endpoint);
 
       if (!response.ok) {
         throw new Error('Failed to fetch repositories');
@@ -115,10 +114,10 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
 
   // Load repositories when connected
   useEffect(() => {
-    if (isConnected && userToken) {
+    if (isConnected) {
       fetchRepositories(1, selectedOrg);
     }
-  }, [isConnected, userToken, selectedOrg]);
+  }, [isConnected, selectedOrg]);
 
   // Filter repositories based on search term
   const filteredRepositories = repositories.filter(repo =>

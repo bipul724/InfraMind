@@ -5,12 +5,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle, AlertTriangle, Github } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGitHub } from '@/contexts/GitHubContext';
 import { API_BASE_URL } from '@/lib/api';
 
 export const GitHubCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { connectGitHub } = useGitHub();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
 
@@ -37,13 +39,14 @@ export const GitHubCallback = () => {
     setMessage('Verifying GitHub authorization...');
 
     // The server checks the OAuth state against its HttpOnly cookie, so it must
-    // exchange the code. It redirects back to /auth/success with a session token.
+    // exchange the code. It stores the token and redirects back to /auth/success
+    // with only a status or an error code.
     window.location.replace(`${API_BASE_URL}/auth/github/callback?${searchParams.toString()}`);
   };
 
   const handleRetry = () => {
-    // Restart through the server so a fresh state cookie is issued
-    window.location.href = `${API_BASE_URL}/auth/github`;
+    // Restart through the server with a fresh one-time ticket and state cookie
+    void connectGitHub();
   };
 
   return (

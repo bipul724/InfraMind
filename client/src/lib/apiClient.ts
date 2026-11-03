@@ -1,27 +1,19 @@
 import { API_BASE_URL } from '@/lib/api';
 import { getAccessToken } from '@/lib/supabase';
 
-export interface ApiFetchOptions {
-  // GitHub session JWT; sent only in X-GitHub-Token (transitional until B1.3)
-  githubToken?: string | null;
-}
-
 // The one way the app calls the backend's /api routes: attaches the Supabase
-// access token as a Bearer token and, when given, the GitHub session header.
+// access token as a Bearer token. GitHub access is resolved on the server from
+// the signed-in user, so no GitHub credential is ever sent from the browser.
 // Returns the raw Response so callers keep their own .ok handling.
 export async function apiFetch(
   path: string,
-  init: RequestInit = {},
-  options: ApiFetchOptions = {}
+  init: RequestInit = {}
 ): Promise<Response> {
   const headers = new Headers(init.headers);
 
   const accessToken = await getAccessToken();
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
-  }
-  if (options.githubToken) {
-    headers.set('X-GitHub-Token', options.githubToken);
   }
   if (typeof init.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');

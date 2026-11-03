@@ -1,4 +1,6 @@
-// Integration tests for B1.2: Supabase identity, ownership, GitHub header and metrics.
+// Integration tests for B1.2: Supabase identity, ownership, GitHub access and metrics.
+// B1.3 retired the GitHub session JWT and X-GitHub-Token; the tests that used them
+// now check that such tokens grant nothing.
 // Spawned servers verify tokens against the local fake Supabase (see helpers.js).
 
 import { describe, test, before, after } from 'node:test';
@@ -13,6 +15,7 @@ import {
   getFreePort,
   postJson,
   randomAlphanumeric,
+  randomSecret,
   runServerExpectingExit,
   startServer
 } from './helpers.js';
@@ -31,7 +34,9 @@ before(async () => {
 });
 after(async () => { await closeFakes(); });
 
-const signGitHubJwt = (secret) => {
+// An old-style GitHub session JWT (pre-B1.3 format). The server no longer has any
+// secret to verify it with, and must ignore it wherever it appears.
+const signGitHubJwt = (secret = randomSecret()) => {
   const token = jwt.sign({ id: 1, login: 't', accessToken: 'test-not-a-real-token' }, secret, { expiresIn: '1h' });
   secretsThatMustNotBeLogged.push(token);
   return token;
@@ -58,7 +63,10 @@ const PROTECTED_ROUTES = [
   ['GET', `/api/status/${SAMPLE_ID}`],
   ['GET', '/api/github/repositories'],
   ['GET', '/api/github/organizations/x/repositories'],
-  ['POST', '/api/github/verify-repo', { owner: 'octocat', repo: 'Hello-World' }]
+  ['POST', '/api/github/verify-repo', { owner: 'octocat', repo: 'Hello-World' }],
+  ['GET', '/api/github/status'],
+  ['POST', '/api/github/connect'],
+  ['DELETE', '/api/github/connection']
 ];
 
 describe('anonymous and invalid-token access', () => {
@@ -84,17 +92,19 @@ describe('anonymous and invalid-token access', () => {
 
   test('a GitHub session JWT alone (no Supabase token) is 401 AUTH_REQUIRED', async () => {
     const response = await request(server.baseUrl, 'POST', '/api/clone-repo', {
-      headers: { 'X-GitHub-Token': signGitHubJwt(server.env.JWT_SECRET) },
+      headers: { 'X-GitHub-Token': signGitHubJwt() },
       body: { repositoryData: { fullName: 'octocat/Hello-World' } }
     });
     assert.equal(response.status, 401);
     assert.equal(response.json.code, 'AUTH_REQUIRED');
   });
 
-  test('/health and /auth/github stay public', async () => {
+  test('/health and /auth/github stay public, but /auth/github cannot start a flow without a ticket', async () => {
     assert.equal((await fetch(`${server.baseUrl}/health`)).status, 200);
     const oauth = await fetch(`${server.baseUrl}/auth/github`, { redirect: 'manual' });
     assert.equal(oauth.status, 302);
+    assert.equal(oauth.headers.get('location'), 'http://localhost:5173/auth/success?error=connect_expired');
+    assert.deepEqual(oauth.headers.getSetCookie(), [], 'no OAuth state cookie is issued');
   });
 });
 
@@ -133,7 +143,7 @@ describe('CORS preflight', () => {
   before(async () => { server = await startServer(); });
   after(async () => { await server?.stop(); });
 
-  test('OPTIONS is answered without auth and allows X-GitHub-Token', async () => {
+  test('OPTIONS is answered without auth, allows Authorization and no longer allows X-GitHub-Token', async () => {
     const response = await fetch(`${server.baseUrl}/api/clone-repo`, {
       method: 'OPTIONS',
       headers: {
@@ -143,8 +153,19 @@ describe('CORS preflight', () => {
       }
     });
     assert.equal(response.status, 204);
-    const allowed = (response.headers.get('access-control-allow-headers') || '').toLowerCase();
-    assert.ok(allowed.split(',').map((h) => h.trim()).includes('x-github-token'), `allowed headers: ${allowed}`);
+    const allowed = (response.headers.get('access-control-allow-headers') || '').toLowerCase().split(',').map((h) => h.trim());
+    assert.ok(allowed.includes('authorization'), `allowed headers: ${allowed}`);
+    assert.ok(allowed.includes('content-type'), `allowed headers: ${allowed}`);
+    assert.ok(!allowed.includes('x-github-token'), `allowed headers: ${allowed}`);
+  });
+
+  test('DELETE is an allowed method (GitHub disconnect)', async () => {
+    const response = await fetch(`${server.baseUrl}/api/github/connection`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'DELETE', 'Access-Control-Request-Headers': 'authorization' }
+    });
+    assert.equal(response.status, 204);
+    assert.ok((response.headers.get('access-control-allow-methods') || '').includes('DELETE'));
   });
 });
 
@@ -237,27 +258,29 @@ describe('session ownership (offline: clone fails through an unreachable proxy)'
   });
 });
 
-describe('GitHub session header', () => {
+describe('GitHub access without a stored connection (X-GitHub-Token is dead)', () => {
   let server;
   before(async () => { server = await startServer(); });
   after(async () => { await server?.stop(); });
 
   const repositoryData = { fullName: 'octocat/Hello-World', name: 'Hello-World', owner: { login: 'octocat' } };
 
-  test('repositoryData clone without X-GitHub-Token is 401 GITHUB_AUTH_REQUIRED', async () => {
+  test('repositoryData clone without a connection is 401 GITHUB_AUTH_REQUIRED', async () => {
     const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData }, authA);
     assert.equal(response.status, 401);
     assert.deepEqual(response.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
   });
 
-  test('repositoryData clone with a garbage X-GitHub-Token is 401 GITHUB_AUTH_INVALID', async () => {
-    const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData }, { ...authA, 'X-GitHub-Token': 'garbage' });
-    assert.equal(response.status, 401);
-    assert.deepEqual(response.json, { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' });
+  test('repositoryData clone with a garbage or old-style X-GitHub-Token is still 401 GITHUB_AUTH_REQUIRED', async () => {
+    for (const header of ['garbage', signGitHubJwt()]) {
+      const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData }, { ...authA, 'X-GitHub-Token': header });
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
+    }
   });
 
   test('a GitHub JWT in Authorization is not accepted as a Supabase token', async () => {
-    const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData }, authHeaders(signGitHubJwt(server.env.JWT_SECRET)));
+    const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData }, authHeaders(signGitHubJwt()));
     assert.equal(response.status, 401);
     assert.equal(response.json.code, 'AUTH_REQUIRED');
   });
@@ -267,14 +290,16 @@ describe('GitHub session header', () => {
     ['GET', '/api/github/organizations/x/repositories'],
     ['POST', '/api/github/verify-repo', { owner: 'octocat', repo: 'Hello-World' }]
   ]) {
-    test(`${method} ${route}: missing header is GITHUB_AUTH_REQUIRED, garbage is GITHUB_AUTH_INVALID`, async () => {
+    test(`${method} ${route}: no connection is GITHUB_AUTH_REQUIRED, with or without an X-GitHub-Token`, async () => {
       const missing = await request(server.baseUrl, method, route, { headers: authA, body });
       assert.equal(missing.status, 401);
-      assert.equal(missing.json.code, 'GITHUB_AUTH_REQUIRED');
+      assert.deepEqual(missing.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
 
-      const garbage = await request(server.baseUrl, method, route, { headers: { ...authA, 'X-GitHub-Token': 'garbage' }, body });
-      assert.equal(garbage.status, 401);
-      assert.deepEqual(garbage.json, { error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
+      for (const header of ['garbage', signGitHubJwt()]) {
+        const ignored = await request(server.baseUrl, method, route, { headers: { ...authA, 'X-GitHub-Token': header }, body });
+        assert.equal(ignored.status, 401);
+        assert.deepEqual(ignored.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
+      }
     });
   }
 });

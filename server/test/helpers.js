@@ -11,6 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startFakeSupabase, USER_A, USER_B } from './fakeSupabase.js';
 import { startFakeLlm } from './fakeLlm.js';
+import { startFakeGitHub, GITHUB_USER_A } from './fakeGitHub.js';
+import { createFakePostgrest } from './fakePostgrest.js';
 
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SERVER_ENTRY = path.join(SERVER_DIR, 'server.js');
@@ -25,6 +27,9 @@ export function randomAlphanumeric(length) {
 }
 
 export const randomSecret = () => randomAlphanumeric(48);
+
+// A valid GITHUB_TOKEN_ENC_KEY: standard base64 of 32 random bytes
+export const randomEncryptionKey = () => crypto.randomBytes(32).toString('base64');
 
 export async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -56,16 +61,21 @@ export async function pathExists(target) {
 // Every log line captured from every spawned server in this test process
 export const allCapturedLogs = [];
 
-// One fake Supabase and one fake LLM per test process, shared by every spawned server
+// One fake Supabase (with PostgREST on the same origin), one fake LLM and one fake
+// GitHub per test process, shared by every spawned server
 let fakes = null;
 
 export async function getFakes() {
   if (!fakes) {
-    const supabase = await startFakeSupabase();
+    const postgrest = createFakePostgrest();
+    const supabase = await startFakeSupabase({ rest: postgrest });
     const llm = await startFakeLlm();
+    const github = await startFakeGitHub();
     fakes = {
       supabase,
+      postgrest,
       llm,
+      github,
       tokens: { A: supabase.issueToken(USER_A), B: supabase.issueToken(USER_B) }
     };
   }
@@ -76,7 +86,7 @@ export async function closeFakes() {
   if (!fakes) return;
   const current = fakes;
   fakes = null;
-  await Promise.all([current.supabase.close(), current.llm.close()]);
+  await Promise.all([current.supabase.close(), current.llm.close(), current.github.close()]);
 }
 
 export const authHeaders = (token) => ({ Authorization: `Bearer ${token}` });
@@ -87,14 +97,18 @@ export function buildEnv(cwd, port, overrides = {}) {
     HOME: cwd,
     NODE_ENV: 'test',
     PORT: String(port),
-    JWT_SECRET: randomSecret(),
     CLIENT_URL: 'http://localhost:5173',
     LLAMA_API_KEY: 'invalid-test-key',
     TAVILY_API_KEY: '',
     MEM0_API_KEY: '',
     KEYWORDS_AI_API_KEY: '',
-    GITHUB_CLIENT_ID: '',
-    GITHUB_CLIENT_SECRET: '',
+    GITHUB_CLIENT_ID: `Iv1.${randomAlphanumeric(16)}`,
+    GITHUB_CLIENT_SECRET: randomSecret(),
+    GITHUB_REDIRECT_URI: 'http://localhost:5173/auth/github/callback',
+    GITHUB_OAUTH_BASE_URL: fakes?.github.url,
+    GITHUB_API_BASE_URL: fakes?.github.url,
+    GITHUB_TOKEN_STORE: 'memory',
+    GITHUB_TOKEN_ENC_KEY: randomEncryptionKey(),
     SUPABASE_URL: fakes?.supabase.url,
     SUPABASE_ANON_KEY: fakes?.supabase.anonKey,
     LLAMA_API_BASE_URL: fakes?.llm.url,
@@ -217,4 +231,47 @@ export async function createFixtureRepo(parentDir) {
   runFixtureGit(['add', '.'], repoDir);
   runFixtureGit(['-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-q', '-m', 'fixture'], repoDir);
   return repoDir;
+}
+
+// Header value for a Cookie request header built from a response's Set-Cookie headers
+export function cookieHeaderFrom(response) {
+  return response.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ');
+}
+
+// Run the full connect flow (prompt D.2) for the Supabase user holding userToken:
+// POST /api/github/connect -> GET /auth/github?ticket -> fake GitHub code -> callback.
+// Options let tests complete the flow from another browser or tamper with any step.
+export async function connectGitHubFor(server, userToken, {
+  githubUser = GITHUB_USER_A,
+  completeWithCookie,
+  callbackQuery
+} = {}) {
+  const { github } = await getFakes();
+  const connect = await fetch(`${server.baseUrl}/api/github/connect`, { method: 'POST', headers: authHeaders(userToken) });
+  if (connect.status !== 200) throw new Error(`connect failed with HTTP ${connect.status}`);
+  const { ticket } = await connect.json();
+
+  const start = await fetch(`${server.baseUrl}/auth/github?ticket=${encodeURIComponent(ticket)}`, { redirect: 'manual' });
+  const authorizeUrl = new URL(start.headers.get('location'));
+  const state = authorizeUrl.searchParams.get('state');
+  const cookie = cookieHeaderFrom(start);
+  const code = github.issueCode(githubUser);
+
+  const query = callbackQuery ?? `code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+  const callback = await fetch(`${server.baseUrl}/auth/github/callback?${query}`, {
+    redirect: 'manual',
+    headers: { Cookie: completeWithCookie ?? cookie }
+  });
+
+  return {
+    ticket,
+    state,
+    code,
+    cookie,
+    startStatus: start.status,
+    authorizeUrl,
+    callbackStatus: callback.status,
+    location: callback.headers.get('location'),
+    callbackSetCookie: callback.headers.getSetCookie()
+  };
 }

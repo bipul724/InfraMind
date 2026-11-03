@@ -1,6 +1,8 @@
 // Local stand-in for Supabase Auth's GET /auth/v1/user.
 // The fake is the authority: the server never checks token signatures, so test
 // tokens are JWT-shaped strings signed with an arbitrary secret.
+// An optional `rest` handler (see fakePostgrest.js) serves /rest/v1 on the same origin,
+// because the server derives both from SUPABASE_URL.
 
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -10,13 +12,14 @@ export const USER_A = { id: '11111111-1111-4111-8111-111111111111', email: 'user
 export const USER_B = { id: '22222222-2222-4222-8222-222222222222', email: 'user-b@example.test' };
 export const FAKE_ANON_KEY = 'fake-anon-key-for-tests';
 
-export async function startFakeSupabase({ anonKey = FAKE_ANON_KEY } = {}) {
+export async function startFakeSupabase({ anonKey = FAKE_ANON_KEY, rest = null } = {}) {
   const tokens = new Map(); // token -> user
   const sockets = new Set();
   let mode = 'ok';
   let callCount = 0;
 
   const server = http.createServer((req, res) => {
+    if (rest && rest.handle(req, res)) return;
     if (req.method !== 'GET' || req.url !== '/auth/v1/user') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       return res.end('{}');

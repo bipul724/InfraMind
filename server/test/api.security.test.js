@@ -6,11 +6,11 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import jwt from 'jsonwebtoken';
 import {
   allCapturedLogs,
   authHeaders,
   closeFakes,
+  connectGitHubFor,
   createFixtureRepo,
   getFakes,
   getFreePort,
@@ -18,21 +18,18 @@ import {
   pathExists,
   postJson,
   randomAlphanumeric,
-  randomSecret,
-  runServerExpectingExit,
   startServer
 } from './helpers.js';
 
 const RUN_NETWORK = process.env.RUN_NETWORK_TESTS === '1';
-const FAKE_ACCESS_TOKEN = 'test-not-a-real-token';
-const PLACEHOLDER_SECRET = 'your-jwt-secret-change-in-production';
-
-const signFor = (secret) =>
-  jwt.sign({ id: 1, login: 't', accessToken: FAKE_ACCESS_TOKEN }, secret, { expiresIn: '1h' });
 
 // B1.2: every /api/* call now needs a verified Supabase token (user A from the fake)
+let fakes;
 let authA;
-before(async () => { authA = authHeaders((await getFakes()).tokens.A); });
+before(async () => {
+  fakes = await getFakes();
+  authA = authHeaders(fakes.tokens.A);
+});
 after(async () => { await closeFakes(); });
 
 const listDir = async (dir) => {
@@ -115,16 +112,17 @@ describe('authenticated clone path (repositoryData)', () => {
 
   const repositoryData = { fullName: 'octocat/Hello-World', name: 'Hello-World', owner: { login: 'octocat' } };
 
-  test('without Authorization is a 401', async () => {
-    // B1.2: the GitHub session moved to X-GitHub-Token; it is absent here
+  test('without a stored GitHub connection is 401 GITHUB_AUTH_REQUIRED', async () => {
+    // B1.3: GitHub access comes only from the server-side connection of the signed-in user
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World.git',
       repositoryData
     }, authA);
     assert.equal(response.status, 401);
+    assert.deepEqual(response.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
   });
 
-  test('with a garbage bearer token is a 401, not a 500', async () => {
+  test('a garbage X-GitHub-Token header is ignored: still 401 GITHUB_AUTH_REQUIRED, not a 500', async () => {
     const response = await postJson(
       server.baseUrl,
       '/api/clone-repo',
@@ -132,11 +130,15 @@ describe('authenticated clone path (repositoryData)', () => {
       { ...authA, 'X-GitHub-Token': 'garbage' }
     );
     assert.equal(response.status, 401);
-    // B1.2 adds the machine-readable code to this body (prompt D.3.3)
-    assert.deepEqual(response.json, { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' });
+    assert.deepEqual(response.json, { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' });
   });
 
-  test('path traversal and a local cloneUrl are rejected before anything touches disk', async () => {
+  test('path traversal and a local cloneUrl are rejected before anything touches disk or GitHub', async () => {
+    // A real stored connection, so only input validation can stop this request
+    const connected = await connectGitHubFor(server, fakes.tokens.A);
+    assert.equal(connected.location, 'http://localhost:5173/auth/success?status=connected');
+    const githubRequestsBefore = fakes.github.requests.length;
+
     const fixtureParent = await makeTempDir('inframind-fixture-');
     const fixtureRepo = await createFixtureRepo(fixtureParent);
     const tempDir = path.join(server.cwd, 'temp');
@@ -154,10 +156,12 @@ describe('authenticated clone path (repositoryData)', () => {
           cloneUrl: fixtureRepo
         }
       },
-      { ...authA, 'X-GitHub-Token': signFor(server.env.JWT_SECRET) }
+      authA
     );
 
     assert.equal(response.status, 400);
+    assert.deepEqual(response.json, { error: 'Invalid repository data' });
+    assert.equal(fakes.github.requests.length, githubRequestsBefore, 'no GitHub API call');
     assert.equal(await pathExists(traversalTarget), false);
     assert.deepEqual(await listDir(tempDir), [], 'temp must not contain a clone of the fixture');
     await fs.rm(fixtureParent, { recursive: true, force: true });
@@ -208,59 +212,8 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
   });
 });
 
-describe('JWT_SECRET startup checks', () => {
-  const cases = [
-    ['unset', undefined],
-    ['a known placeholder', PLACEHOLDER_SECRET],
-    ['10 characters', randomAlphanumeric(10)]
-  ];
-
-  for (const [label, value] of cases) {
-    test(`exits non-zero when JWT_SECRET is ${label}`, async () => {
-      const result = await runServerExpectingExit({ envOverrides: { JWT_SECRET: value }, timeoutMs: 10000 });
-      assert.equal(result.timedOut, false, 'server should exit within 10 s');
-      assert.notEqual(result.code, 0);
-      assert.ok(result.stderr.includes('JWT_SECRET'), 'stderr should name the variable');
-      if (value) {
-        assert.ok(!result.stderr.includes(value), 'stderr must not contain the value');
-        assert.ok(!result.stdout.includes(value), 'stdout must not contain the value');
-      }
-    });
-  }
-});
-
-describe('.env is loaded before modules read configuration (NEW-01)', () => {
-  let server;
-  let envFileSecret;
-
-  before(async () => {
-    const cwd = await makeTempDir();
-    envFileSecret = randomSecret();
-    await fs.writeFile(path.join(cwd, '.env'), `JWT_SECRET=${envFileSecret}\n`);
-    server = await startServer({ cwd, envOverrides: { JWT_SECRET: undefined, DOTENV_CONFIG_PATH: undefined } });
-  });
-  after(async () => { await server?.stop(); });
-
-  test('a JWT signed with the .env secret is accepted', async () => {
-    const response = await postJson(
-      server.baseUrl,
-      '/api/clone-repo',
-      { repositoryData: { fullName: 'not a valid/name/at all' } },
-      { ...authA, 'X-GitHub-Token': signFor(envFileSecret) }
-    );
-    assert.equal(response.status, 400, 'should pass auth and fail on the malformed fullName');
-  });
-
-  test('a JWT signed with the old public fallback secret is rejected', async () => {
-    const response = await postJson(
-      server.baseUrl,
-      '/api/clone-repo',
-      { repositoryData: { fullName: 'not a valid/name/at all' } },
-      { ...authA, 'X-GitHub-Token': signFor(PLACEHOLDER_SECRET) }
-    );
-    assert.equal(response.status, 401);
-  });
-});
+// The JWT_SECRET startup checks and the JWT-based NEW-01 test were converted to the
+// GitHub token store equivalents in api.github.test.js (startup checks and NEW-01).
 
 describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set RUN_NETWORK_TESTS=1' }, () => {
   let server;
@@ -324,10 +277,13 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
 });
 
 // Runs last: covers the output of every server spawned above
-test('no server log ever contains the test access token', () => {
+test('no server log ever contains a GitHub access token issued in this file', () => {
   assert.ok(allCapturedLogs.length > 0);
+  assert.ok(fakes.github.issuedTokens.length > 0, 'a real connection was made above');
   for (const { output } of allCapturedLogs) {
-    assert.ok(!output.stdout.includes(FAKE_ACCESS_TOKEN));
-    assert.ok(!output.stderr.includes(FAKE_ACCESS_TOKEN));
+    for (const token of fakes.github.issuedTokens) {
+      assert.ok(!output.stdout.includes(token));
+      assert.ok(!output.stderr.includes(token));
+    }
   }
 });

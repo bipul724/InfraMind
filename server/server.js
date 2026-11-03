@@ -11,7 +11,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { runAgentPipeline } from './agents/index.js';
-import GitHubService, { describeJwtSecretProblem } from './github.js';
+import GitHubService from './github.js';
 import { logger } from './utils/logger.js';
 import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
 import { performanceMonitor, getHealthStatus } from './utils/performance.js';
@@ -28,6 +28,12 @@ import { cloneRepository, getCloneLimits, CloneError, CLONE_ERRORS } from './uti
 import { createSupabaseVerifier, describeSupabaseConfigProblem, requireUser } from './utils/auth.js';
 import { attachRealtime } from './utils/realtime.js';
 import { toStatusResponse, toFilesResponse } from './utils/sessionView.js';
+import {
+  StoreUnavailableError,
+  createConnectionStoreFromEnv,
+  createOneTimeTokenStore,
+  describeConnectionStoreConfigProblem
+} from './utils/githubConnections.js';
 
 const app = express();
 const server = createServer(app);
@@ -39,7 +45,7 @@ const io = new Server(server, {
       "https://dev-pilot.vercel.app"    // production frontend URL
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-GitHub-Token']
+    allowedHeaders: ['Content-Type', 'Authorization']
   }
 });
 
@@ -63,7 +69,7 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-GitHub-Token']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Security headers
@@ -171,12 +177,74 @@ app.get('/api/analytics', (req, res) => {
 // Every other /api/* route requires a verified Supabase access token
 app.use('/api', requireUser(verifier));
 
+// GitHub connections
+//
+// GitHub tokens never leave the server: they are stored encrypted, keyed by the
+// Supabase user id (utils/githubConnections.js). startServer() validates the store
+// configuration and creates the store before the server accepts requests.
+let connectionStore = null;
+
+const CONNECT_TICKET_TTL_MS = 2 * 60 * 1000; // 2 minutes
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_PENDING_CONNECTS = 1000;
+
+// One-time ticket from an authenticated POST /api/github/connect, consumed by /auth/github
+const connectTickets = createOneTimeTokenStore({ ttlMs: CONNECT_TICKET_TTL_MS, maxEntries: MAX_PENDING_CONNECTS });
+// OAuth state -> the Supabase user who started the flow, consumed by the callback
+const pendingStates = createOneTimeTokenStore({ ttlMs: OAUTH_STATE_TTL_MS, maxEntries: MAX_PENDING_CONNECTS });
+
+const GITHUB_AUTH_REQUIRED_BODY = { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' };
+const GITHUB_AUTH_INVALID_BODY = { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' };
+const GITHUB_STORE_UNAVAILABLE_BODY = { error: 'GitHub connection service unavailable', code: 'GITHUB_STORE_UNAVAILABLE' };
+const GITHUB_CONNECT_BUSY_BODY = { error: 'Too many pending GitHub connections. Please try again shortly.', code: 'GITHUB_CONNECT_BUSY' };
+
+const sendStoreUnavailable = (res) => res.status(503).json(GITHUB_STORE_UNAVAILABLE_BODY);
+
+// Returns the decrypted connection of the signed-in user, or null after sending
+// 401 GITHUB_AUTH_REQUIRED (no connection) or 503 (store unavailable).
+// The token is looked up only by req.user.id; nothing from the request selects it.
+async function getGitHubConnection(req, res) {
+  let connection;
+  try {
+    connection = await connectionStore.get(req.user.id);
+  } catch (error) {
+    if (error instanceof StoreUnavailableError) {
+      sendStoreUnavailable(res);
+      return null;
+    }
+    throw error;
+  }
+  if (!connection) {
+    res.status(401).json(GITHUB_AUTH_REQUIRED_BODY);
+    return null;
+  }
+  return connection;
+}
+
+// GitHub rejected the stored token (revoked or expired): forget it, unless the user
+// has meanwhile reconnected with a different token
+async function dropRejectedConnection(userId, rejectedToken) {
+  try {
+    const current = await connectionStore.get(userId);
+    if (current && current.accessToken === rejectedToken) {
+      await connectionStore.delete(userId);
+    }
+  } catch (error) {
+    console.error(`Could not remove a rejected GitHub connection: ${error instanceof StoreUnavailableError ? 'store unavailable' : 'unexpected error'}`);
+  }
+}
+
+async function sendGitHubAuthInvalid(req, res, rejectedToken) {
+  await dropRejectedConnection(req.user.id, rejectedToken);
+  return res.status(401).json(GITHUB_AUTH_INVALID_BODY);
+}
+
 // GitHub OAuth Routes
 
 // OAuth state cookie: HttpOnly, single-use, scoped to the /auth/github routes.
 // Production frontends and backends sit on different sites, so use SameSite=None; Secure there.
 const OAUTH_STATE_COOKIE = 'oauth_state';
-const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
+const OAUTH_STATE_MAX_AGE_MS = OAUTH_STATE_TTL_MS;
 const isProduction = process.env.NODE_ENV === 'production';
 const oauthStateCookieOptions = {
   httpOnly: true,
@@ -194,11 +262,35 @@ const isValidOAuthState = (state, storedState) => {
   return received.length === expected.length && crypto.timingSafeEqual(received, expected);
 };
 
-// Initiate GitHub OAuth. The browser navigates here (top-level), so the state
+// The browser lands on /auth/success with a status or an error code, never a token
+const redirectToClient = (res, query) => res.redirect(`${process.env.CLIENT_URL}/auth/success?${query}`);
+const redirectWithError = (res, code) => redirectToClient(res, `error=${code}`);
+
+// Step 1 (authenticated): issue a one-time ticket that starts a connect flow for this user
+app.post('/api/github/connect', (req, res) => {
+  const ticket = connectTickets.issue(req.user.id);
+  if (!ticket) {
+    return res.status(503).json(GITHUB_CONNECT_BUSY_BODY);
+  }
+  res.set('Cache-Control', 'no-store');
+  res.json({ ticket });
+});
+
+// Step 2: initiate GitHub OAuth. The browser navigates here (top-level), so the state
 // cookie is first-party and survives browsers that block third-party cookies.
+// Only a valid, unexpired ticket can start a flow; it is consumed on every outcome.
 app.get('/auth/github', (req, res) => {
   try {
-    const state = crypto.randomBytes(32).toString('hex'); // CSRF protection
+    const userId = connectTickets.consume(req.query.ticket);
+    if (!userId) {
+      return redirectWithError(res, 'connect_expired');
+    }
+
+    // CSRF protection, bound server-side to the user who obtained the ticket
+    const state = pendingStates.issue(userId);
+    if (!state) {
+      return redirectWithError(res, 'github_auth_failed');
+    }
     const authUrl = GitHubService.getAuthURL(state);
     
     res.cookie(OAUTH_STATE_COOKIE, state, { ...oauthStateCookieOptions, maxAge: OAUTH_STATE_MAX_AGE_MS });
@@ -206,97 +298,123 @@ app.get('/auth/github', (req, res) => {
     res.redirect(authUrl);
   } catch (error) {
     console.error('GitHub OAuth initiation error:', error.message);
-    res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
+    redirectWithError(res, 'github_auth_failed');
   }
 });
 
-// GitHub OAuth callback
+// Step 3: GitHub OAuth callback. The connection is stored for the user bound to the
+// state, never for anyone identified by this request.
 app.get('/auth/github/callback', async (req, res) => {
-  const { code, state } = req.query;
+  const { code, state, error: oauthError } = req.query;
   const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
   
-  // The state is single-use: clear it whether or not validation succeeds
+  // The state is single-use: clear the cookie and consume the pending state
+  // whether or not validation succeeds
   res.clearCookie(OAUTH_STATE_COOKIE, oauthStateCookieOptions);
+  const userId = pendingStates.consume(typeof state === 'string' ? state : undefined);
   
   // Verify state to prevent CSRF attacks
-  if (!isValidOAuthState(state, storedState)) {
-    return res.redirect(`${process.env.CLIENT_URL}/auth?error=invalid_state`);
+  if (!isValidOAuthState(state, storedState) || !userId) {
+    return redirectWithError(res, 'invalid_state');
+  }
+
+  if (oauthError !== undefined) {
+    return redirectWithError(res, oauthError === 'access_denied' ? 'access_denied' : 'github_auth_failed');
   }
   
   if (typeof code !== 'string' || !code) {
-    return res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
+    return redirectWithError(res, 'github_auth_failed');
   }
   
   try {
     // Exchange code for access token
-    const accessToken = await GitHubService.getAccessToken(code);
+    const { accessToken, scope } = await GitHubService.getAccessToken(code);
     
     // Get user information
     const userInfo = await GitHubService.getUserInfo(accessToken);
     
-    // Generate JWT token
-    const jwtToken = GitHubService.generateJWT({
-      id: userInfo.id,
+    await connectionStore.put(userId, {
+      githubUserId: userInfo.id,
       login: userInfo.login,
       name: userInfo.name,
-      email: userInfo.email,
       avatarUrl: userInfo.avatar_url,
-      accessToken: accessToken
+      scopes: scope,
+      accessToken,
+      connectedAt: new Date()
     });
     
-    // Redirect to frontend with JWT token
-    res.redirect(`${process.env.CLIENT_URL}/auth/success?token=${jwtToken}`);
+    // No token or JWT in the redirect: the client asks /api/github/status
+    redirectToClient(res, 'status=connected');
     
   } catch (error) {
-    console.error('GitHub OAuth callback error:', error.message);
-    res.redirect(`${process.env.CLIENT_URL}/auth?error=github_auth_failed`);
+    console.error(`GitHub OAuth callback error: ${error instanceof StoreUnavailableError ? 'connection store unavailable' : error.message}`);
+    redirectWithError(res, 'github_auth_failed');
   }
 });
 
-// The GitHub session JWT travels in X-GitHub-Token; Authorization carries the Supabase token.
-// Transitional until GitHub tokens are kept on the server (B1.3).
-const GITHUB_AUTH_REQUIRED_BODY = { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' };
-const GITHUB_SESSION_INVALID_MESSAGE = 'GitHub session is invalid or expired. Please reconnect GitHub.';
-
-// Returns the verified GitHub session payload, or null after sending a 401.
-// Configuration errors (missing JWT_SECRET) are rethrown for the caller's 500 handling.
-function readGitHubSession(req, res, invalidMessage = GITHUB_SESSION_INVALID_MESSAGE) {
-  const raw = req.get('x-github-token');
-  if (typeof raw !== 'string' || raw.trim() === '') {
-    res.status(401).json(GITHUB_AUTH_REQUIRED_BODY);
-    return null;
-  }
+// Connection status for the signed-in user. Makes no GitHub API call.
+app.get('/api/github/status', async (req, res) => {
   try {
-    return GitHubService.verifyJWT(raw.trim());
+    const connection = await connectionStore.get(req.user.id);
+    if (!connection) {
+      return res.json({ connected: false });
+    }
+    res.json({
+      connected: true,
+      user: { login: connection.login, name: connection.name, avatarUrl: connection.avatarUrl },
+      connectedAt: connection.connectedAt
+    });
   } catch (error) {
-    if (error.message !== 'Invalid token') throw error;
-    res.status(401).json({ error: invalidMessage, code: 'GITHUB_AUTH_INVALID' });
-    return null;
+    if (error instanceof StoreUnavailableError) return sendStoreUnavailable(res);
+    console.error(`GitHub status error: ${redactSecrets(error)}`);
+    res.status(500).json({ error: 'Failed to read GitHub connection' });
   }
-}
+});
+
+// Disconnect: revoke the grant at GitHub (best effort), then always forget the token
+app.delete('/api/github/connection', async (req, res) => {
+  try {
+    const connection = await connectionStore.get(req.user.id);
+    if (connection) {
+      const revocation = await GitHubService.revokeGrant(connection.accessToken);
+      if (!revocation.ok) {
+        // Only the HTTP status (or "timeout" / "network error"); never the request
+        const reason = typeof revocation.status === 'number' ? `HTTP ${revocation.status}` : revocation.status;
+        console.warn(`grant revocation failed: ${reason}`);
+      }
+      await connectionStore.delete(req.user.id);
+    }
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof StoreUnavailableError) return sendStoreUnavailable(res);
+    console.error(`GitHub disconnect error: ${redactSecrets(error)}`);
+    res.status(500).json({ error: 'Failed to disconnect GitHub' });
+  }
+});
 
 // Get user repositories
 app.get('/api/github/repositories', async (req, res) => {
+  let connection;
   try {
-    const userData = readGitHubSession(req, res, 'Invalid or expired token');
-    if (!userData) return;
+    connection = await getGitHubConnection(req, res);
+    if (!connection) return;
     const { page = 1, per_page = 50 } = req.query;
     
     // Get user repositories
     const repositories = await GitHubService.getUserRepositories(
-      userData.accessToken, 
+      connection.accessToken, 
       parseInt(page), 
       parseInt(per_page)
     );
     
     // Get organizations
-    const organizations = await GitHubService.getUserOrganizations(userData.accessToken);
+    const organizations = await GitHubService.getUserOrganizations(connection.accessToken);
     
     res.json({
       user: {
-        login: userData.login,
-        name: userData.name,
-        avatarUrl: userData.avatarUrl
+        login: connection.login,
+        name: connection.name,
+        avatarUrl: connection.avatarUrl
       },
       repositories,
       organizations,
@@ -308,24 +426,25 @@ app.get('/api/github/repositories', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get repositories error:', error);
-    if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
+    if (error.code === 'GITHUB_UNAUTHORIZED') {
+      return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    console.error(`Get repositories error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to fetch repositories' });
   }
 });
 
 // Get organization repositories
 app.get('/api/github/organizations/:org/repositories', async (req, res) => {
+  let connection;
   try {
-    const userData = readGitHubSession(req, res, 'Invalid or expired token');
-    if (!userData) return;
+    connection = await getGitHubConnection(req, res);
+    if (!connection) return;
     const { org } = req.params;
     const { page = 1, per_page = 50 } = req.query;
     
     const repositories = await GitHubService.getOrgRepositories(
-      userData.accessToken, 
+      connection.accessToken, 
       org, 
       parseInt(page), 
       parseInt(per_page)
@@ -342,40 +461,41 @@ app.get('/api/github/organizations/:org/repositories', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get org repositories error:', error);
-    if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
+    if (error.code === 'GITHUB_UNAUTHORIZED') {
+      return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    console.error(`Get org repositories error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to fetch organization repositories' });
   }
 });
 
 // Verify user access to repository
 app.post('/api/github/verify-repo', async (req, res) => {
+  let connection;
   try {
-    const userData = readGitHubSession(req, res, 'Invalid or expired token');
-    if (!userData) return;
+    connection = await getGitHubConnection(req, res);
+    if (!connection) return;
     const { owner, repo } = req.body;
     
     if (!owner || !repo) {
       return res.status(400).json({ error: 'Owner and repository name are required' });
     }
     
-    const accessResult = await GitHubService.checkRepoAccess(userData.accessToken, owner, repo);
+    const accessResult = await GitHubService.checkRepoAccess(connection.accessToken, owner, repo);
     
     res.json(accessResult);
     
   } catch (error) {
-    console.error('Verify repo access error:', error);
-    if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
+    if (error.code === 'GITHUB_UNAUTHORIZED') {
+      return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    console.error(`Verify repo access error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to verify repository access' });
   }
 });
 
 // Clone repository endpoint
-// GitHub tokens are accepted only for the duration of this request: they are never stored
+// GitHub tokens are used only for the duration of this request: they are never stored
 // in the session, embedded in a URL, returned, logged or passed to the agents.
 const GITHUB_TOKEN_PATTERN = /^[A-Za-z0-9_]{1,255}$/;
 const isAbsent = (value) => value === undefined || value === null;
@@ -407,24 +527,19 @@ async function handleCloneRequest(req, res) {
   let token = null;
 
   if (!isAbsent(repositoryData)) {
-    // User selected from their GitHub repositories (takes precedence over repoUrl)
-    let userData;
-    try {
-      userData = readGitHubSession(req, res);
-    } catch (error) {
-      console.error(`Clone auth error: ${redactSecrets(error.message)}`);
-      return res.status(500).json({ error: 'Internal server error' });
-    }
-    if (!userData) return;
-
+    // User selected from their GitHub repositories (takes precedence over repoUrl).
+    // Validate the input before touching the store or GitHub.
     const requested = parseRepositoryData(repositoryData);
     if (!requested) {
       return res.status(400).json({ error: 'Invalid repository data' });
     }
 
-    const accessToken = userData?.accessToken;
+    const connection = await getGitHubConnection(req, res);
+    if (!connection) return;
+
+    const accessToken = connection.accessToken;
     if (typeof accessToken !== 'string' || !GITHUB_TOKEN_PATTERN.test(accessToken)) {
-      return res.status(401).json({ error: GITHUB_SESSION_INVALID_MESSAGE, code: 'GITHUB_AUTH_INVALID' });
+      return sendGitHubAuthInvalid(req, res, accessToken);
     }
 
     let access;
@@ -432,7 +547,7 @@ async function handleCloneRequest(req, res) {
       access = await GitHubService.checkRepoAccess(accessToken, requested.owner, requested.repo);
     } catch (error) {
       if (error.code === 'GITHUB_UNAUTHORIZED') {
-        return res.status(401).json({ error: GITHUB_SESSION_INVALID_MESSAGE, code: 'GITHUB_AUTH_INVALID' });
+        return sendGitHubAuthInvalid(req, res, accessToken);
       }
       console.error(`Clone access check failed: ${redactSecrets(error.message, [accessToken])}`);
       return sendCloneError(res, 'CLONE_FAILED');
@@ -770,18 +885,22 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server
 async function startServer() {
-  // Refuse to start with a secret that would let anyone forge GitHub session tokens
-  const jwtSecretProblem = describeJwtSecretProblem(process.env.JWT_SECRET);
-  if (jwtSecretProblem) {
-    console.error(`❌ JWT_SECRET ${jwtSecretProblem}. Set JWT_SECRET to a random value of at least 32 characters.`);
-    process.exit(1);
-  }
-
   // Refuse to start without a usable Supabase configuration: every /api route depends on it
   const supabaseProblem = describeSupabaseConfigProblem(process.env);
   if (supabaseProblem) {
     console.error(`❌ ${supabaseProblem}. Set SUPABASE_URL (https://<project>.supabase.co) and SUPABASE_ANON_KEY.`);
     process.exit(1);
+  }
+
+  // Refuse to start without an explicit, valid GitHub token store and encryption key
+  const storeProblem = describeConnectionStoreConfigProblem(process.env);
+  if (storeProblem) {
+    console.error(`❌ ${storeProblem}.`);
+    process.exit(1);
+  }
+  connectionStore = createConnectionStoreFromEnv(process.env);
+  if (connectionStore.kind === 'memory' && isProduction) {
+    console.warn('⚠️ GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart. Use "supabase" in production.');
   }
 
   try {

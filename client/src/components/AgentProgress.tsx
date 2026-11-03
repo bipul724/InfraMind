@@ -142,8 +142,14 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       }
     });
 
-    newSocket.on('disconnect', () => {
+    newSocket.on('disconnect', (reason) => {
       console.log('❌ Disconnected from InfraMind server');
+      // The server disconnects sockets whose access token expired; Socket.IO does not
+      // reconnect those on its own. Reconnecting runs the auth callback, which
+      // supplies a refreshed token.
+      if (reason === 'io server disconnect') {
+        newSocket.connect();
+      }
     });
 
     // Listen for progress updates
