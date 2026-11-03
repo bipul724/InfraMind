@@ -9,6 +9,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startFakeSupabase, USER_A, USER_B } from './fakeSupabase.js';
+import { startFakeLlm } from './fakeLlm.js';
 
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SERVER_ENTRY = path.join(SERVER_DIR, 'server.js');
@@ -54,6 +56,31 @@ export async function pathExists(target) {
 // Every log line captured from every spawned server in this test process
 export const allCapturedLogs = [];
 
+// One fake Supabase and one fake LLM per test process, shared by every spawned server
+let fakes = null;
+
+export async function getFakes() {
+  if (!fakes) {
+    const supabase = await startFakeSupabase();
+    const llm = await startFakeLlm();
+    fakes = {
+      supabase,
+      llm,
+      tokens: { A: supabase.issueToken(USER_A), B: supabase.issueToken(USER_B) }
+    };
+  }
+  return fakes;
+}
+
+export async function closeFakes() {
+  if (!fakes) return;
+  const current = fakes;
+  fakes = null;
+  await Promise.all([current.supabase.close(), current.llm.close()]);
+}
+
+export const authHeaders = (token) => ({ Authorization: `Bearer ${token}` });
+
 export function buildEnv(cwd, port, overrides = {}) {
   const env = {
     PATH: process.env.PATH,
@@ -68,6 +95,9 @@ export function buildEnv(cwd, port, overrides = {}) {
     KEYWORDS_AI_API_KEY: '',
     GITHUB_CLIENT_ID: '',
     GITHUB_CLIENT_SECRET: '',
+    SUPABASE_URL: fakes?.supabase.url,
+    SUPABASE_ANON_KEY: fakes?.supabase.anonKey,
+    LLAMA_API_BASE_URL: fakes?.llm.url,
     DOTENV_CONFIG_PATH: path.join(cwd, 'does-not-exist.env')
   };
   for (const [key, value] of Object.entries(overrides)) {
@@ -89,6 +119,7 @@ function spawnServer(cwd, env) {
 
 // Start a server and wait until /health answers
 export async function startServer({ envOverrides = {}, cwd } = {}) {
+  await getFakes();
   const workDir = cwd || await makeTempDir();
   const port = await getFreePort();
   const env = buildEnv(workDir, port, envOverrides);
@@ -135,6 +166,7 @@ export async function startServer({ envOverrides = {}, cwd } = {}) {
 
 // Spawn a server that is expected to exit; resolves with its exit code and output
 export async function runServerExpectingExit({ envOverrides = {}, cwd, timeoutMs = 10000 } = {}) {
+  await getFakes();
   const workDir = cwd || await makeTempDir();
   const port = await getFreePort();
   const env = buildEnv(workDir, port, envOverrides);

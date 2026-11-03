@@ -55,7 +55,14 @@ describe('parseGitHubRepoUrl', () => {
     '/tmp/repo',
     '../../x',
     'git@github.com:a/b.git',
-    ''
+    '',
+    // Lookalike hosts (B1.2, T-117a)
+    'https://evilgithub.com/a/b',
+    'https://notgithub.com/a/b',
+    'https://github.com./a/b',
+    'https://api.github.com/a/b',
+    'https://gist.github.com/a/b',
+    'https://www.github.com/a/b'
   ];
 
   for (const input of rejected) {

@@ -9,7 +9,10 @@ import path from 'node:path';
 import jwt from 'jsonwebtoken';
 import {
   allCapturedLogs,
+  authHeaders,
+  closeFakes,
   createFixtureRepo,
+  getFakes,
   getFreePort,
   makeTempDir,
   pathExists,
@@ -27,6 +30,11 @@ const PLACEHOLDER_SECRET = 'your-jwt-secret-change-in-production';
 const signFor = (secret) =>
   jwt.sign({ id: 1, login: 't', accessToken: FAKE_ACCESS_TOKEN }, secret, { expiresIn: '1h' });
 
+// B1.2: every /api/* call now needs a verified Supabase token (user A from the fake)
+let authA;
+before(async () => { authA = authHeaders((await getFakes()).tokens.A); });
+after(async () => { await closeFakes(); });
+
 const listDir = async (dir) => {
   try {
     return await fs.readdir(dir);
@@ -41,12 +49,12 @@ describe('removed endpoints, input validation and body handling', () => {
   after(async () => { await server?.stop(); });
 
   test('GET /api/sessions is gone', async () => {
-    const response = await fetch(`${server.baseUrl}/api/sessions`);
+    const response = await fetch(`${server.baseUrl}/api/sessions`, { headers: authA });
     assert.equal(response.status, 404);
   });
 
   test('POST /api/devpilot is gone', async () => {
-    const response = await postJson(server.baseUrl, '/api/devpilot', { repoUrl: 'https://github.com/octocat/Hello-World' });
+    const response = await postJson(server.baseUrl, '/api/devpilot', { repoUrl: 'https://github.com/octocat/Hello-World' }, authA);
     assert.equal(response.status, 404);
   });
 
@@ -60,7 +68,7 @@ describe('removed endpoints, input validation and body handling', () => {
   ];
   for (const body of badBodies) {
     test(`clone-repo rejects ${JSON.stringify(body)} with 400 without echoing it`, async () => {
-      const response = await postJson(server.baseUrl, '/api/clone-repo', body);
+      const response = await postJson(server.baseUrl, '/api/clone-repo', body, authA);
       assert.equal(response.status, 400);
       assert.equal(typeof response.json?.error, 'string');
       if (body.repoUrl !== undefined) {
@@ -73,13 +81,13 @@ describe('removed endpoints, input validation and body handling', () => {
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World',
       authToken: 'abc\r\nX-Injected: 1'
-    });
+    }, authA);
     assert.equal(response.status, 400);
     assert.ok(!response.text.includes('X-Injected'));
   });
 
   test('malformed JSON is a 400 without parser details', async () => {
-    const response = await postJson(server.baseUrl, '/api/clone-repo', '{bad');
+    const response = await postJson(server.baseUrl, '/api/clone-repo', '{bad', authA);
     assert.equal(response.status, 400);
     assert.deepEqual(response.json, { error: 'Invalid JSON body' });
     assert.ok(!response.text.includes('Expected'));
@@ -90,7 +98,7 @@ describe('removed endpoints, input validation and body handling', () => {
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World',
       padding: 'x'.repeat(200 * 1024)
-    });
+    }, authA);
     assert.equal(response.status, 413);
     assert.deepEqual(response.json, { error: 'Request body too large' });
   });
@@ -108,10 +116,11 @@ describe('authenticated clone path (repositoryData)', () => {
   const repositoryData = { fullName: 'octocat/Hello-World', name: 'Hello-World', owner: { login: 'octocat' } };
 
   test('without Authorization is a 401', async () => {
+    // B1.2: the GitHub session moved to X-GitHub-Token; it is absent here
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World.git',
       repositoryData
-    });
+    }, authA);
     assert.equal(response.status, 401);
   });
 
@@ -120,10 +129,11 @@ describe('authenticated clone path (repositoryData)', () => {
       server.baseUrl,
       '/api/clone-repo',
       { repoUrl: 'https://github.com/octocat/Hello-World.git', repositoryData },
-      { Authorization: 'Bearer garbage' }
+      { ...authA, 'X-GitHub-Token': 'garbage' }
     );
     assert.equal(response.status, 401);
-    assert.deepEqual(response.json, { error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+    // B1.2 adds the machine-readable code to this body (prompt D.3.3)
+    assert.deepEqual(response.json, { error: 'GitHub session is invalid or expired. Please reconnect GitHub.', code: 'GITHUB_AUTH_INVALID' });
   });
 
   test('path traversal and a local cloneUrl are rejected before anything touches disk', async () => {
@@ -144,7 +154,7 @@ describe('authenticated clone path (repositoryData)', () => {
           cloneUrl: fixtureRepo
         }
       },
-      { Authorization: `Bearer ${signFor(server.env.JWT_SECRET)}` }
+      { ...authA, 'X-GitHub-Token': signFor(server.env.JWT_SECRET) }
     );
 
     assert.equal(response.status, 400);
@@ -170,7 +180,7 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World',
       authToken: token
-    });
+    }, authA);
 
     assert.equal(response.status, 502);
     assert.deepEqual(response.json, { error: 'Failed to clone repository', code: 'CLONE_FAILED' });
@@ -180,7 +190,7 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
     assert.ok(match, 'server should log one redacted clone failure line');
     const sessionId = match[1];
 
-    const status = await fetch(`${server.baseUrl}/api/status/${sessionId}`);
+    const status = await fetch(`${server.baseUrl}/api/status/${sessionId}`, { headers: authA });
     const statusText = await status.text();
     const statusJson = JSON.parse(statusText);
     assert.equal(statusJson.status, 'failed');
@@ -236,7 +246,7 @@ describe('.env is loaded before modules read configuration (NEW-01)', () => {
       server.baseUrl,
       '/api/clone-repo',
       { repositoryData: { fullName: 'not a valid/name/at all' } },
-      { Authorization: `Bearer ${signFor(envFileSecret)}` }
+      { ...authA, 'X-GitHub-Token': signFor(envFileSecret) }
     );
     assert.equal(response.status, 400, 'should pass auth and fail on the malformed fullName');
   });
@@ -246,7 +256,7 @@ describe('.env is loaded before modules read configuration (NEW-01)', () => {
       server.baseUrl,
       '/api/clone-repo',
       { repositoryData: { fullName: 'not a valid/name/at all' } },
-      { Authorization: `Bearer ${signFor(PLACEHOLDER_SECRET)}` }
+      { ...authA, 'X-GitHub-Token': signFor(PLACEHOLDER_SECRET) }
     );
     assert.equal(response.status, 401);
   });
@@ -258,7 +268,7 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
   after(async () => { await server?.stop(); });
 
   test('clones a public repository into temp/<id>/repo without exposing the path', { timeout: 120000 }, async () => {
-    const response = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' });
+    const response = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }, authA);
     assert.equal(response.status, 200, response.text);
     assert.equal(response.json.success, true);
     assert.equal(response.json.repoName, 'Hello-World');
@@ -266,7 +276,7 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
     assert.ok(!response.text.includes(server.cwd));
 
     const { sessionId } = response.json;
-    const status = await (await fetch(`${server.baseUrl}/api/status/${sessionId}`)).json();
+    const status = await (await fetch(`${server.baseUrl}/api/status/${sessionId}`, { headers: authA })).json();
     assert.equal(status.repoUrl, 'https://github.com/octocat/Hello-World');
     assert.equal(status.status, 'cloned');
     assert.equal(await pathExists(path.join(server.cwd, 'temp', sessionId, 'repo', 'README')), true);
@@ -278,7 +288,7 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: `https://github.com/octocat/inframind-nonexistent-${randomAlphanumeric(12)}`,
       authToken: token
-    });
+    }, authA);
 
     assert.equal(response.status, 404, response.text);
     assert.deepEqual(response.json, { error: 'Repository not found or access denied', code: 'REPO_NOT_FOUND' });
@@ -288,7 +298,7 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
     assert.ok(match, 'server should log one redacted clone failure line');
     const sessionId = match[1];
 
-    const statusText = await (await fetch(`${server.baseUrl}/api/status/${sessionId}`)).text();
+    const statusText = await (await fetch(`${server.baseUrl}/api/status/${sessionId}`, { headers: authA })).text();
     assert.equal(JSON.parse(statusText).status, 'failed');
     assert.equal(await pathExists(path.join(server.cwd, 'temp', sessionId)), false);
 
@@ -301,8 +311,8 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
 
   test('two concurrent clones get separate session directories', { timeout: 120000 }, async () => {
     const [first, second] = await Promise.all([
-      postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }),
-      postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World.git' })
+      postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }, authA),
+      postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World.git' }, authA)
     ]);
     assert.equal(first.status, 200, first.text);
     assert.equal(second.status, 200, second.text);

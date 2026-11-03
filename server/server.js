@@ -20,10 +20,14 @@ import {
   parseRepositoryData,
   parseFullName,
   buildDisplayUrl,
+  isUuidV4,
   resolveSessionClonePath,
   redactSecrets
 } from './utils/repository.js';
 import { cloneRepository, getCloneLimits, CloneError, CLONE_ERRORS } from './utils/git.js';
+import { createSupabaseVerifier, describeSupabaseConfigProblem, requireUser } from './utils/auth.js';
+import { attachRealtime } from './utils/realtime.js';
+import { toStatusResponse, toFilesResponse } from './utils/sessionView.js';
 
 const app = express();
 const server = createServer(app);
@@ -35,13 +39,20 @@ const io = new Server(server, {
       "https://dev-pilot.vercel.app"    // production frontend URL
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-GitHub-Token']
   }
 });
 
 
 const PORT = process.env.PORT || 3001;
 const TEMP_DIR = path.join(process.cwd(), 'temp');
+
+// One Supabase verifier shared by HTTP routes and Socket.IO.
+// startServer() refuses to start when this configuration is invalid.
+const verifier = createSupabaseVerifier({
+  supabaseUrl: process.env.SUPABASE_URL,
+  anonKey: process.env.SUPABASE_ANON_KEY
+});
 
 // Middleware
 app.use(cors({
@@ -52,7 +63,7 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-GitHub-Token']
 }));
 
 // Security headers
@@ -84,20 +95,22 @@ async function initializeTempDir() {
   }
 }
 
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-  
-  socket.on('disconnect', () => {
-    console.log(`Client disconnected: ${socket.id}`);
-  });
+// Socket.io: authenticated handshake, private per-session rooms
+const { emitProgress } = attachRealtime(io, {
+  verifier,
+  getSession: (sessionId) => activeSessions.get(sessionId)
 });
 
-// Helper function to emit progress updates
-function emitProgress(sessionId, data) {
-  io.emit('progress', { sessionId, ...data });
-  console.log(`Progress update for ${sessionId}:`, data);
+// Returns the session only if it exists and belongs to the authenticated user.
+// Unknown and foreign sessions are indistinguishable to the caller.
+function getOwnedSession(req, sessionId) {
+  if (!isUuidV4(sessionId)) return null;
+  const session = activeSessions.get(sessionId);
+  if (!session || session.userId !== req.user?.id) return null;
+  return session;
 }
+
+const sendSessionNotFound = (res) => res.status(404).json({ error: 'Session not found' });
 
 // API Routes
 
@@ -116,8 +129,24 @@ app.get('/health', (req, res) => {
   }
 });
 
+// Operator-only endpoints: enabled only when METRICS_TOKEN (32+ characters) is set,
+// and then only for requests carrying a matching X-Metrics-Token header.
+// Every other case is a 404 so the endpoints do not reveal that they exist.
+function hasMetricsAccess(req) {
+  const expected = process.env.METRICS_TOKEN;
+  if (typeof expected !== 'string' || expected.length < 32) return false;
+  const provided = req.get('x-metrics-token');
+  if (typeof provided !== 'string') return false;
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+const sendNotFound = (res) => res.status(404).json({ error: 'Not found' });
+
 // Performance metrics endpoint
 app.get('/api/metrics', (req, res) => {
+  if (!hasMetricsAccess(req)) return sendNotFound(res);
   try {
     const metrics = performanceMonitor.getMetrics();
     res.json(metrics);
@@ -129,6 +158,7 @@ app.get('/api/metrics', (req, res) => {
 
 // Session analytics endpoint
 app.get('/api/analytics', (req, res) => {
+  if (!hasMetricsAccess(req)) return sendNotFound(res);
   try {
     const analytics = performanceMonitor.getSessionAnalytics();
     res.json(analytics);
@@ -137,6 +167,9 @@ app.get('/api/analytics', (req, res) => {
     res.status(500).json({ error: 'Failed to retrieve analytics' });
   }
 });
+
+// Every other /api/* route requires a verified Supabase access token
+app.use('/api', requireUser(verifier));
 
 // GitHub OAuth Routes
 
@@ -220,16 +253,33 @@ app.get('/auth/github/callback', async (req, res) => {
   }
 });
 
+// The GitHub session JWT travels in X-GitHub-Token; Authorization carries the Supabase token.
+// Transitional until GitHub tokens are kept on the server (B1.3).
+const GITHUB_AUTH_REQUIRED_BODY = { error: 'Connect GitHub to use your repositories', code: 'GITHUB_AUTH_REQUIRED' };
+const GITHUB_SESSION_INVALID_MESSAGE = 'GitHub session is invalid or expired. Please reconnect GitHub.';
+
+// Returns the verified GitHub session payload, or null after sending a 401.
+// Configuration errors (missing JWT_SECRET) are rethrown for the caller's 500 handling.
+function readGitHubSession(req, res, invalidMessage = GITHUB_SESSION_INVALID_MESSAGE) {
+  const raw = req.get('x-github-token');
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    res.status(401).json(GITHUB_AUTH_REQUIRED_BODY);
+    return null;
+  }
+  try {
+    return GitHubService.verifyJWT(raw.trim());
+  } catch (error) {
+    if (error.message !== 'Invalid token') throw error;
+    res.status(401).json({ error: invalidMessage, code: 'GITHUB_AUTH_INVALID' });
+    return null;
+  }
+}
+
 // Get user repositories
 app.get('/api/github/repositories', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    const token = authHeader.substring(7);
-    const userData = GitHubService.verifyJWT(token);
+    const userData = readGitHubSession(req, res, 'Invalid or expired token');
+    if (!userData) return;
     const { page = 1, per_page = 50 } = req.query;
     
     // Get user repositories
@@ -260,7 +310,7 @@ app.get('/api/github/repositories', async (req, res) => {
   } catch (error) {
     console.error('Get repositories error:', error);
     if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
     }
     res.status(500).json({ error: 'Failed to fetch repositories' });
   }
@@ -269,13 +319,8 @@ app.get('/api/github/repositories', async (req, res) => {
 // Get organization repositories
 app.get('/api/github/organizations/:org/repositories', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    const token = authHeader.substring(7);
-    const userData = GitHubService.verifyJWT(token);
+    const userData = readGitHubSession(req, res, 'Invalid or expired token');
+    if (!userData) return;
     const { org } = req.params;
     const { page = 1, per_page = 50 } = req.query;
     
@@ -299,7 +344,7 @@ app.get('/api/github/organizations/:org/repositories', async (req, res) => {
   } catch (error) {
     console.error('Get org repositories error:', error);
     if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
     }
     res.status(500).json({ error: 'Failed to fetch organization repositories' });
   }
@@ -308,13 +353,8 @@ app.get('/api/github/organizations/:org/repositories', async (req, res) => {
 // Verify user access to repository
 app.post('/api/github/verify-repo', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    
-    const token = authHeader.substring(7);
-    const userData = GitHubService.verifyJWT(token);
+    const userData = readGitHubSession(req, res, 'Invalid or expired token');
+    if (!userData) return;
     const { owner, repo } = req.body;
     
     if (!owner || !repo) {
@@ -328,7 +368,7 @@ app.post('/api/github/verify-repo', async (req, res) => {
   } catch (error) {
     console.error('Verify repo access error:', error);
     if (error.message === 'Invalid token') {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+      return res.status(401).json({ error: 'Invalid or expired token', code: 'GITHUB_AUTH_INVALID' });
     }
     res.status(500).json({ error: 'Failed to verify repository access' });
   }
@@ -368,21 +408,14 @@ async function handleCloneRequest(req, res) {
 
   if (!isAbsent(repositoryData)) {
     // User selected from their GitHub repositories (takes precedence over repoUrl)
-    const authHeader = req.headers.authorization;
-    if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication required for private repositories' });
-    }
-
     let userData;
     try {
-      userData = GitHubService.verifyJWT(authHeader.substring(7));
+      userData = readGitHubSession(req, res);
     } catch (error) {
-      if (error.message === 'Invalid token') {
-        return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
-      }
       console.error(`Clone auth error: ${redactSecrets(error.message)}`);
       return res.status(500).json({ error: 'Internal server error' });
     }
+    if (!userData) return;
 
     const requested = parseRepositoryData(repositoryData);
     if (!requested) {
@@ -391,7 +424,7 @@ async function handleCloneRequest(req, res) {
 
     const accessToken = userData?.accessToken;
     if (typeof accessToken !== 'string' || !GITHUB_TOKEN_PATTERN.test(accessToken)) {
-      return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+      return res.status(401).json({ error: GITHUB_SESSION_INVALID_MESSAGE, code: 'GITHUB_AUTH_INVALID' });
     }
 
     let access;
@@ -399,7 +432,7 @@ async function handleCloneRequest(req, res) {
       access = await GitHubService.checkRepoAccess(accessToken, requested.owner, requested.repo);
     } catch (error) {
       if (error.code === 'GITHUB_UNAUTHORIZED') {
-        return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+        return res.status(401).json({ error: GITHUB_SESSION_INVALID_MESSAGE, code: 'GITHUB_AUTH_INVALID' });
       }
       console.error(`Clone access check failed: ${redactSecrets(error.message, [accessToken])}`);
       return sendCloneError(res, 'CLONE_FAILED');
@@ -436,6 +469,7 @@ async function handleCloneRequest(req, res) {
 
   // Create session (no credentials, no client-supplied URLs)
   const session = {
+    userId: req.user.id,
     owner: identity.owner,
     repo: identity.repo,
     fullName,
@@ -513,11 +547,11 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
   try {
     const { sessionId } = req.body;
     
-    if (!sessionId || !activeSessions.has(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID' });
+    // Ownership first, so a non-owner never learns the session's status
+    const session = getOwnedSession(req, sessionId);
+    if (!session) {
+      return sendSessionNotFound(res);
     }
-    
-    const session = activeSessions.get(sessionId);
     
     if (session.status !== 'cloned') {
       return res.status(400).json({ error: 'Repository not ready for analysis' });
@@ -576,8 +610,8 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     console.error(`Analysis error: ${redactSecrets(error)}`);
     
     const failedSessionId = req.body?.sessionId;
-    if (activeSessions.has(failedSessionId)) {
-      const session = activeSessions.get(failedSessionId);
+    const session = getOwnedSession(req, failedSessionId);
+    if (session) {
       session.status = 'failed';
       session.error = 'Analysis failed';
       
@@ -598,29 +632,16 @@ app.get('/api/files/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     
-    if (!sessionId || !activeSessions.has(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID' });
+    const session = getOwnedSession(req, sessionId);
+    if (!session) {
+      return sendSessionNotFound(res);
     }
-    
-    const session = activeSessions.get(sessionId);
     
     if (session.status !== 'completed' || !session.analysisResult) {
       return res.status(400).json({ error: 'Analysis not completed' });
     }
     
-    const { generatedFiles, techStack, codebaseAnalysis, verificationResults } = session.analysisResult;
-    
-    res.json({
-      files: generatedFiles,
-      techStack,
-      codebaseAnalysis,
-      verificationResults,
-      metadata: {
-        repoUrl: session.displayUrl,
-        repoName: session.repoName,
-        completedAt: session.completedAt
-      }
-    });
+    res.json(toFilesResponse(session));
     
   } catch (error) {
     console.error(`Files retrieval error: ${redactSecrets(error)}`);
@@ -633,11 +654,10 @@ app.get('/api/files/:sessionId/:filename', async (req, res) => {
   try {
     const { sessionId, filename } = req.params;
     
-    if (!sessionId || !activeSessions.has(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID' });
+    const session = getOwnedSession(req, sessionId);
+    if (!session) {
+      return sendSessionNotFound(res);
     }
-    
-    const session = activeSessions.get(sessionId);
     
     if (session.status !== 'completed' || !session.analysisResult) {
       return res.status(400).json({ error: 'Analysis not completed' });
@@ -685,23 +705,12 @@ app.get('/api/status/:sessionId', (req, res) => {
   try {
     const { sessionId } = req.params;
     
-    if (!sessionId || !activeSessions.has(sessionId)) {
-      return res.status(404).json({ error: 'Session not found' });
+    const session = getOwnedSession(req, sessionId);
+    if (!session) {
+      return sendSessionNotFound(res);
     }
     
-    const session = activeSessions.get(sessionId);
-    
-    res.json({
-      sessionId,
-      status: session.status,
-      repoUrl: session.displayUrl,
-      repoName: session.repoName,
-      createdAt: session.createdAt,
-      clonedAt: session.clonedAt,
-      analysisStartedAt: session.analysisStartedAt,
-      completedAt: session.completedAt,
-      error: session.error
-    });
+    res.json(toStatusResponse(sessionId, session));
     
   } catch (error) {
     console.error(`Status retrieval error: ${redactSecrets(error)}`);
@@ -765,6 +774,13 @@ async function startServer() {
   const jwtSecretProblem = describeJwtSecretProblem(process.env.JWT_SECRET);
   if (jwtSecretProblem) {
     console.error(`❌ JWT_SECRET ${jwtSecretProblem}. Set JWT_SECRET to a random value of at least 32 characters.`);
+    process.exit(1);
+  }
+
+  // Refuse to start without a usable Supabase configuration: every /api route depends on it
+  const supabaseProblem = describeSupabaseConfigProblem(process.env);
+  if (supabaseProblem) {
+    console.error(`❌ ${supabaseProblem}. Set SUPABASE_URL (https://<project>.supabase.co) and SUPABASE_ANON_KEY.`);
     process.exit(1);
   }
 

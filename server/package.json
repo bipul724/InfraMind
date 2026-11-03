@@ -19,7 +19,7 @@
     "logs:agent": "tail -f logs/agents.log",
     "debug": "NODE_DEBUG=http,net node minimal.js",
     "health": "curl -s http://localhost:3001/health | jq",
-    "metrics": "curl -s http://localhost:3001/api/metrics | jq"
+    "metrics": "curl -s -H \"X-Metrics-Token: $METRICS_TOKEN\" http://localhost:3001/api/metrics | jq"
   },
   "keywords": [
     "devops",
@@ -49,5 +49,8 @@
   "type": "module",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "~4.8.1"
   }
 }

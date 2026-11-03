@@ -8,6 +8,7 @@ import { Badge } from './ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { apiFetch } from '@/lib/apiClient';
 import { 
   Bot, 
   GitBranch, 
@@ -42,9 +43,8 @@ class AgentAPIService {
   
   async cloneRepository(params: { repoUrl: string; authToken?: string }) {
     // Mock implementation
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/clone-repo`, {
+    const response = await apiFetch('/api/clone-repo', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params)
     });
     return response.json();
@@ -52,9 +52,8 @@ class AgentAPIService {
   
   async runAnalysis(params: { sessionId: string }) {
     // Mock implementation  
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/analyze`, {
+    const response = await apiFetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params)
     });
     return response.json();

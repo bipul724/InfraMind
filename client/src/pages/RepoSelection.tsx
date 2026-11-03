@@ -10,7 +10,7 @@ import { ArrowRight, Search, GitBranch, Github, Globe, Link, Users } from 'lucid
 import { TechStackSelector } from '@/components/TechStackSelector';
 import { RepositorySelector } from '@/components/RepositorySelector';
 import { useToast } from '@/hooks/use-toast';
-import { API_BASE_URL } from '@/lib/api';
+import { apiFetch } from '@/lib/apiClient';
 
 export const RepoSelection = () => {
   const { user } = useAuth();
@@ -66,17 +66,13 @@ export const RepoSelection = () => {
     setLoading(true);
     try {
       // Clone repository using the new backend endpoint
-      const cloneResponse = await fetch(`${API_BASE_URL}/api/clone-repo`, {
+      const cloneResponse = await apiFetch('/api/clone-repo', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
         body: JSON.stringify({
           repoUrl: finalRepoUrl,
           repositoryData
         }),
-      });
+      }, { githubToken: token });
 
       if (!cloneResponse.ok) {
         throw new Error('Failed to clone repository');
@@ -85,11 +81,8 @@ export const RepoSelection = () => {
       const cloneData = await cloneResponse.json();
       
       // Start analysis
-      const analyzeResponse = await fetch(`${API_BASE_URL}/api/analyze`, {
+      const analyzeResponse = await apiFetch('/api/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           sessionId: cloneData.sessionId
         }),

@@ -38,6 +38,14 @@ const toUser = (user: SupabaseUser): User => {
   };
 };
 
+// Current Supabase access token, or null when signed out.
+// supabase-js refreshes an expired session before returning it.
+export async function getAccessToken(): Promise<string | null> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) return null;
+  return data.session.access_token;
+}
+
 export class AuthService {
   // Get current user
   static async getCurrentUser(): Promise<User | null> {

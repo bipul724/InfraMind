@@ -1,15 +1,34 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { isPathInside } from '../utils/repository.js';
+import { describeServiceUrlProblem } from '../utils/auth.js';
+
+const DEFAULT_LLAMA_API_BASE_URL = 'https://api.novita.ai/v3/openai';
+let warnedAboutLlamaBaseUrl = false;
 
 // Custom Llama API client for Novita.ai
 class LlamaClient {
   constructor() {
-    this.baseURL = "https://api.novita.ai/v3/openai";
     this.apiKey = process.env.LLAMA_API_KEY;
     this.model = "meta-llama/llama-3-70b-instruct";
     this.maxRetries = 3;
     this.retryDelay = 1000;
+  }
+
+  // Read lazily so module evaluation order cannot matter.
+  // https only (http allowed for localhost/127.0.0.1); invalid values fall back to the default.
+  get baseURL() {
+    const configured = process.env.LLAMA_API_BASE_URL;
+    if (!configured) return DEFAULT_LLAMA_API_BASE_URL;
+    const problem = describeServiceUrlProblem(configured, { allowPath: true });
+    if (problem) {
+      if (!warnedAboutLlamaBaseUrl) {
+        console.warn(`LLAMA_API_BASE_URL ${problem}; using the default Novita endpoint`);
+        warnedAboutLlamaBaseUrl = true;
+      }
+      return DEFAULT_LLAMA_API_BASE_URL;
+    }
+    return configured.replace(/\/+$/, '');
   }
 
   async invoke(messages, retryCount = 0) {

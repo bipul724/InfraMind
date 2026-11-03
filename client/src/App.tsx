@@ -35,8 +35,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 function App() {
   return (
-    <GitHubProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <GitHubProvider>
         <Router>
           <Routes>
             {/* Landing route uses its own navigation without the public shell header. */}
@@ -82,8 +82,8 @@ function App() {
           </Routes>
           <Toaster />
         </Router>
-      </AuthProvider>
-    </GitHubProvider>
+      </GitHubProvider>
+    </AuthProvider>
   );
 }
 

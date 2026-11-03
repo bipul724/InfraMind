@@ -20,7 +20,9 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { SavedFilesAPI } from '@/lib/api';
+import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
+import { apiFetch } from '@/lib/apiClient';
+import { getAccessToken } from '@/lib/supabase';
 
 interface AgentMessage {
   agent: string;
@@ -121,11 +123,23 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
   // Initialize Socket.IO connection
   useEffect(() => {
-    const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:10000';
-    const newSocket = io(serverUrl);
+    // The auth callback runs on every (re)connect, so refreshed tokens are picked up
+    const newSocket = io(API_BASE_URL, {
+      auth: (cb) => {
+        getAccessToken().then((token) => cb({ token: token ?? '' }));
+      }
+    });
     
     newSocket.on('connect', () => {
       console.log('🔗 Connected to InfraMind server');
+      // Progress is delivered only to sockets subscribed to a session they own
+      if (sessionId) {
+        newSocket.emit('subscribe', { sessionId }, (ack: { ok: boolean; error?: string }) => {
+          if (!ack?.ok) {
+            console.warn('Could not subscribe to session progress:', ack?.error);
+          }
+        });
+      }
     });
 
     newSocket.on('disconnect', () => {
@@ -216,8 +230,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   };
 
   const fetchGeneratedFiles = async (): Promise<Record<string, unknown>> => {
-    const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:10000';
-    const response = await fetch(`${serverUrl}/api/files/${sessionId}`);
+    const response = await apiFetch(`/api/files/${sessionId}`);
     
     if (!response.ok) {
       throw new Error('Failed to fetch generated files');

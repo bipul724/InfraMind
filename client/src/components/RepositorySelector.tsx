@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Alert, AlertDescription } from './ui/alert';
+import { apiFetch } from '@/lib/apiClient';
 import { 
   Github, 
   Search, 
@@ -80,17 +81,11 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
     setError(null);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:10000';
       const endpoint = orgName 
-        ? `/api/github/organizations/${orgName}/repositories?page=${page}&per_page=20`
+        ? `/api/github/organizations/${encodeURIComponent(orgName)}/repositories?page=${page}&per_page=20`
         : `/api/github/repositories?page=${page}&per_page=20`;
 
-      const response = await fetch(`${apiUrl}${endpoint}`, {
-        headers: {
-          'Authorization': `Bearer ${userToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await apiFetch(endpoint, {}, { githubToken: userToken });
 
       if (!response.ok) {
         throw new Error('Failed to fetch repositories');
