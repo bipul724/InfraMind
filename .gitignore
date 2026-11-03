@@ -40,3 +40,8 @@ Thumbs.db
 # Misc
 *.local
 *.tsbuildinfo
+
+# Remediation planning docs (local only)
+/remediation/
+/APP_AUDIT_AND_REMAINING_TASKS.md
+/IMPLEMENTATION_TRACKER.md
