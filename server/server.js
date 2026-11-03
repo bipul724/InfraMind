@@ -1,21 +1,29 @@
+// Must stay the first import: ES modules are evaluated before this file's body runs,
+// so .env has to be loaded before any imported module reads process.env
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import dotenv from 'dotenv';
-import simpleGit from 'simple-git';
 import fs from 'fs-extra';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { runAgentPipeline } from './agents/index.js';
-import GitHubService from './github.js';
+import GitHubService, { describeJwtSecretProblem } from './github.js';
 import { logger } from './utils/logger.js';
 import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
 import { performanceMonitor, getHealthStatus } from './utils/performance.js';
-
-dotenv.config();
+import {
+  parseGitHubRepoUrl,
+  parseRepositoryData,
+  parseFullName,
+  buildDisplayUrl,
+  resolveSessionClonePath,
+  redactSecrets
+} from './utils/repository.js';
+import { cloneRepository, getCloneLimits, CloneError, CLONE_ERRORS } from './utils/git.js';
 
 const app = express();
 const server = createServer(app);
@@ -57,8 +65,9 @@ app.use(requestLogger);
 app.use(performanceMonitor.trackRequest.bind(performanceMonitor));
 
 // Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// The largest legitimate body is repositoryData (about 2 kB)
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
 // Store active sessions
@@ -101,7 +110,7 @@ app.get('/health', (req, res) => {
     logger.error('Health check failed', error);
     res.status(500).json({ 
       status: 'unhealthy', 
-      error: error.message,
+      error: 'Health check failed',
       timestamp: new Date().toISOString() 
     });
   }
@@ -326,106 +335,176 @@ app.post('/api/github/verify-repo', async (req, res) => {
 });
 
 // Clone repository endpoint
+// GitHub tokens are accepted only for the duration of this request: they are never stored
+// in the session, embedded in a URL, returned, logged or passed to the agents.
+const GITHUB_TOKEN_PATTERN = /^[A-Za-z0-9_]{1,255}$/;
+const isAbsent = (value) => value === undefined || value === null;
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const sendCloneError = (res, code) => {
+  const { status, publicMessage } = CLONE_ERRORS[code];
+  return res.status(status).json({ error: publicMessage, code });
+};
+
+async function handleCloneRequest(req, res) {
+  const { repoUrl, repositoryData } = req.body || {};
+  // The UI sends an empty string when no token was entered
+  const authToken = req.body?.authToken === '' ? undefined : req.body?.authToken;
+
+  // Input shape checks. Never echo submitted values back.
+  if (!isAbsent(repoUrl) && typeof repoUrl !== 'string') {
+    return res.status(400).json({ error: 'Invalid GitHub repository URL' });
+  }
+  if (!isAbsent(repositoryData) && !isPlainObject(repositoryData)) {
+    return res.status(400).json({ error: 'Invalid repository data' });
+  }
+  if (!isAbsent(authToken) && (typeof authToken !== 'string' || !GITHUB_TOKEN_PATTERN.test(authToken))) {
+    return res.status(400).json({ error: 'Invalid GitHub token format' });
+  }
+
+  const { maxSizeBytes } = getCloneLimits();
+  let identity;
+  let token = null;
+
+  if (!isAbsent(repositoryData)) {
+    // User selected from their GitHub repositories (takes precedence over repoUrl)
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required for private repositories' });
+    }
+
+    let userData;
+    try {
+      userData = GitHubService.verifyJWT(authHeader.substring(7));
+    } catch (error) {
+      if (error.message === 'Invalid token') {
+        return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+      }
+      console.error(`Clone auth error: ${redactSecrets(error.message)}`);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    const requested = parseRepositoryData(repositoryData);
+    if (!requested) {
+      return res.status(400).json({ error: 'Invalid repository data' });
+    }
+
+    const accessToken = userData?.accessToken;
+    if (typeof accessToken !== 'string' || !GITHUB_TOKEN_PATTERN.test(accessToken)) {
+      return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+    }
+
+    let access;
+    try {
+      access = await GitHubService.checkRepoAccess(accessToken, requested.owner, requested.repo);
+    } catch (error) {
+      if (error.code === 'GITHUB_UNAUTHORIZED') {
+        return res.status(401).json({ error: 'GitHub session is invalid or expired. Please reconnect GitHub.' });
+      }
+      console.error(`Clone access check failed: ${redactSecrets(error.message, [accessToken])}`);
+      return sendCloneError(res, 'CLONE_FAILED');
+    }
+
+    if (!access.hasAccess) {
+      return sendCloneError(res, 'REPO_NOT_FOUND');
+    }
+
+    // Use GitHub's canonical name from here on, re-validated
+    identity = parseFullName(access.repo?.fullName);
+    if (!identity) {
+      return sendCloneError(res, 'CLONE_FAILED');
+    }
+    if (Number.isFinite(access.repo.size) && access.repo.size * 1024 > maxSizeBytes) {
+      return sendCloneError(res, 'REPO_TOO_LARGE');
+    }
+
+    token = accessToken;
+  } else if (!isAbsent(repoUrl)) {
+    // Manual URL input
+    identity = parseGitHubRepoUrl(repoUrl);
+    if (!identity) {
+      return res.status(400).json({ error: 'Invalid GitHub repository URL' });
+    }
+    token = authToken || null;
+  } else {
+    return res.status(400).json({ error: 'Repository URL or repository data is required' });
+  }
+
+  const sessionId = uuidv4();
+  const clonePath = resolveSessionClonePath(TEMP_DIR, sessionId);
+  const fullName = `${identity.owner}/${identity.repo}`;
+
+  // Create session (no credentials, no client-supplied URLs)
+  const session = {
+    owner: identity.owner,
+    repo: identity.repo,
+    fullName,
+    repoName: identity.repo,
+    displayUrl: buildDisplayUrl(identity),
+    clonePath,
+    status: 'cloning',
+    createdAt: new Date()
+  };
+  activeSessions.set(sessionId, session);
+
+  emitProgress(sessionId, {
+    step: 'Cloning repository...',
+    progress: 10,
+    status: 'cloning'
+  });
+
+  try {
+    await cloneRepository({
+      owner: identity.owner,
+      repo: identity.repo,
+      token,
+      destination: clonePath,
+      maxSizeBytes
+    });
+  } catch (error) {
+    const cloneError = error instanceof CloneError ? error : new CloneError('CLONE_FAILED');
+    const details = error instanceof CloneError ? error.details : error;
+
+    session.status = 'failed';
+    session.error = cloneError.publicMessage;
+    await fs.remove(path.dirname(clonePath)).catch(() => {});
+
+    emitProgress(sessionId, {
+      step: 'Clone failed',
+      progress: 0,
+      status: 'failed',
+      error: cloneError.publicMessage
+    });
+
+    console.error(`Clone failed [${cloneError.code}] session=${sessionId} repo=${fullName}: ${redactSecrets(details, [token])}`);
+    return sendCloneError(res, cloneError.code);
+  }
+
+  session.status = 'cloned';
+  session.clonedAt = new Date();
+
+  emitProgress(sessionId, {
+    step: 'Repository cloned successfully',
+    progress: 25,
+    status: 'cloned'
+  });
+
+  res.json({
+    success: true,
+    sessionId,
+    message: '✅ Repo Cloned Successfully',
+    repoName: identity.repo
+  });
+}
+
 app.post('/api/clone-repo', rateLimiters.clone, async (req, res) => {
   try {
-    const { repoUrl, authToken, repositoryData } = req.body;
-    let finalRepoUrl = repoUrl;
-    let repoName = '';
-    
-    // Handle authenticated GitHub repository selection
-    if (repositoryData) {
-      // User selected from their GitHub repositories
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Authentication required for private repositories' });
-      }
-      
-      const token = authHeader.substring(7);
-      const userData = GitHubService.verifyJWT(token);
-      
-      finalRepoUrl = repositoryData.cloneUrl;
-      repoName = repositoryData.name;
-      
-      // Use authenticated clone URL for private repos
-      if (repositoryData.private) {
-        finalRepoUrl = repositoryData.cloneUrl.replace('https://', `https://${userData.accessToken}@`);
-      }
-    } else if (repoUrl) {
-      // Manual URL input
-      if (!repoUrl) {
-        return res.status(400).json({ error: 'Repository URL is required' });
-      }
-      
-      // Validate GitHub URL
-      const githubUrlPattern = /^https:\/\/github\.com\/[\w-.]+\/[\w-.]+(?:\.git)?$/;
-      if (!githubUrlPattern.test(repoUrl)) {
-        return res.status(400).json({ error: 'Invalid GitHub repository URL' });
-      }
-      
-      repoName = repoUrl.split('/').pop().replace('.git', '');
-      
-      // Add authentication if provided
-      if (authToken) {
-        finalRepoUrl = repoUrl.replace('https://', `https://${authToken}@`);
-      }
-    } else {
-      return res.status(400).json({ error: 'Repository URL or repository data is required' });
-    }
-    
-    if (!repoName) {
-      repoName = finalRepoUrl.split('/').pop().replace('.git', '');
-    }
-    
-    const sessionId = uuidv4();
-    const clonePath = path.join(TEMP_DIR, sessionId, repoName);
-    
-    // Create session
-    activeSessions.set(sessionId, {
-      repoUrl: finalRepoUrl,
-      repoName,
-      clonePath,
-      status: 'cloning',
-      createdAt: new Date()
-    });
-    
-    emitProgress(sessionId, {
-      step: 'Cloning repository...',
-      progress: 10,
-      status: 'cloning'
-    });
-    
-    // Clone the repository
-    const git = simpleGit();
-    const cloneOptions = {};
-    
-    // Clone using the final repository URL (with authentication if needed)
-    await git.clone(finalRepoUrl, clonePath, cloneOptions);
-    
-    // Update session status
-    const session = activeSessions.get(sessionId);
-    session.status = 'cloned';
-    session.clonedAt = new Date();
-    
-    emitProgress(sessionId, {
-      step: 'Repository cloned successfully',
-      progress: 25,
-      status: 'cloned'
-    });
-    
-    res.json({
-      success: true,
-      sessionId,
-      message: '✅ Repo Cloned Successfully',
-      repoName,
-      path: clonePath
-    });
-    
+    await handleCloneRequest(req, res);
   } catch (error) {
-    console.error('Clone error:', error);
-    res.status(500).json({
-      error: 'Failed to clone repository',
-      message: error.message
-    });
+    console.error(`Clone request error: ${redactSecrets(error)}`);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to clone repository' });
+    }
   }
 });
 
@@ -466,7 +545,7 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     };
     
     const result = await runAgentPipeline(
-      session.repoUrl,
+      session.fullName,
       session.clonePath,
       progressCallback
     );
@@ -494,25 +573,23 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Analysis error:', error);
+    console.error(`Analysis error: ${redactSecrets(error)}`);
     
-    if (activeSessions.has(req.body.sessionId)) {
-      const session = activeSessions.get(req.body.sessionId);
+    const failedSessionId = req.body?.sessionId;
+    if (activeSessions.has(failedSessionId)) {
+      const session = activeSessions.get(failedSessionId);
       session.status = 'failed';
-      session.error = error.message;
+      session.error = 'Analysis failed';
       
-      emitProgress(req.body.sessionId, {
+      emitProgress(failedSessionId, {
         step: 'Analysis failed',
         progress: 0,
         status: 'failed',
-        error: error.message
+        error: 'Analysis failed'
       });
     }
     
-    res.status(500).json({
-      error: 'Analysis failed',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Analysis failed' });
   }
 });
 
@@ -539,18 +616,15 @@ app.get('/api/files/:sessionId', async (req, res) => {
       codebaseAnalysis,
       verificationResults,
       metadata: {
-        repoUrl: session.repoUrl,
+        repoUrl: session.displayUrl,
         repoName: session.repoName,
         completedAt: session.completedAt
       }
     });
     
   } catch (error) {
-    console.error('Files retrieval error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve files',
-      message: error.message
-    });
+    console.error(`Files retrieval error: ${redactSecrets(error)}`);
+    res.status(500).json({ error: 'Failed to retrieve files' });
   }
 });
 
@@ -583,11 +657,8 @@ app.get('/api/files/:sessionId/:filename', async (req, res) => {
     res.send(fileContent);
     
   } catch (error) {
-    console.error('File download error:', error);
-    res.status(500).json({
-      error: 'Failed to download file',
-      message: error.message
-    });
+    console.error(`File download error: ${redactSecrets(error)}`);
+    res.status(500).json({ error: 'Failed to download file' });
   }
 });
 
@@ -623,7 +694,7 @@ app.get('/api/status/:sessionId', (req, res) => {
     res.json({
       sessionId,
       status: session.status,
-      repoUrl: session.repoUrl,
+      repoUrl: session.displayUrl,
       repoName: session.repoName,
       createdAt: session.createdAt,
       clonedAt: session.clonedAt,
@@ -633,82 +704,8 @@ app.get('/api/status/:sessionId', (req, res) => {
     });
     
   } catch (error) {
-    console.error('Status retrieval error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve status',
-      message: error.message
-    });
-  }
-});
-
-// Enhanced DevPilot endpoint (integrates with agent system)
-app.post('/api/devpilot', async (req, res) => {
-  try {
-    const { repoUrl, useAgents = true } = req.body;
-    
-    if (!repoUrl) {
-      return res.status(400).json({ error: 'Repository URL is required' });
-    }
-    
-    if (useAgents) {
-      // Use the new agent-based system
-      const sessionId = uuidv4();
-      const repoName = repoUrl.split('/').pop().replace('.git', '');
-      const clonePath = path.join(TEMP_DIR, sessionId, repoName);
-      
-      // Clone repository
-      const git = simpleGit();
-      await git.clone(repoUrl, clonePath);
-      
-      // Run agent analysis
-      const result = await runAgentPipeline(repoUrl, clonePath);
-      
-      // Clean up cloned repo
-      await fs.remove(path.join(TEMP_DIR, sessionId));
-      
-      res.json({
-        dockerfile: result.generatedFiles.dockerfile,
-        githubActions: result.generatedFiles.githubActions,
-        envExample: result.generatedFiles.envExample,
-        techStack: result.techStack,
-        codebaseAnalysis: result.codebaseAnalysis,
-        agentMessages: result.messages,
-        verificationResults: result.verificationResults
-      });
-    } else {
-      // Fallback to original system
-      const { devPilotAI } = await import('./index.js');
-      return devPilotAI(req, res);
-    }
-    
-  } catch (error) {
-    console.error('DevPilot error:', error);
-    res.status(500).json({
-      error: 'Failed to generate CI/CD setup',
-      message: error.message
-    });
-  }
-});
-
-// List active sessions endpoint
-app.get('/api/sessions', (req, res) => {
-  try {
-    const sessions = Array.from(activeSessions.entries()).map(([id, session]) => ({
-      sessionId: id,
-      status: session.status,
-      repoUrl: session.repoUrl,
-      repoName: session.repoName,
-      createdAt: session.createdAt,
-      completedAt: session.completedAt
-    }));
-    
-    res.json({ sessions });
-  } catch (error) {
-    console.error('Sessions retrieval error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve sessions',
-      message: error.message
-    });
+    console.error(`Status retrieval error: ${redactSecrets(error)}`);
+    res.status(500).json({ error: 'Failed to retrieve status' });
   }
 });
 
@@ -738,11 +735,17 @@ setInterval(async () => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: err.message
-  });
+  if (res.headersSent) {
+    return next(err);
+  }
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large' });
+  }
+  console.error(`Unhandled error: ${redactSecrets(err)}`);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Add global error handlers
@@ -758,6 +761,13 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server
 async function startServer() {
+  // Refuse to start with a secret that would let anyone forge GitHub session tokens
+  const jwtSecretProblem = describeJwtSecretProblem(process.env.JWT_SECRET);
+  if (jwtSecretProblem) {
+    console.error(`❌ JWT_SECRET ${jwtSecretProblem}. Set JWT_SECRET to a random value of at least 32 characters.`);
+    process.exit(1);
+  }
+
   try {
     console.log('🚀 Starting InfraMind Server...');
     console.log(`📍 Node.js version: ${process.version}`);

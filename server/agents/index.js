@@ -1,5 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
+import { isPathInside } from '../utils/repository.js';
 
 // Custom Llama API client for Novita.ai
 class LlamaClient {
@@ -98,7 +99,7 @@ class HumanMessage {
 // Agent state interface
 class AgentState {
   constructor() {
-    this.repoUrl = '';
+    this.repoName = ''; // owner/repo label; never a URL or a filesystem path
     this.repoPath = '';
     this.codebaseAnalysis = null;
     this.techStack = null;
@@ -120,8 +121,7 @@ const plannerAgent = async (state) => {
   
   const plannerPrompt = `You are a DevOps Planning Agent. Your task is to analyze the repository structure and create a comprehensive plan.
 
-Repository URL: ${state.repoUrl}
-Repository structure has been cloned to: ${state.repoPath}
+Repository: ${state.repoName}
 
 Based on typical project patterns, create a plan that includes:
 1. File types to analyze for tech stack detection
@@ -134,7 +134,7 @@ Return a JSON plan with these categories.`;
   try {
     const response = await model.invoke([
       new SystemMessage(plannerPrompt),
-      new HumanMessage(`Plan the analysis for: ${state.repoUrl}`)
+      new HumanMessage(`Plan the analysis for: ${state.repoName}`)
     ]);
     
     state.messages.push({
@@ -304,12 +304,16 @@ async function scanProjectStructure(repoPath) {
         
         const fullPath = path.join(dirPath, item);
         const itemRelativePath = path.join(relativePath, item);
-        const stats = await fs.stat(fullPath);
+        // lstat: cloned repositories are untrusted, so symlinks are never followed
+        const stats = await fs.lstat(fullPath);
         
+        if (stats.isSymbolicLink()) {
+          continue;
+        }
         if (stats.isDirectory()) {
           structure[itemRelativePath] = 'directory';
           await scanDirectory(fullPath, itemRelativePath);
-        } else {
+        } else if (stats.isFile()) {
           structure[itemRelativePath] = 'file';
         }
       }
@@ -320,6 +324,33 @@ async function scanProjectStructure(repoPath) {
   
   await scanDirectory(repoPath);
   return structure;
+}
+
+// Read a file from the cloned repository. Only regular files whose real path stays
+// inside the repository are read, so symlinks cannot point the analyzer elsewhere.
+async function readRepoFile(repoPath, relativePath) {
+  const root = path.resolve(repoPath);
+  const target = path.resolve(root, relativePath);
+  if (!isPathInside(root, target)) {
+    throw new Error(`Refusing to read ${relativePath}: outside the repository`);
+  }
+
+  const stats = await fs.lstat(target);
+  if (!stats.isFile()) {
+    throw new Error(`Refusing to read ${relativePath}: not a regular file`);
+  }
+
+  // Catches symlinked parent directories as well
+  const [realRoot, realTarget] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+  if (!isPathInside(realRoot, realTarget)) {
+    throw new Error(`Refusing to read ${relativePath}: outside the repository`);
+  }
+
+  return fs.readFile(target, 'utf8');
+}
+
+async function readRepoJson(repoPath, relativePath) {
+  return JSON.parse(await readRepoFile(repoPath, relativePath));
 }
 
 // Helper function to analyze tech stack
@@ -338,7 +369,7 @@ async function analyzeTechStack(repoPath, projectFiles) {
   if (fileNames.includes('package.json')) {
     techStack.primary = 'node';
     try {
-      const packageJson = await fs.readJson(path.join(repoPath, 'package.json'));
+      const packageJson = await readRepoJson(repoPath, 'package.json');
       if (packageJson.dependencies) {
         if (packageJson.dependencies.react) techStack.frameworks.push('react');
         if (packageJson.dependencies.next) techStack.frameworks.push('nextjs');
@@ -388,7 +419,7 @@ async function performDetailedAnalysis(repoPath, projectFiles) {
   // Find entry points
   if (fileNames.includes('package.json')) {
     try {
-      const packageJson = await fs.readJson(path.join(repoPath, 'package.json'));
+      const packageJson = await readRepoJson(repoPath, 'package.json');
       if (packageJson.main) analysis.entryPoints.push(packageJson.main);
       if (packageJson.scripts) {
         if (packageJson.scripts.start) analysis.buildCommands.push('npm start');
@@ -437,12 +468,13 @@ export function createAgentWorkflow() {
 }
 
 // Main function to run the agent pipeline
-export async function runAgentPipeline(repoUrl, repoPath, progressCallback = null) {
+// repoName is the "owner/repo" label shown to the LLM; repoPath is only used locally
+export async function runAgentPipeline(repoName, repoPath, progressCallback = null) {
   console.log('🚀 Starting AI Agent Pipeline...');
   
   const workflow = createAgentWorkflow();
   const initialState = new AgentState();
-  initialState.repoUrl = repoUrl;
+  initialState.repoName = repoName;
   initialState.repoPath = repoPath;
   
   try {
@@ -467,4 +499,4 @@ export async function runAgentPipeline(repoUrl, repoPath, progressCallback = nul
   }
 }
 
-export { AgentState }; 
+export { AgentState, scanProjectStructure }; 

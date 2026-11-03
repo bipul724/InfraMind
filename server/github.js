@@ -30,18 +30,56 @@ import jwt from 'jsonwebtoken';
 const describeError = (error) =>
   `${error.message}${error.response ? ` (HTTP ${error.response.status})` : ''}`;
 
+// Placeholder values shipped in docs and examples; never acceptable as a real secret
+export const JWT_SECRET_PLACEHOLDERS = [
+  'your-jwt-secret-change-in-production',
+  'your-jwt-secret-for-github-sessions',
+  'your_jwt_secret_here'
+];
+export const MIN_JWT_SECRET_LENGTH = 32;
+
+// Returns a short description of what is wrong with the secret, or null if it is usable.
+// Never includes the value itself.
+export function describeJwtSecretProblem(secret) {
+  if (typeof secret !== 'string' || secret.length === 0) return 'is not set';
+  if (JWT_SECRET_PLACEHOLDERS.includes(secret)) return 'is set to a known placeholder value';
+  if (secret.length < MIN_JWT_SECRET_LENGTH) return `is shorter than ${MIN_JWT_SECRET_LENGTH} characters`;
+  return null;
+}
+
 class GitHubService {
-  constructor() {
-    this.clientId = process.env.GITHUB_CLIENT_ID;
-    this.clientSecret = process.env.GITHUB_CLIENT_SECRET;
-    this.redirectUri = process.env.GITHUB_REDIRECT_URI;
-    this.jwtSecret = process.env.JWT_SECRET || 'your-jwt-secret-change-in-production';
+  // Configuration is read lazily so it always reflects the loaded environment,
+  // regardless of module evaluation order
+  get clientId() {
+    return process.env.GITHUB_CLIENT_ID;
+  }
+
+  get clientSecret() {
+    return process.env.GITHUB_CLIENT_SECRET;
+  }
+
+  get redirectUri() {
+    return process.env.GITHUB_REDIRECT_URI;
+  }
+
+  get jwtSecret() {
+    const secret = process.env.JWT_SECRET;
+    const problem = describeJwtSecretProblem(secret);
+    if (problem) {
+      throw new Error(`JWT_SECRET ${problem}`);
+    }
+    return secret;
   }
 
   // Generate GitHub OAuth URL
   getAuthURL(state = '') {
-    const scopes = 'repo,user:email';
-    return `https://github.com/login/oauth/authorize?client_id=${this.clientId}&redirect_uri=${this.redirectUri}&scope=${scopes}&state=${state}`;
+    const params = new URLSearchParams({
+      client_id: this.clientId || '',
+      redirect_uri: this.redirectUri || '',
+      scope: 'repo,user:email',
+      state
+    });
+    return `https://github.com/login/oauth/authorize?${params.toString()}`;
   }
 
   // Exchange authorization code for access token
@@ -132,7 +170,7 @@ class GitHubService {
   // Get organization repositories
   async getOrgRepositories(accessToken, org, page = 1, perPage = 50) {
     try {
-      const response = await axios.get(`https://api.github.com/orgs/${org}/repos`, {
+      const response = await axios.get(`https://api.github.com/orgs/${encodeURIComponent(org)}/repos`, {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
@@ -200,22 +238,29 @@ class GitHubService {
 
   // Verify JWT token
   verifyJWT(token) {
+    // Read outside the try so a missing secret is a configuration error, not "Invalid token"
+    const secret = this.jwtSecret;
     try {
-      return jwt.verify(token, this.jwtSecret);
+      return jwt.verify(token, secret);
     } catch (error) {
       throw new Error('Invalid token');
     }
   }
 
-  // Check if user has access to repository
+  // Check if user has access to repository.
+  // 403/404 resolve to { hasAccess: false }; a 401 (revoked or expired token)
+  // throws an error with code GITHUB_UNAUTHORIZED.
   async checkRepoAccess(accessToken, owner, repo) {
     try {
-      const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
-        headers: {
-          'Authorization': `token ${accessToken}`,
-          'Accept': 'application/vnd.github.v3+json'
+      const response = await axios.get(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        {
+          headers: {
+            'Authorization': `token ${accessToken}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
         }
-      });
+      );
 
       return {
         hasAccess: true,
@@ -224,15 +269,23 @@ class GitHubService {
           name: response.data.name,
           fullName: response.data.full_name,
           private: response.data.private,
+          size: response.data.size, // KB
           cloneUrl: response.data.clone_url,
           sshUrl: response.data.ssh_url,
           defaultBranch: response.data.default_branch
         }
       };
     } catch (error) {
-      if (error.response?.status === 404) {
+      const status = error.response?.status;
+      if (status === 404 || status === 403) {
         return { hasAccess: false, error: 'Repository not found or no access' };
       }
+      if (status === 401) {
+        const unauthorized = new Error('GitHub token is invalid or expired');
+        unauthorized.code = 'GITHUB_UNAUTHORIZED';
+        throw unauthorized;
+      }
+      console.error('Error checking repository access:', describeError(error));
       throw new Error('Failed to check repository access');
     }
   }

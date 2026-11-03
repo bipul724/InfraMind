@@ -7,7 +7,8 @@
     "start": "node server.js",
     "start:debug": "node start.js",
     "start:minimal": "node minimal.js",
-    "test": "node test.js",
+    "test": "node --test --test-reporter=spec test/*.test.js",
+    "test:legacy": "node test.js",
     "test:system": "node test-system.js",
     "test:render": "node test-render.js",
     "dev": "node --watch server.js",
@@ -42,7 +43,6 @@
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^3.3.2",
-    "simple-git": "^3.20.0",
     "socket.io": "^4.7.4",
     "uuid": "^9.0.1"
   },
