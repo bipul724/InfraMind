@@ -11,6 +11,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { runAgentPipeline } from './agents/index.js';
+import { AiConfigError, describeAiRoutes, loadAiConfig } from './ai/index.js';
 import GitHubService from './github.js';
 import { logger } from './utils/logger.js';
 import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
@@ -807,7 +808,8 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     const result = await runAgentPipeline(
       session.fullName,
       session.clonePath,
-      progressCallback
+      progressCallback,
+      { sessionId, userId: req.user.id }
     );
     
     // Store analysis results
@@ -1014,6 +1016,18 @@ async function startServer() {
     console.warn('⚠️ GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart. Use "supabase" in production.');
   }
 
+  // Refuse to start without a valid AI provider configuration. Problems name variables only.
+  let aiConfig;
+  try {
+    aiConfig = loadAiConfig(process.env);
+  } catch (error) {
+    if (!(error instanceof AiConfigError)) throw error;
+    for (const problem of error.problems) console.error(`❌ ${problem}`);
+    process.exit(1);
+  }
+  // Provider names and model IDs only; keys and URLs are never printed
+  for (const line of describeAiRoutes(aiConfig)) console.log(`🤖 ${line}`);
+
   try {
     console.log('🚀 Starting InfraMind Server...');
     console.log(`📍 Node.js version: ${process.version}`);
@@ -1040,7 +1054,7 @@ async function startServer() {
       console.log(`🚀 DevOps AI Agent Server running on port ${PORT}`);
       console.log(`📁 Temp directory: ${TEMP_DIR}`);
       console.log(`🔗 Client URL: ${process.env.CLIENT_URL || "http://localhost:5173"}`);
-      console.log('🤖 Multi-agent system: 4 sequential agents + Llama 3 70B (Novita.ai)');
+      console.log('🤖 Multi-agent system: 4 sequential agents; AI providers per task as listed in the AI route lines');
       console.log('✅ Server startup complete!');
     });
     

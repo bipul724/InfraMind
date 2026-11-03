@@ -1,118 +1,14 @@
 import fs from 'fs-extra';
 import path from 'path';
-import { isPathInside } from '../utils/repository.js';
-import { describeServiceUrlProblem } from '../utils/auth.js';
+import { isPathInside, redactSecrets } from '../utils/repository.js';
+import { AiError, generateText } from '../ai/index.js';
 
-const DEFAULT_LLAMA_API_BASE_URL = 'https://api.novita.ai/v3/openai';
-let warnedAboutLlamaBaseUrl = false;
-
-// Custom Llama API client for Novita.ai
-class LlamaClient {
-  constructor() {
-    this.apiKey = process.env.LLAMA_API_KEY;
-    this.model = "meta-llama/llama-3-70b-instruct";
-    this.maxRetries = 3;
-    this.retryDelay = 1000;
-  }
-
-  // Read lazily so module evaluation order cannot matter.
-  // https only (http allowed for localhost/127.0.0.1); invalid values fall back to the default.
-  get baseURL() {
-    const configured = process.env.LLAMA_API_BASE_URL;
-    if (!configured) return DEFAULT_LLAMA_API_BASE_URL;
-    const problem = describeServiceUrlProblem(configured, { allowPath: true });
-    if (problem) {
-      if (!warnedAboutLlamaBaseUrl) {
-        console.warn(`LLAMA_API_BASE_URL ${problem}; using the default Novita endpoint`);
-        warnedAboutLlamaBaseUrl = true;
-      }
-      return DEFAULT_LLAMA_API_BASE_URL;
-    }
-    return configured.replace(/\/+$/, '');
-  }
-
-  async invoke(messages, retryCount = 0) {
-    try {
-      const formattedMessages = messages.map(msg => ({
-        role: msg._getType() === 'system' ? 'system' : 'user',
-        content: msg.content
-      }));
-
-      const response = await fetch(`${this.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.model,
-          messages: formattedMessages,
-          temperature: 0.1,
-          max_tokens: 4000,
-          response_format: { type: "text" }
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Llama API Error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
-      }
-
-      const data = await response.json();
-      
-      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-        throw new Error('Invalid response format from Llama API');
-      }
-
-      return {
-        content: data.choices[0].message.content,
-        usage: data.usage
-      };
-    } catch (error) {
-      console.error(`Llama API Error (attempt ${retryCount + 1}):`, error);
-      
-      // Retry logic for transient errors
-      if (retryCount < this.maxRetries && this.isRetryableError(error)) {
-        console.log(`Retrying in ${this.retryDelay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
-        return this.invoke(messages, retryCount + 1);
-      }
-      
-      throw error;
-    }
-  }
-
-  isRetryableError(error) {
-    // Retry on network errors, rate limits, and server errors
-    return error.message.includes('502') || 
-           error.message.includes('503') || 
-           error.message.includes('504') ||
-           error.message.includes('429') ||
-           error.message.includes('ECONNRESET') ||
-           error.message.includes('ETIMEDOUT');
-  }
-}
-
-// Initialize Llama model
-const model = new LlamaClient();
-
-// Message classes for compatibility
-class SystemMessage {
-  constructor(content) {
-    this.content = content;
-  }
-  _getType() {
-    return 'system';
-  }
-}
-
-class HumanMessage {
-  constructor(content) {
-    this.content = content;
-  }
-  _getType() {
-    return 'human';
-  }
+// state.errors is sent to the browser, so it only ever holds fixed text: the AI layer's
+// constant message, or "Internal error" (the real error is logged server-side, redacted)
+function publicErrorMessage(agent, error) {
+  if (error instanceof AiError) return error.message;
+  console.error(`${agent} Agent internal error: ${redactSecrets(error)}`);
+  return 'Internal error';
 }
 
 // Agent state interface
@@ -128,6 +24,7 @@ class AgentState {
     this.progress = 0;
     this.messages = [];
     this.errors = [];
+    this.meta = {}; // { sessionId, userId }: passed to the AI call records only, never to a provider
   }
 }
 
@@ -151,10 +48,12 @@ Based on typical project patterns, create a plan that includes:
 Return a JSON plan with these categories.`;
 
   try {
-    const response = await model.invoke([
-      new SystemMessage(plannerPrompt),
-      new HumanMessage(`Plan the analysis for: ${state.repoName}`)
-    ]);
+    const response = await generateText({
+      task: 'planner',
+      system: plannerPrompt,
+      prompt: `Plan the analysis for: ${state.repoName}`,
+      meta: state.meta
+    });
     
     state.messages.push({
       agent: 'planner',
@@ -163,12 +62,12 @@ Return a JSON plan with these categories.`;
     });
     
     // Parse the response to extract planning information
-    const planContent = response.content;
+    const planContent = response.text;
     state.analysisplan = planContent;
     
     return state;
   } catch (error) {
-    state.errors.push(`Planner Agent Error: ${error.message}`);
+    state.errors.push(`Planner Agent Error: ${publicErrorMessage('Planner', error)}`);
     return state;
   }
 };
@@ -201,7 +100,7 @@ const analyzerAgent = async (state) => {
     
     return state;
   } catch (error) {
-    state.errors.push(`Analyzer Agent Error: ${error.message}`);
+    state.errors.push(`Analyzer Agent Error: ${publicErrorMessage('Analyzer', error)}`);
     return state;
   }
 };
@@ -228,27 +127,33 @@ For each file, provide the complete content optimized for this specific project.
 
   try {
     // Generate Dockerfile
-    const dockerfileResponse = await model.invoke([
-      new SystemMessage(generatorPrompt),
-      new HumanMessage('Generate an optimized Dockerfile for this project')
-    ]);
+    const dockerfileResponse = await generateText({
+      task: 'generator',
+      system: generatorPrompt,
+      prompt: 'Generate an optimized Dockerfile for this project',
+      meta: state.meta
+    });
     
     // Generate GitHub Actions
-    const githubActionsResponse = await model.invoke([
-      new SystemMessage(generatorPrompt),
-      new HumanMessage('Generate a complete GitHub Actions CI/CD workflow')
-    ]);
+    const githubActionsResponse = await generateText({
+      task: 'generator',
+      system: generatorPrompt,
+      prompt: 'Generate a complete GitHub Actions CI/CD workflow',
+      meta: state.meta
+    });
     
     // Generate .env.example
-    const envExampleResponse = await model.invoke([
-      new SystemMessage(generatorPrompt),
-      new HumanMessage('Generate a comprehensive .env.example file')
-    ]);
+    const envExampleResponse = await generateText({
+      task: 'generator',
+      system: generatorPrompt,
+      prompt: 'Generate a comprehensive .env.example file',
+      meta: state.meta
+    });
     
     state.generatedFiles = {
-      dockerfile: dockerfileResponse.content,
-      githubActions: githubActionsResponse.content,
-      envExample: envExampleResponse.content
+      dockerfile: dockerfileResponse.text,
+      githubActions: githubActionsResponse.text,
+      envExample: envExampleResponse.text
     };
     
     state.messages.push({
@@ -259,7 +164,7 @@ For each file, provide the complete content optimized for this specific project.
     
     return state;
   } catch (error) {
-    state.errors.push(`Generator Agent Error: ${error.message}`);
+    state.errors.push(`Generator Agent Error: ${publicErrorMessage('Generator', error)}`);
     return state;
   }
 };
@@ -285,12 +190,14 @@ Generated Files:
 Provide verification results and any recommendations for improvements.`;
 
   try {
-    const response = await model.invoke([
-      new SystemMessage(verifierPrompt),
-      new HumanMessage('Verify and validate all generated files')
-    ]);
+    const response = await generateText({
+      task: 'verifier',
+      system: verifierPrompt,
+      prompt: 'Verify and validate all generated files',
+      meta: state.meta
+    });
     
-    state.verificationResults = response.content;
+    state.verificationResults = response.text;
     state.currentStep = 'Complete';
     state.progress = 100;
     
@@ -302,7 +209,7 @@ Provide verification results and any recommendations for improvements.`;
     
     return state;
   } catch (error) {
-    state.errors.push(`Verifier Agent Error: ${error.message}`);
+    state.errors.push(`Verifier Agent Error: ${publicErrorMessage('Verifier', error)}`);
     return state;
   }
 };
@@ -487,14 +394,16 @@ export function createAgentWorkflow() {
 }
 
 // Main function to run the agent pipeline
-// repoName is the "owner/repo" label shown to the LLM; repoPath is only used locally
-export async function runAgentPipeline(repoName, repoPath, progressCallback = null) {
+// repoName is the "owner/repo" label shown to the LLM; repoPath is only used locally;
+// meta ({ sessionId, userId }) reaches only the AI call records
+export async function runAgentPipeline(repoName, repoPath, progressCallback = null, meta = {}) {
   console.log('🚀 Starting AI Agent Pipeline...');
   
   const workflow = createAgentWorkflow();
   const initialState = new AgentState();
   initialState.repoName = repoName;
   initialState.repoPath = repoPath;
+  initialState.meta = { sessionId: meta?.sessionId ?? null, userId: meta?.userId ?? null };
   
   try {
     const result = await workflow.invoke(initialState);

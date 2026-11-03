@@ -5,6 +5,7 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { io as connectClient } from 'socket.io-client';
 import { authHeaders, closeFakes, getFakes, postJson, startServer } from './helpers.js';
+import { USER_A } from './fakeSupabase.js';
 
 const RUN_NETWORK = process.env.RUN_NETWORK_TESTS === '1';
 
@@ -22,8 +23,8 @@ describe('two users, one analysis', { skip: !RUN_NETWORK && 'set RUN_NETWORK_TES
 
   before(async () => {
     fakes = await getFakes();
+    fakes.llm.reset();
     fakes.llm.setDelay(300);
-    fakes.llm.requestBodies.length = 0;
     server = await startServer();
   });
 
@@ -77,8 +78,9 @@ describe('two users, one analysis', { skip: !RUN_NETWORK && 'set RUN_NETWORK_TES
     assert.equal((await fetch(`${server.baseUrl}/api/status/${sessionId}`, { headers: authB })).status, 404);
     assert.equal((await fetch(`${server.baseUrl}/api/files/${sessionId}`, { headers: authB })).status, 404);
 
-    // 5. Nothing sensitive reached the LLM
-    assert.ok(fakes.llm.requestBodies.length > 0, 'the fake LLM should have been called');
+    // 5. Nothing sensitive reached the LLM (every provider of the multi-provider fake)
+    assert.ok(fakes.llm.requests.length > 0, 'the fake LLM should have been called');
+    assert.deepEqual([...new Set(fakes.llm.requests.map((r) => r.provider))], ['gemini'], 'the first provider in the chain served every call');
     for (const body of fakes.llm.requestBodies) {
       assert.ok(!body.includes('access_token'));
       assert.ok(!body.includes(fakes.tokens.A));
@@ -87,5 +89,10 @@ describe('two users, one analysis', { skip: !RUN_NETWORK && 'set RUN_NETWORK_TES
       assert.ok(!body.includes('@github.com'));
     }
     assert.ok(fakes.llm.requestBodies[0].includes('octocat/Hello-World'));
+    // Session and user ids go only to the call records, never to a provider
+    for (const body of fakes.llm.requestBodies) {
+      assert.ok(!body.includes(sessionId));
+      assert.ok(!body.includes(USER_A.id));
+    }
   });
 });

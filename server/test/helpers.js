@@ -98,7 +98,6 @@ export function buildEnv(cwd, port, overrides = {}) {
     NODE_ENV: 'test',
     PORT: String(port),
     CLIENT_URL: 'http://localhost:5173',
-    LLAMA_API_KEY: 'invalid-test-key',
     TAVILY_API_KEY: '',
     MEM0_API_KEY: '',
     KEYWORDS_AI_API_KEY: '',
@@ -111,7 +110,19 @@ export function buildEnv(cwd, port, overrides = {}) {
     GITHUB_TOKEN_ENC_KEY: randomEncryptionKey(),
     SUPABASE_URL: fakes?.supabase.url,
     SUPABASE_ANON_KEY: fakes?.supabase.anonKey,
-    LLAMA_API_BASE_URL: fakes?.llm.url,
+    // AI providers: all three point at the local multi-provider fake
+    AI_PROVIDERS: 'gemini,groq,openrouter',
+    GEMINI_API_KEY: `test-gemini-key-${randomAlphanumeric(12)}`,
+    GEMINI_MODEL: 'test-model-gemini',
+    GEMINI_BASE_URL: fakes?.llm.baseUrlFor('gemini'),
+    GROQ_API_KEY: `test-groq-key-${randomAlphanumeric(12)}`,
+    GROQ_MODEL: 'test-model-groq',
+    GROQ_BASE_URL: fakes?.llm.baseUrlFor('groq'),
+    OPENROUTER_API_KEY: `test-openrouter-key-${randomAlphanumeric(12)}`,
+    OPENROUTER_MODEL: 'test-model-openrouter',
+    OPENROUTER_BASE_URL: fakes?.llm.baseUrlFor('openrouter'),
+    AI_TIMEOUT_MS: '2000',
+    AI_CALL_BUDGET_MS: '10000',
     DOTENV_CONFIG_PATH: path.join(cwd, 'does-not-exist.env')
   };
   for (const [key, value] of Object.entries(overrides)) {

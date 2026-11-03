@@ -97,7 +97,12 @@ JWT_SECRET=your-jwt-secret
 `createAgentWorkflow()` in `server/agents/index.js` awaits the four agents in a fixed order: planner → analyzer → generator → verifier. They pass a single `AgentState` object along. No LangGraph or other orchestration library is used, and nothing runs in parallel.
 
 ### AI Services
-- **Llama 3 70B** (Novita.ai): Core AI reasoning for all four agents
+- **AI providers** (`server/ai/`): the planner, generator and verifier agents ask for a *task*, never a provider or model. Gemini, Groq, OpenRouter and Novita are supported; all speak the OpenAI chat-completions format.
+  - **Task routes:** `AI_PROVIDERS` sets the default fallback chain (e.g. `gemini,groq,openrouter`); `AI_ROUTE_PLANNER`, `AI_ROUTE_GENERATOR` and `AI_ROUTE_VERIFIER` override it per task. Each provider's model comes from `<NAME>_MODEL`, so switching provider or model is a configuration change.
+  - **Fallback:** each attempt has a timeout (`AI_TIMEOUT_MS`) and each call a total budget (`AI_CALL_BUDGET_MS`). Rate limits, server errors, timeouts, network errors and unusable responses retry the same provider with backoff (honouring `Retry-After`), up to `AI_MAX_ATTEMPTS_PER_PROVIDER`, then fall through to the next provider. Auth errors and other 4xx move on at once.
+  - **Circuit breaker:** a provider that fails 3 calls in a row is skipped for 60 s; a rejected key skips it for 5 minutes.
+  - **Structured output:** `generateObject` validates JSON against a zod schema, with one repair retry per provider (`<NAME>_JSON_MODE`: `json_object`, `json_schema` or `prompt`).
+  - **Privacy:** errors shown to users carry a fixed message only; every attempt produces one metadata-only call record (no prompt or response text). `OPENROUTER_DATA_COLLECTION=deny` by default.
 - **Tavily API**: Real-time documentation search (legacy generator only)
 - **Mem0**: User interaction memory (legacy generator only)
 - **Keywords AI**: Observability (legacy generator only, optional)
