@@ -1,5 +1,16 @@
 # InfraMind System Improvements Summary
 
+> **Historical record (note added 2026-11-04).** This document describes an earlier round of changes and is kept as written, except for the commands marked below. It is not a description of the current system; for that, see [ARCHITECTURE.md](ARCHITECTURE.md) and [server/OBSERVABILITY.md](server/OBSERVABILITY.md). What is no longer current:
+>
+> - `/api/metrics` and `/api/analytics` now answer 404 unless `METRICS_TOKEN` (32+ characters) is set and sent as the `X-Metrics-Token` header (`server/server.js`). `npm run test:system` (`server/test-system.js`) calls them without the header.
+> - Of the rate limiters listed below, only the clone and analysis limiters are applied to routes; `general` and `auth` are defined but unused. The Joi request validation, session validation and IP whitelist middleware in `server/utils/security.js` are not used by any route.
+> - `agents.log` and `websocket.log` are never written: nothing calls `logger.websocket`, and `logger.agent` is called only from `trackAgentSession`, which nothing calls. For the same reason session analytics stay empty (`server/utils/logger.js`, `server/utils/performance.js`).
+> - The `SystemMonitoringDashboard` component is not reachable from any route in `client/src/App.tsx`, and `ErrorBoundary` no longer sends errors anywhere: its `POST /api/errors` call, to an endpoint nothing served, was removed.
+> - The response-time figures and percentages in this document ("~800ms", "~400ms", "50% faster") and the example metric values were not produced by any code or test in this repository.
+> - The agents now call the AI layer in `server/ai/`, which handles retries and provider fallback; see [README-AI-AGENTS.md](README-AI-AGENTS.md).
+>
+> **Update (2026-11-04, later the same day).** Three points in the note above changed again: the unused `general` and `auth` rate limiters and the request-validation, session-validation and IP-whitelist middleware were deleted, and `joi` was removed from `server/package.json`; `trackAgentSession` is now called for every clone and analysis, so `agents.log` is written and `/api/analytics` reports real data; public `GET /health` now returns only `status`, `timestamp` and `uptime`, and the default port is 10000, not 3001 (`server/utils/security.js`, `server/utils/performance.js`, `server/utils/port.js`).
+
 ## 🎯 Overview
 This document outlines the comprehensive improvements made to the InfraMind system, focusing on enhanced UI/UX, backend performance, security, and monitoring capabilities.
 
@@ -172,7 +183,7 @@ npm run test:system
 ```
 
 ### 2. Health Monitoring
-Check system health:
+Check system health (both scripts use port 10000; `npm run metrics` sends `$METRICS_TOKEN` as `X-Metrics-Token`):
 ```bash
 npm run health
 npm run metrics
@@ -270,10 +281,10 @@ npm run dev
 npm run test:system
 
 # Check health
-curl http://localhost:3001/health
+curl http://localhost:10000/health
 
-# Get metrics
-curl http://localhost:3001/api/metrics
+# Get metrics (404 unless METRICS_TOKEN is set on the server)
+curl -H "X-Metrics-Token: $METRICS_TOKEN" http://localhost:10000/api/metrics
 
 # Monitor logs
 npm run logs

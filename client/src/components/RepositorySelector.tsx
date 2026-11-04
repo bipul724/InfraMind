@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -49,6 +49,17 @@ interface Organization {
   url: string;
 }
 
+// The `user` object of GET /api/github/repositories (server/server.js)
+interface GitHubUser {
+  login: string;
+  name?: string | null;
+  avatarUrl?: string | null;
+}
+
+// Only GitHub's own repository pages are opened in a new tab
+const isGitHubPage = (url: string | undefined): url is string =>
+  typeof url === 'string' && url.startsWith('https://github.com/');
+
 interface RepositorySelectorProps {
   onRepositorySelect: (repository: Repository) => void;
   isConnected: boolean;
@@ -71,13 +82,13 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<GitHubUser | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
 
   // Fetch user repositories
   // The server uses the signed-in user's stored GitHub connection
-  const fetchRepositories = async (page = 1, orgName = '') => {
+  const fetchRepositories = useCallback(async (page = 1, orgName = '') => {
     if (!isConnected) return;
 
     setLoading(true);
@@ -114,14 +125,14 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [isConnected]);
 
   // Load repositories when connected
   useEffect(() => {
     if (isConnected) {
       fetchRepositories(1, selectedOrg);
     }
-  }, [isConnected, selectedOrg]);
+  }, [isConnected, selectedOrg, fetchRepositories]);
 
   // Filter repositories based on search term
   const filteredRepositories = repositories.filter(repo =>
@@ -321,9 +332,21 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                             </span>
                           </div>
                         </div>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground">
-                          <ExternalLink className="h-4 w-4" />
-                        </Button>
+                        {isGitHubPage(repo.htmlUrl) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              window.open(repo.htmlUrl, '_blank', 'noopener,noreferrer');
+                            }}
+                            aria-label={`Open ${repo.fullName} on GitHub`}
+                            title="Open on GitHub"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}

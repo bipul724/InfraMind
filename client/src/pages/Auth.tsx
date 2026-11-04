@@ -184,8 +184,8 @@ export const Auth = () => {
               </CardTitle>
               <CardDescription className="mx-auto max-w-[22rem]">
                 {activeTab === 'signin' 
-                  ? 'Sign in to access your multi-agent AI dashboard powered by cutting-edge technology'
-                  : 'Join thousands of developers automating DevOps with AI agents'
+                  ? 'Sign in to generate DevOps files for your repositories'
+                  : 'Create an account to analyze repositories with the four-agent pipeline'
                 }
               </CardDescription>
             </CardHeader>
@@ -482,7 +482,7 @@ export const Auth = () => {
             <CardFooter className="flex flex-col items-center justify-center rounded-b-lg border-t border-border bg-muted/40 px-6 py-4 sm:py-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Shield className="h-4 w-4" />
-                <span>Secured by</span>
+                <span>Authentication by</span>
                 <a 
                   href="https://supabase.com" 
                   target="_blank" 

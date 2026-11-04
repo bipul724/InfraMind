@@ -60,8 +60,10 @@ export interface SavedFile {
 export class DevPilotAPI {
   private static async makeRequest(data: DevPilotRequest): Promise<DevPilotResponse> {
     try {
-      // useAgents: false selects the single-shot generator (server/index.js),
-      // which returns the DevPilotResponse shape including docs
+      // server/server.js registers no /api/devpilot route (only the mock server
+      // server/minimal.js does), so this call fails against the real server. It is
+      // used only by pages/EnhancedDashboard.tsx, which no route in App.tsx renders.
+      // The useAgents flag is not read by any server code.
       const response = await fetch(`${API_BASE_URL}/api/devpilot`, {
         method: 'POST',
         headers: {
@@ -88,7 +90,7 @@ export class DevPilotAPI {
     }
 
     // Validate repo URL format
-    const githubUrlPattern = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+$/;
+    const githubUrlPattern = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/;
     if (!githubUrlPattern.test(repoUrl)) {
       throw new Error('Please enter a valid GitHub repository URL');
     }
@@ -327,7 +329,18 @@ export class SavedFilesAPI {
   }
 }
 
-const toSavedFile = (row: any): SavedFile => ({
+// A row of public.saved_files as returned by Supabase
+interface SavedFileRow {
+  id: string;
+  user_id: string;
+  name: string;
+  type: string;
+  repo_url: string | null;
+  content: string;
+  created_at: string;
+}
+
+const toSavedFile = (row: SavedFileRow): SavedFile => ({
   id: row.id,
   userId: row.user_id,
   name: row.name,

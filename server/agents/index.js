@@ -105,7 +105,15 @@ const analyzerAgent = async (state) => {
   }
 };
 
-// Generator Agent - Generates CI/CD files based on analysis
+// Generator Agent - Generates CI/CD files based on analysis.
+// The three calls are independent: each success sets its own key, each failure adds one
+// "Generator Agent Error: <file>: ..." entry, and the other files are kept.
+const GENERATED_FILES = [
+  { key: 'dockerfile', label: 'Dockerfile', prompt: 'Generate an optimized Dockerfile for this project' },
+  { key: 'githubActions', label: 'GitHub Actions workflow', prompt: 'Generate a complete GitHub Actions CI/CD workflow' },
+  { key: 'envExample', label: '.env.example', prompt: 'Generate a comprehensive .env.example file' }
+];
+
 const generatorAgent = async (state) => {
   console.log('⚡ Generator Agent: Generating CI/CD files...');
   
@@ -125,56 +133,47 @@ Generate the following files with best practices:
 
 For each file, provide the complete content optimized for this specific project.`;
 
-  try {
-    // Generate Dockerfile
-    const dockerfileResponse = await generateText({
-      task: 'generator',
-      system: generatorPrompt,
-      prompt: 'Generate an optimized Dockerfile for this project',
-      meta: state.meta
-    });
-    
-    // Generate GitHub Actions
-    const githubActionsResponse = await generateText({
-      task: 'generator',
-      system: generatorPrompt,
-      prompt: 'Generate a complete GitHub Actions CI/CD workflow',
-      meta: state.meta
-    });
-    
-    // Generate .env.example
-    const envExampleResponse = await generateText({
-      task: 'generator',
-      system: generatorPrompt,
-      prompt: 'Generate a comprehensive .env.example file',
-      meta: state.meta
-    });
-    
-    state.generatedFiles = {
-      dockerfile: dockerfileResponse.text,
-      githubActions: githubActionsResponse.text,
-      envExample: envExampleResponse.text
-    };
-    
+  state.generatedFiles = {};
+  for (const file of GENERATED_FILES) {
+    try {
+      const response = await generateText({
+        task: 'generator',
+        system: generatorPrompt,
+        prompt: file.prompt,
+        meta: state.meta
+      });
+      state.generatedFiles[file.key] = response.text;
+    } catch (error) {
+      state.errors.push(`Generator Agent Error: ${file.label}: ${publicErrorMessage('Generator', error)}`);
+    }
+  }
+
+  const generated = Object.keys(state.generatedFiles).length;
+  if (generated > 0) {
     state.messages.push({
       agent: 'generator',
-      message: 'Generated all CI/CD configuration files',
+      message: `Generated ${generated} of ${GENERATED_FILES.length} files`,
       timestamp: new Date().toISOString()
     });
-    
-    return state;
-  } catch (error) {
-    state.errors.push(`Generator Agent Error: ${publicErrorMessage('Generator', error)}`);
-    return state;
   }
+
+  return state;
 };
 
-// Verifier Agent - Checks and validates generated files
+// Verifier Agent - Asks the AI to review the generated files. With no files there is
+// nothing to review: no AI call, no message, verificationResults stays unset.
 const verifierAgent = async (state) => {
   console.log('✅ Verifier Agent: Validating generated files...');
   
   state.currentStep = 'Validating generated configurations';
   state.progress = 95;
+
+  const present = GENERATED_FILES.filter((file) => typeof state.generatedFiles[file.key] === 'string');
+  if (present.length === 0) {
+    state.currentStep = 'Review skipped: no files were generated';
+    state.progress = 100;
+    return state;
+  }
   
   const verifierPrompt = `You are a DevOps Verification Agent. Review the generated files for:
 1. Syntax correctness
@@ -183,9 +182,7 @@ const verifierAgent = async (state) => {
 4. Compliance with standards
 
 Generated Files:
-- Dockerfile: ${state.generatedFiles.dockerfile?.substring(0, 500)}...
-- GitHub Actions: ${state.generatedFiles.githubActions?.substring(0, 500)}...
-- .env.example: ${state.generatedFiles.envExample?.substring(0, 500)}...
+${present.map((file) => `- ${file.label}: ${state.generatedFiles[file.key].substring(0, 500)}...`).join('\n')}
 
 Provide verification results and any recommendations for improvements.`;
 
@@ -201,9 +198,11 @@ Provide verification results and any recommendations for improvements.`;
     state.currentStep = 'Complete';
     state.progress = 100;
     
+    // A statement of what happened, not a verdict: the review itself is the text in
+    // verificationResults
     state.messages.push({
       agent: 'verifier',
-      message: 'Validation complete - files are production ready',
+      message: 'Review complete: see the review text',
       timestamp: new Date().toISOString()
     });
     
@@ -279,6 +278,24 @@ async function readRepoJson(repoPath, relativePath) {
   return JSON.parse(await readRepoFile(repoPath, relativePath));
 }
 
+// Top-level Compose files (Compose's own default names)
+const COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
+const KUBERNETES_DIRECTORIES = new Set(['k8s', 'kubernetes']);
+const KUBERNETES_FILES = new Set(['kustomization.yaml', 'kustomization.yml', 'Chart.yaml']);
+
+// Kubernetes-specific evidence only, from names (no file is read): a directory named
+// k8s or kubernetes at any depth (which also covers every .yaml/.yml file under one),
+// or a kustomization.yaml/.yml or Helm Chart.yaml file at any depth. Other YAML files
+// (lock files, CI and tool configs) do not count.
+function hasKubernetesEvidence(projectFiles) {
+  return Object.entries(projectFiles).some(([relativePath, kind]) => {
+    const segments = relativePath.split(path.sep);
+    const name = segments[segments.length - 1];
+    if (kind === 'directory') return KUBERNETES_DIRECTORIES.has(name);
+    return KUBERNETES_FILES.has(name) || segments.slice(0, -1).some((segment) => KUBERNETES_DIRECTORIES.has(segment));
+  });
+}
+
 // Helper function to analyze tech stack
 async function analyzeTechStack(repoPath, projectFiles) {
   const techStack = {
@@ -323,8 +340,8 @@ async function analyzeTechStack(repoPath, projectFiles) {
   
   // Check for containerization
   if (fileNames.includes('Dockerfile')) techStack.tools.push('docker');
-  if (fileNames.includes('docker-compose.yml')) techStack.tools.push('docker-compose');
-  if (fileNames.includes('kubernetes') || fileNames.some(f => f.endsWith('.yaml'))) techStack.tools.push('kubernetes');
+  if (COMPOSE_FILES.some((name) => fileNames.includes(name))) techStack.tools.push('docker-compose');
+  if (hasKubernetesEvidence(projectFiles)) techStack.tools.push('kubernetes');
   
   return techStack;
 }
@@ -427,4 +444,4 @@ export async function runAgentPipeline(repoName, repoPath, progressCallback = nu
   }
 }
 
-export { AgentState, scanProjectStructure }; 
+export { AgentState, scanProjectStructure, analyzeTechStack }; 

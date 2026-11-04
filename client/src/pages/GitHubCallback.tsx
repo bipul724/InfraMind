@@ -17,10 +17,6 @@ export const GitHubCallback = () => {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    handleCallback();
-  }, []);
-
-  const handleCallback = () => {
     const code = searchParams.get('code');
     const error = searchParams.get('error');
 
@@ -39,10 +35,11 @@ export const GitHubCallback = () => {
     setMessage('Verifying GitHub authorization...');
 
     // The server checks the OAuth state against its HttpOnly cookie, so it must
-    // exchange the code. It stores the token and redirects back to /auth/success
-    // with only a status or an error code.
+    // exchange the code. It stores nothing at this step: it parks the result under a
+    // one-time completion id and redirects to /auth/success?complete=<id> (or ?error=),
+    // where the signed-in user claims it (server/server.js /auth/github/callback).
     window.location.replace(`${API_BASE_URL}/auth/github/callback?${searchParams.toString()}`);
-  };
+  }, [searchParams]);
 
   const handleRetry = () => {
     // Restart through the server with a fresh one-time ticket and state cookie

@@ -7,8 +7,9 @@
 
 import fetch from 'node-fetch';
 import { performance } from 'perf_hooks';
+import { resolvePort } from './utils/port.js';
 
-const SERVER_URL = 'http://localhost:3001';
+const SERVER_URL = `http://localhost:${resolvePort(process.env)}`;
 
 class SystemTester {
   constructor() {

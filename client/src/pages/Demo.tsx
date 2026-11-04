@@ -54,15 +54,15 @@ export const Demo = () => {
     const initialMessage: Message = {
       id: Date.now().toString(),
       type: 'assistant',
-      content: `I've analyzed the repository at ${repoUrl}. I can help you with:
+      content: `This is a scripted demo. Nothing was fetched from ${repoUrl}: every answer below is a fixed sample written for a made-up React project.
 
-• Understanding the codebase structure
-• Generating deployment configurations
-• Setting up CI/CD pipelines
-• Implementing security best practices
-• Optimizing infrastructure
+The real InfraMind app has no chat. It clones a repository, runs four agents and generates:
 
-What would you like to know about your repository?`
+• a Dockerfile
+• a GitHub Actions workflow
+• a .env.example
+
+Pick a sample question to see a scripted answer.`
     };
     setMessages([initialMessage]);
   };
@@ -126,7 +126,7 @@ What would you like to know about your repository?`
     // Example response generation logic
     const normalizedQuestion = message.toLowerCase();
     if (normalizedQuestion.includes('tech stack') || normalizedQuestion.includes('technologies')) {
-      response = `Based on my analysis of ${repoUrl}, your project uses:
+      response = `Sample answer (scripted, not based on ${repoUrl}). A typical React project might use:
 
 • Frontend: React with TypeScript
 • State Management: Redux
@@ -136,7 +136,7 @@ What would you like to know about your repository?`
 
 Would you like me to generate optimized configurations for any of these technologies?`;
     } else if (normalizedQuestion.includes('pipeline') || normalizedQuestion.includes('ci/cd')) {
-      response = `I'll help you set up a CI/CD pipeline for your React application. Here's what I recommend:
+      response = `Sample answer (scripted). A CI/CD pipeline for a React application could include:
 
 1. GitHub Actions workflow with:
    • Node.js 18 setup
@@ -148,7 +148,7 @@ Would you like me to generate optimized configurations for any of these technolo
 
 Would you like me to generate this configuration for you?`;
     } else if (normalizedQuestion.includes('security') || normalizedQuestion.includes('secure')) {
-      response = `I've analyzed your repository's security profile. Here are my recommendations:
+      response = `Sample answer (scripted, no security scan was run). Typical recommendations:
 
 • Update dependencies with known vulnerabilities
 • Implement environment variable validation
@@ -159,7 +159,7 @@ Would you like me to generate this configuration for you?`;
 
 Would you like me to help you implement any of these security measures?`;
     } else if (normalizedQuestion.includes('docker') || normalizedQuestion.includes('containerize')) {
-      response = `I'll help you containerize your application. Based on your tech stack, here's the recommended Dockerfile setup:
+      response = `Sample answer (scripted). A typical Dockerfile setup:
 
 • Multi-stage build for optimal image size
 • Node 18 Alpine base image
@@ -170,7 +170,7 @@ Would you like me to help you implement any of these security measures?`;
 
 Would you like me to generate this Dockerfile for you?`;
     } else if (normalizedQuestion.includes('architecture') || normalizedQuestion.includes('structure')) {
-      response = `I've analyzed the architecture of your repository. Here's the breakdown:
+      response = `Sample answer (scripted, not your repository's structure). A typical breakdown:
 
 Project Structure:
 • /src - Main source code
@@ -189,7 +189,7 @@ Data Flow:
 
 Would you like me to suggest any architectural improvements?`;
     } else if (normalizedQuestion.includes('performance') || normalizedQuestion.includes('optimize')) {
-      response = `I've identified several opportunities to optimize your application:
+      response = `Sample answer (scripted). Typical optimizations:
 
 Performance Improvements:
 • Implement React.memo() for expensive components
@@ -198,16 +198,16 @@ Performance Improvements:
 • Implement service worker for caching
 • Add Redis caching for API responses
 
-Current Metrics:
+Example metrics (made up):
 • First Load JS: ~2.8MB
 • Lighthouse Score: 76
 • Time to Interactive: 3.2s
 
 Would you like me to help implement any of these optimizations?`;
     } else if (normalizedQuestion.includes('test') || normalizedQuestion.includes('testing')) {
-      response = `I've analyzed your testing setup. Here's what I found and recommend:
+      response = `Sample answer (scripted, no tests were run).
 
-Current Test Coverage:
+Example coverage (made up):
 • Unit Tests: 65%
 • Integration Tests: 40%
 • E2E Tests: Minimal
@@ -221,9 +221,9 @@ Recommendations:
 
 Would you like me to help set up any of these testing improvements?`;
     } else if (normalizedQuestion.includes('dependencies') || normalizedQuestion.includes('packages')) {
-      response = `I've analyzed your package.json and found some opportunities:
+      response = `Sample answer (scripted, no package.json was read).
 
-Dependencies Analysis:
+Example findings (made up):
 • Outdated packages: 5
 • Security vulnerabilities: 2 moderate
 • Duplicate dependencies: 3
@@ -237,7 +237,7 @@ Recommendations:
 
 Would you like me to help update these dependencies?`;
     } else if (normalizedQuestion.includes('deploy') || normalizedQuestion.includes('deployment')) {
-      response = `Based on your repository structure, here are my deployment recommendations:
+      response = `Sample answer (scripted). Common deployment options:
 
 Deployment Options:
 1. Vercel (Recommended)
@@ -258,7 +258,7 @@ Deployment Options:
 
 Which deployment option would you like to explore?`;
     } else {
-      response = `I understand you're asking about ${message}. Based on your repository at ${repoUrl}, I can help you with:
+      response = `This scripted demo has no answer for "${message}". Its sample topics are:
 
 • Tech stack analysis and optimization
 • CI/CD pipeline setup
@@ -312,7 +312,7 @@ What specific aspect would you like to explore?`;
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-status-warning">
               <Terminal className="h-4 w-4 shrink-0" />
-              <span className="text-sm font-medium">Running in Demo Mode</span>
+              <span className="text-sm font-medium">Scripted demo: sample answers, nothing is analyzed</span>
             </div>
             <Button
               variant="outline"
@@ -320,7 +320,7 @@ What specific aspect would you like to explore?`;
               onClick={() => navigate('/auth')}
               className="h-8 shrink-0 border-status-warning/30 bg-card text-status-warning hover:border-status-warning/50 hover:bg-status-warning/10 hover:text-status-warning"
             >
-              Switch to Full Version
+              Sign In to the App
             </Button>
           </div>
         </div>
@@ -333,9 +333,9 @@ What specific aspect would you like to explore?`;
           {!hasAnalyzed && (
             <Card className="shadow-raised">
               <CardHeader>
-                <CardTitle className="text-xl">Analyze Repository</CardTitle>
+                <CardTitle className="text-xl">Scripted Demo</CardTitle>
                 <CardDescription>
-                  Enter your GitHub repository URL to start the analysis
+                  Enter any GitHub URL to start. The demo does not fetch or analyze it.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -359,10 +359,10 @@ What specific aspect would you like to explore?`;
                     {isAnalyzing ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Analyzing...
+                        Starting...
                       </>
                     ) : (
-                      'Analyze'
+                      'Start Demo'
                     )}
                   </Button>
                 </div>
@@ -376,8 +376,8 @@ What specific aspect would you like to explore?`;
               <CardHeader className="border-b border-border bg-muted/40 py-4 sm:py-4">
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                   <Terminal className="h-4 w-4 text-primary" />
-                  Repository analysis
-                  <span className="font-mono text-xs font-normal text-muted-foreground">interactive demo</span>
+                  Sample conversation
+                  <span className="font-mono text-xs font-normal text-muted-foreground">scripted, not your repository</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0 sm:p-0">
@@ -429,7 +429,7 @@ What specific aspect would you like to explore?`;
                 {/* Input Area */}
                 <div className="flex gap-2 border-t border-border bg-muted/30 p-4 sm:px-6">
                   <Input
-                    placeholder="Ask me anything about your repository..."
+                    placeholder="Type a question or pick a sample one..."
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyPress={(e) => {

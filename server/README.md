@@ -1,155 +1,82 @@
-# InfraMind Backend
+# InfraMind Server
 
-AI-powered DevOps assistant backend function that generates production-grade Dockerfiles, CI/CD workflows, environment files, and deployment instructions.
+The Express + Socket.IO server in `server.js`. It verifies Supabase access tokens, runs the GitHub connection flow, clones repositories, runs the four-agent pipeline and serves the results. See [../ARCHITECTURE.md](../ARCHITECTURE.md) for the flows and [../README-AI-AGENTS.md](../README-AI-AGENTS.md) for the agents and AI providers.
 
-## 🚀 Features
+## Requirements
 
-- **Production-grade Dockerfile generation** based on tech stack
-- **GitHub Actions CI/CD workflows** with best practices
-- **Environment file templates** with common variables
-- **Deployment instructions** fetched via Tavily API
-- **Memory storage** using Mem0 for session tracking
-- **Used by the Express server** as the fallback for `POST /api/devpilot` when the request sets `useAgents: false` (the web client always sends `useAgents: true`)
+- Node.js `^20.19 || ^22.12 || >=24.0` (`package.json` `engines`)
+- `git` on the PATH: `utils/git.js` runs it with `child_process.execFile`
+- The configuration in `.env.example`; the server exits at startup when a required setting is missing (`startServer` in `server.js`)
 
-## 📋 Requirements
-
-- Node.js 18+
-- npm or yarn
-- API keys for:
-  - [Tavily](https://tavily.com) (for deployment instructions)
-  - [Mem0](https://mem0.ai) (for memory storage)
-
-## 🛠️ Setup
-
-1. **Clone and install dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
-
-3. **Required API Keys:**
-   - `TAVILY_API_KEY`: Get from [Tavily Dashboard](https://app.tavily.com)
-   - `MEM0_API_KEY`: Get from [Mem0 Dashboard](https://app.mem0.ai)
-
-## 🧪 Testing
-
-Run the test harness to validate functionality:
+## Setup
 
 ```bash
-npm test
+npm install
+cp .env.example .env     # fill in the values; see ../DEPLOYMENT-GUIDE.md
+npm run dev              # node --watch server.js
 ```
 
-Test without API keys (uses fallback data):
-```bash
-# Remove or comment out API keys in .env
-npm test
-```
+With `SESSION_STORE=database`, also run `npm run db:generate` and `npm run db:deploy` once (see below).
 
-## 📚 API Usage
+## Scripts
 
-### Input Format
+From `package.json`:
 
-```json
-{
-  "repoUrl": "https://github.com/user/repo",
-  "techStack": "React + Node",
-  "userId": "unique-user-id"
-}
-```
+| Script | Runs | Notes |
+|---|---|---|
+| `npm start` | `node server.js` | The production entry point (`render.yaml`) |
+| `npm run dev` | `node --watch server.js` | |
+| `npm run dev:debug` | `NODE_DEBUG=http,net node --watch server.js` | |
+| `npm test` | `node --test --test-reporter=spec test/*.test.js` | The test suite, with local fakes for GitHub, Supabase and the AI providers |
+| `npm run db:generate` | `prisma generate` | Writes the Prisma client to `generated/prisma` |
+| `npm run db:deploy` | `prisma migrate deploy` | Applies `prisma/migrations` to `DATABASE_URL`; run it manually |
+| `npm run db:status` | `prisma migrate status` | |
+| `npm run db:migrate:dev` | `node scripts/assert-local-db.js && prisma migrate dev` | Local databases only; the guard refuses any other host |
+| `npm run ai:smoke` | `node scripts/ai-smoke.js` | Real requests to every configured provider; refuses to run without `RUN_LIVE_AI=1` on the command line |
+| `npm run health` | `curl -s http://localhost:10000/health \| jq` | The literal default port 10000 |
+| `npm run metrics` | `curl` of `/api/metrics` on port 10000 with `X-Metrics-Token: $METRICS_TOKEN` | 404 unless the server has `METRICS_TOKEN` |
+| `npm run logs`, `logs:error`, `logs:agent` | `tail -f` of `logs/app.log`, `logs/error.log`, `logs/agents.log` | `agents.log` holds the clone and analysis analytics lines ([OBSERVABILITY.md](OBSERVABILITY.md)) |
+| `npm run start:debug` | `node start.js` | Prints environment details, test-imports modules, then loads `server.js` |
+| `npm run start:minimal`, `npm run debug` | `node minimal.js` | A mock server, not the real API (see below) |
+| `npm run test:legacy` | `node test.js` | Runs the legacy generator in `index.js` |
+| `npm run test:system` | `node test-system.js` | HTTP checks against `http://localhost:${PORT}`, default 10000 |
+| `npm run test:render` | `node test-render.js` | A server that answers every request with a fixed message |
 
-### Output Format
-
-```json
-{
-  "dockerfile": "# Production Dockerfile content...",
-  "githubActions": "# CI/CD workflow YAML...",
-  "envExample": "# Environment variables...",
-  "docs": [
-    {
-      "title": "Deployment Guide",
-      "url": "https://...",
-      "content": "Guide description..."
-    }
-  ]
-}
-```
-
-### Supported Tech Stacks
-
-- React + Node.js
-- Node.js only
-- Python Flask/Django
-- Generic applications
-
-## 🚀 Deployment
-
-### Local Development
-
-```bash
-npm run dev
-```
-
-### Inside the Express Server
-
-`devPilotAI` is a named export of `index.js`. `server.js` loads it on demand for `POST /api/devpilot` requests that set `useAgents: false`, so it deploys with the server and needs no separate deployment.
-
-> Earlier versions also shipped an `appwrite.js` entry point for deploying this as an Appwrite Cloud Function. It was removed when the project moved from Appwrite to Supabase in October 2026.
-
-## 🔧 Function Architecture
+## Layout
 
 ```
-InfraMind Function
-├── Input Validation
-├── File Generation
-│   ├── Dockerfile (production-ready)
-│   ├── GitHub Actions (CI/CD)
-│   └── .env.example (tech-specific)
-├── External APIs
-│   ├── Tavily (deployment docs)
-│   └── Mem0 (memory storage)
-└── Response Formation
+server.js               Routes, startup checks, cleanup
+agents/index.js         Planner, analyzer, generator, verifier
+ai/                     Provider registry, configuration, client with retries and fallback
+db/                     Database configuration and the Prisma client
+prisma/                 schema.prisma and the migration for analysis_sessions, generated_files, ai_calls
+github.js               GitHub OAuth and REST API calls
+utils/auth.js           Supabase token verifier and requireUser middleware
+utils/githubConnections.js  Encrypted GitHub connection store and one-time tokens
+utils/git.js            git clone runner
+utils/repository.js     Repository URL parsing, clone paths, secret redaction
+utils/sessionStore.js   Session store: memory or database
+utils/sessionView.js    Allow-list serializers for responses and progress events
+utils/realtime.js       Authenticated Socket.IO rooms
+utils/security.js       helmet headers, the clone and analysis rate limiters, request logger
+utils/logger.js         Console and logs/ files
+utils/performance.js    Request metrics, session analytics, /health data
+utils/port.js           Default port (10000) for server.js, healthcheck.js and test-system.js
+scripts/                ai-smoke.js, assert-local-db.js
+test/                   node --test suite and fakes
 ```
 
-## 🌟 Examples
+## Legacy and mock entry points
 
-### React + Node.js App
+These files are not loaded by `server.js`:
 
-```javascript
-const response = await devPilotAI({
-  body: {
-    repoUrl: 'https://github.com/example/react-app',
-    techStack: 'React + Node',
-    userId: 'user123'
-  }
-});
-```
+- **`index.js`** exports `devPilotAI`, an older generator that builds files from templates and calls Tavily (deployment links), Mem0 (interaction storage) and Keywords AI (event tracking). Only `test.js` imports it (`npm run test:legacy`). It reads `TAVILY_API_KEY`, `MEM0_API_KEY`, `KEYWORDS_AI_API_KEY` and `KEYWORDS_AI_BASE_URL`; the running server reads none of them.
+- **`minimal.js`** is a mock server: `/health`, `/`, a mock `POST /api/devpilot`, a mock `POST /api/analyze-repo`, and GitHub routes without user authentication. It listens on `PORT` or 10000.
+- **`test-render.js`** answers every request, including `/health`, with `{"message": "Render deployment test successful", ...}`. It must never be the production start command.
+- **`healthcheck.js`** requests `http://localhost:${PORT}/health` (default 10000) and exits 0 on a 200 response.
 
-### Python Flask API
+The real server registers no `/api/devpilot` route.
 
-```javascript
-const response = await devPilotAI({
-  body: {
-    repoUrl: 'https://github.com/example/flask-api',
-    techStack: 'Python Flask',
-    userId: 'user456'
-  }
-});
-```
+## License
 
-## 🔍 Error Handling
-
-The function includes comprehensive error handling:
-
-- Input validation
-- API failure fallbacks
-- Memory storage error tolerance
-- Graceful degradation
-
-## 📝 License
-
-MIT License - see LICENSE file for details. 
+There is no license file in this repository; `package.json` declares `"license": "MIT"`.

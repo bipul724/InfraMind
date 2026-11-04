@@ -1,90 +1,110 @@
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState, useEffect, useRef } from 'react';
+import { CardDescription, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  CheckCircle, 
-  Clock, 
-  AlertCircle, 
-  Bot, 
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  AlertTriangle,
+  Bot,
   Search,
   Cog,
   Shield,
   Download,
-  ExternalLink,
   Loader2,
   Save,
   FileCode
 } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
 import { apiFetch } from '@/lib/apiClient';
 import { getAccessToken } from '@/lib/supabase';
-
-interface AgentMessage {
-  agent: string;
-  message: string;
-  timestamp: string;
-}
+import type { AgentMessage, ProgressPayload, SessionStatus, TechStack } from '@/lib/session';
 
 interface AgentProgressProps {
-  sessionId?: string;
+  sessionId?: string | null;
   repoUrl?: string;
   currentStep: string;
   progress: number;
-  status: 'cloning' | 'cloned' | 'analyzing' | 'completed' | 'failed';
+  status: SessionStatus;
+  // undefined until the pipeline's result event (the only event that carries messages) arrives
   messages?: AgentMessage[];
   errors?: string[];
-  techStack?: any;
+  techStack?: TechStack | null;
   generatedFiles?: string[];
-  onComplete?: (result: any) => void;
-  onError?: (error: string) => void;
-  onProgressUpdate?: (data: any) => void;
+  onProgressUpdate?: (data: ProgressPayload) => void;
 }
 
+// agent: the `agent` value of the agent's entry in state.messages; errorPrefix: the start
+// of the string the agent adds to state.errors on failure (server/agents/index.js)
 const WORKFLOW_STEPS = [
   {
     id: 'plan',
+    agent: 'planner',
+    errorPrefix: 'Planner Agent Error:',
     title: 'Planner Agent',
-    description: 'Planner Agent analyzing project structure',
+    description: 'Asks the AI for an analysis plan from the repository name',
     icon: Bot,
-    estimatedTime: '15-45s'
+    aiUsage: 'planner, 1 call'
   },
   {
     id: 'analyze',
+    agent: 'analyzer',
+    errorPrefix: 'Analyzer Agent Error:',
     title: 'Analyzer Agent',
-    description: 'Analyzer Agent detecting tech stack',
+    description: 'Scans the cloned files and detects the tech stack',
     icon: Search,
-    estimatedTime: '30-60s'
+    aiUsage: 'none'
   },
   {
     id: 'generate',
+    agent: 'generator',
+    errorPrefix: 'Generator Agent Error:',
     title: 'Generator Agent',
-    description: 'Generator Agent creating configurations',
+    description: 'Generates the Dockerfile, workflow and .env.example',
     icon: Cog,
-    estimatedTime: '45-90s'
+    aiUsage: 'generator, 3 calls'
   },
   {
     id: 'verify',
+    agent: 'verifier',
+    errorPrefix: 'Verifier Agent Error:',
     title: 'Verifier Agent',
-    description: 'Verifier Agent validating outputs',
+    description: 'Asks the AI to review the generated files',
     icon: Shield,
-    estimatedTime: '15-30s'
+    aiUsage: 'verifier, 1 call'
   }
 ];
 
-// Agent output keys -> the file names and types used for saved files (see OutputDisplay)
-const SAVED_FILE_META: Record<string, { name: string; type: string }> = {
-  dockerfile: { name: 'Dockerfile', type: 'dockerfile' },
-  githubActions: { name: '.github/workflows/ci.yml', type: 'github-actions' },
-  envExample: { name: '.env.example', type: 'env' },
+type StepState = 'waiting' | 'running' | 'done' | 'failed' | 'not-run' | 'unknown';
+
+const STEP_LABELS: Record<StepState, string> = {
+  waiting: 'Waiting',
+  running: 'In sequence',
+  done: 'Done',
+  failed: 'Failed',
+  'not-run': 'Not run',
+  unknown: 'No details'
 };
 
-// Private repos are cloned as https://<token>@github.com/..., so never store credentials
+// Agent output keys -> saved-file name and type, and the name used for downloads.
+// Browsers do not accept a path in a download name, so the workflow downloads as ci.yml.
+const FILE_META: Record<string, { name: string; type: string; downloadName: string }> = {
+  dockerfile: { name: 'Dockerfile', type: 'dockerfile', downloadName: 'Dockerfile' },
+  githubActions: { name: '.github/workflows/ci.yml', type: 'github-actions', downloadName: 'ci.yml' },
+  envExample: { name: '.env.example', type: 'env', downloadName: '.env.example' },
+};
+
+// Clone URLs never carry credentials: server/utils/git.js passes a token to git as an
+// HTTP header, and the URL shown here is the one the user typed or the server's display
+// URL. This only drops a user:password@ part, should a URL ever contain one, before it
+// is stored in saved_files.
 const stripCredentials = (url?: string): string | undefined => {
   if (!url) return undefined;
   try {
@@ -103,162 +123,149 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   currentStep,
   progress,
   status,
-  messages = [],
+  messages,
   errors = [],
   techStack,
   generatedFiles = [],
-  onComplete,
-  onError,
   onProgressUpdate
 }) => {
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [showDetails, setShowDetails] = useState(false);
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [localMessages, setLocalMessages] = useState<AgentMessage[]>(messages);
-  const [localErrors, setLocalErrors] = useState<string[]>(errors);
-  const [localTechStack, setLocalTechStack] = useState(techStack);
-  const [localGeneratedFiles, setLocalGeneratedFiles] = useState<string[]>(generatedFiles);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Initialize Socket.IO connection
+  // The socket lives as long as the session id; the latest callback is read from a ref,
+  // so a parent re-render does not reconnect
+  const onProgressUpdateRef = useRef(onProgressUpdate);
   useEffect(() => {
+    onProgressUpdateRef.current = onProgressUpdate;
+  });
+
+  useEffect(() => {
+    if (!sessionId) return;
+
     // The auth callback runs on every (re)connect, so refreshed tokens are picked up
-    const newSocket = io(API_BASE_URL, {
+    const socket = io(API_BASE_URL, {
       auth: (cb) => {
         getAccessToken().then((token) => cb({ token: token ?? '' }));
       }
     });
-    
-    newSocket.on('connect', () => {
-      console.log('🔗 Connected to InfraMind server');
-      // Progress is delivered only to sockets subscribed to a session they own
-      if (sessionId) {
-        newSocket.emit('subscribe', { sessionId }, (ack: { ok: boolean; error?: string }) => {
-          if (!ack?.ok) {
-            console.warn('Could not subscribe to session progress:', ack?.error);
-          }
-        });
-      }
+
+    socket.on('connect', () => {
+      // Progress is delivered only to sockets subscribed to a session they own. The server
+      // answers a new subscription with the latest stored progress event.
+      socket.emit('subscribe', { sessionId }, (ack: { ok: boolean; error?: string }) => {
+        if (!ack?.ok) {
+          console.warn('Could not subscribe to session progress:', ack?.error);
+        }
+      });
     });
 
-    newSocket.on('disconnect', (reason) => {
-      console.log('❌ Disconnected from InfraMind server');
+    socket.on('disconnect', (reason) => {
       // The server disconnects sockets whose access token expired; Socket.IO does not
       // reconnect those on its own. Reconnecting runs the auth callback, which
       // supplies a refreshed token.
       if (reason === 'io server disconnect') {
-        newSocket.connect();
+        socket.connect();
       }
     });
 
-    // Listen for progress updates
-    newSocket.on('progress', (data) => {
-      if (sessionId && data.sessionId === sessionId) {
-        console.log('📡 Progress update received:', data);
-        
-        // Update local state
-        if (data.messages) setLocalMessages(data.messages);
-        if (data.errors) setLocalErrors(data.errors);
-        if (data.techStack) setLocalTechStack(data.techStack);
-        if (data.generatedFiles) setLocalGeneratedFiles(data.generatedFiles);
-        
-        // Call parent update handler
-        if (onProgressUpdate) {
-          onProgressUpdate(data);
-        }
+    socket.on('progress', (data: ProgressPayload) => {
+      if (data?.sessionId === sessionId) {
+        onProgressUpdateRef.current?.(data);
       }
     });
 
-    setSocket(newSocket);
-
-    // Cleanup on unmount
     return () => {
-      newSocket.disconnect();
+      socket.disconnect();
     };
-  }, [sessionId, onProgressUpdate]);
+  }, [sessionId]);
 
-  useEffect(() => {
-    // Update current step index based on progress
-    if (progress <= 35) setCurrentStepIndex(0);
-    else if (progress <= 65) setCurrentStepIndex(1);
-    else if (progress <= 90) setCurrentStepIndex(2);
-    else setCurrentStepIndex(3);
-  }, [progress]);
-
-  useEffect(() => {
-    if (status === 'completed' && onComplete) {
-      onComplete({ 
-        techStack: localTechStack, 
-        generatedFiles: localGeneratedFiles, 
-        messages: localMessages 
-      });
-    } else if (status === 'failed' && onError && localErrors.length > 0) {
-      onError(localErrors[0]);
+  // Driven only by what the server reports: no per-agent events exist, so before the
+  // result event the cards make no per-agent claim
+  const hasAgentReport = Array.isArray(messages);
+  const getStepState = (step: typeof WORKFLOW_STEPS[number]): StepState => {
+    if (hasAgentReport) {
+      if (errors.some((error) => error.startsWith(step.errorPrefix))) return 'failed';
+      if (messages.some((message) => message.agent === step.agent)) return 'done';
+      return 'not-run';
     }
-  }, [status, onComplete, onError, localTechStack, localGeneratedFiles, localMessages, localErrors]);
-
-  const getStepStatus = (stepIndex: number) => {
-    if (status === 'failed' && stepIndex === currentStepIndex) return 'failed';
-    if (status === 'completed' || stepIndex < currentStepIndex) return 'done';
-    if (stepIndex === currentStepIndex && status !== 'cloned') return 'running';
-    return 'pending';
+    if (status === 'cloning' || status === 'cloned') return 'waiting';
+    if (status === 'analyzing') return 'running';
+    if (status === 'completed') return 'unknown';
+    return 'not-run';
   };
 
-  const getStatusIcon = (stepStatus: string) => {
-    switch (stepStatus) {
+  const getStatusIcon = (stepState: StepState) => {
+    switch (stepState) {
       case 'done':
         return <CheckCircle className="h-4 w-4 text-status-success" />;
       case 'running':
         return <Loader2 className="h-4 w-4 animate-spin text-status-running" />;
       case 'failed':
         return <AlertCircle className="h-4 w-4 text-status-error" />;
-      case 'pending':
-        return <Clock className="h-4 w-4 text-muted-foreground" />;
       default:
         return <Clock className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
-  const getStepColor = (stepStatus: string) => {
-    switch (stepStatus) {
+  const getStepColor = (stepState: StepState) => {
+    switch (stepState) {
       case 'done':
         return 'border-status-success/25 bg-card';
       case 'running':
-        return 'border-primary/40 bg-primary/[0.04] ring-1 ring-primary/20';
+        return 'border-primary/30 bg-primary/[0.03]';
       case 'failed':
         return 'border-status-error/30 bg-status-error/[0.05]';
-      case 'pending':
-        return 'border-border bg-muted/40';
       default:
         return 'border-border bg-muted/40';
     }
   };
 
-  const fetchGeneratedFiles = async (): Promise<Record<string, unknown>> => {
-    const response = await apiFetch(`/api/files/${sessionId}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch generated files');
+  const getBadgeColor = (stepState: StepState) => {
+    switch (stepState) {
+      case 'done':
+        return 'border-status-success/30 bg-status-success/[0.06] text-status-success';
+      case 'running':
+        return 'border-primary/30 bg-primary/[0.06] text-primary';
+      case 'failed':
+        return 'border-status-error/30 bg-status-error/[0.06] text-status-error';
+      default:
+        return 'text-muted-foreground';
     }
-    
-    const data = await response.json();
+  };
+
+  const fetchGeneratedFiles = async (): Promise<Record<string, string>> => {
+    const response = await apiFetch(`/api/files/${sessionId}`);
+
+    if (!response.ok) {
+      throw new Error('The generated files could not be loaded');
+    }
+
+    const data: { files?: Record<string, string> } = await response.json();
     return data.files || {};
   };
 
   const handleDownloadFiles = async () => {
     if (!sessionId) return;
-    
+
+    setDownloading(true);
     try {
-      // Create downloadable files
-      const files = await fetchGeneratedFiles();
-      Object.entries(files).forEach(([filename, content]) => {
-        const blob = new Blob([content as string], { type: 'text/plain' });
+      const entries = Object.entries(await fetchGeneratedFiles()).filter(
+        ([, content]) => typeof content === 'string'
+      );
+      if (entries.length === 0) {
+        throw new Error('No generated files to download');
+      }
+      entries.forEach(([key, content]) => {
+        // octet-stream: with text/plain, Chrome appends ".txt" to a name without an
+        // extension (Dockerfile -> Dockerfile.txt)
+        const blob = new Blob([content], { type: 'application/octet-stream' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = FILE_META[key]?.downloadName || key;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -266,6 +273,13 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       });
     } catch (error) {
       console.error('Download error:', error);
+      toast({
+        title: 'Download failed',
+        description: error instanceof Error ? error.message : 'Failed to download files',
+        variant: 'destructive'
+      });
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -287,9 +301,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         .filter(([, content]) => typeof content === 'string' && content.trim() !== '')
         .map(([key, content]) => ({
           userId: user.id,
-          content: content as string,
-          name: SAVED_FILE_META[key]?.name || key,
-          type: SAVED_FILE_META[key]?.type || key,
+          content,
+          name: FILE_META[key]?.name || key,
+          type: FILE_META[key]?.type || key,
           repoUrl: stripCredentials(repoUrl),
         }));
 
@@ -314,11 +328,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     }
   };
 
-  // Use local state that gets updated via WebSocket, fallback to props
-  const displayMessages = localMessages.length > 0 ? localMessages : messages;
-  const displayErrors = localErrors.length > 0 ? localErrors : errors;
-  const displayTechStack = localTechStack || techStack;
-  const displayGeneratedFiles = localGeneratedFiles.length > 0 ? localGeneratedFiles : generatedFiles;
+  const displayMessages = messages ?? [];
+  const noFilesGenerated = status === 'completed' && generatedFiles.length === 0;
+  const showSharedRunning = !hasAgentReport && status === 'analyzing';
+  const showNoDetails = !hasAgentReport && status === 'completed';
 
   return (
     <section className="w-full space-y-6">
@@ -334,7 +347,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             )}
           </CardTitle>
           <CardDescription>
-            Multi-agent system analyzing your repository and generating CI/CD configurations
+            Progress arrives at milestones: clone, analysis start, and once all four agents have finished
           </CardDescription>
         </div>
         <Button
@@ -362,26 +375,32 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           />
         </div>
 
+        {showSharedRunning && (
+          <p className="text-sm leading-6 text-muted-foreground">
+            The four agents run one after another. The server reports their results together, once all four have finished.
+          </p>
+        )}
+
         {/* Workflow Steps */}
         <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {WORKFLOW_STEPS.map((step, index) => {
-            const stepStatus = getStepStatus(index);
+            const stepState = getStepState(step);
             const Icon = step.icon;
-            
+
             return (
               <li
                 key={step.id}
                 className={`flex flex-col gap-3 rounded-md border p-4 transition-colors duration-200 ${
-                  getStepColor(stepStatus)
+                  getStepColor(stepState)
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[11px] font-medium text-muted-foreground">
                     {String(index + 1).padStart(2, '0')}
                   </span>
-                  {getStatusIcon(stepStatus)}
+                  {getStatusIcon(stepState)}
                 </div>
-                
+
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <Icon className="h-4 w-4 shrink-0 text-foreground/70" />
@@ -393,28 +412,11 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between gap-2 border-t border-border/80 pt-3">
-                  <Badge
-                    variant="outline"
-                    className={`w-fit text-[11px] ${
-                      stepStatus === 'done'
-                        ? 'border-status-success/30 bg-status-success/[0.06] text-status-success'
-                        : stepStatus === 'running'
-                          ? 'border-primary/30 bg-primary/[0.06] text-primary'
-                          : stepStatus === 'failed'
-                            ? 'border-status-error/30 bg-status-error/[0.06] text-status-error'
-                            : 'text-muted-foreground'
-                    }`}
-                  >
-                    {stepStatus === 'done'
-                      ? 'Done'
-                      : stepStatus === 'running'
-                        ? 'Running'
-                        : stepStatus === 'failed'
-                          ? 'Failed'
-                          : 'Pending'}
+                  <Badge variant="outline" className={`w-fit text-[11px] ${getBadgeColor(stepState)}`}>
+                    {STEP_LABELS[stepState]}
                   </Badge>
                   <p className="font-mono text-[11px] text-muted-foreground">
-                    Est. time: {step.estimatedTime}
+                    AI task: {step.aiUsage}
                   </p>
                 </div>
               </li>
@@ -422,15 +424,36 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           })}
         </ol>
 
+        {showNoDetails && (
+          <p className="text-sm leading-6 text-muted-foreground">
+            Per-agent results are reported only while this page is open during the analysis.
+          </p>
+        )}
+
+        {/* No files: the run completed, but the generator produced nothing */}
+        {noFilesGenerated && (
+          <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
+            <AlertTriangle className="h-4 w-4 text-status-warning" />
+            <AlertDescription className="space-y-1">
+              <p className="font-medium text-status-warning">No files were generated</p>
+              {errors.map((error, index) => (
+                <p key={index} className="break-words text-sm leading-6 text-foreground/80">
+                  {error}
+                </p>
+              ))}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Error Display */}
-        {displayErrors.length > 0 && (
+        {!noFilesGenerated && errors.length > 0 && (
           <div className="rounded-md border border-status-error/30 bg-status-error/[0.05] p-4">
             <div className="mb-2 flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-status-error" />
               <h3 className="text-sm font-semibold text-status-error">Errors Detected</h3>
             </div>
             <div className="space-y-1 pl-6">
-              {displayErrors.map((error, index) => (
+              {errors.map((error, index) => (
                 <p key={index} className="break-words text-sm leading-6 text-status-error">
                   {error}
                 </p>
@@ -467,30 +490,30 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         )}
 
         {/* Tech Stack Detection */}
-        {displayTechStack && showDetails && (
+        {techStack && showDetails && (
           <div className="rounded-md border border-border bg-card p-4">
             <h3 className="mb-3 text-sm font-semibold">Detected Tech Stack</h3>
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-xs font-medium text-muted-foreground">Primary:</dt>
-                <dd className="mt-0.5 font-medium">{displayTechStack.primary}</dd>
+                <dd className="mt-0.5 font-medium">{techStack.primary}</dd>
               </div>
-              {displayTechStack.frameworks?.length > 0 && (
+              {techStack.frameworks?.length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Frameworks:</dt>
-                  <dd className="mt-0.5">{displayTechStack.frameworks.join(', ')}</dd>
+                  <dd className="mt-0.5">{techStack.frameworks.join(', ')}</dd>
                 </div>
               )}
-              {displayTechStack.tools?.length > 0 && (
+              {techStack.tools?.length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Tools:</dt>
-                  <dd className="mt-0.5">{displayTechStack.tools.join(', ')}</dd>
+                  <dd className="mt-0.5">{techStack.tools.join(', ')}</dd>
                 </div>
               )}
-              {displayTechStack.databases?.length > 0 && (
+              {techStack.databases?.length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Databases:</dt>
-                  <dd className="mt-0.5">{displayTechStack.databases.join(', ')}</dd>
+                  <dd className="mt-0.5">{techStack.databases.join(', ')}</dd>
                 </div>
               )}
             </dl>
@@ -498,21 +521,21 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         )}
 
         {/* Generated Files */}
-        {displayGeneratedFiles.length > 0 && (
+        {generatedFiles.length > 0 && (
           <div className="rounded-md border border-status-success/25 bg-status-success/[0.05] p-4">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-status-success">
               <CheckCircle className="h-4 w-4" />
               <span>Generated Files</span>
             </h3>
             <div className="flex flex-wrap gap-2">
-              {displayGeneratedFiles.map((file, index) => (
+              {generatedFiles.map((file, index) => (
                 <Badge
                   key={index}
                   variant="outline"
                   className="gap-1.5 rounded-md bg-card py-1.5 font-mono text-[11px] font-normal"
                 >
                   <FileCode className="h-3.5 w-3.5 text-status-success" />
-                  {file}
+                  {FILE_META[file]?.downloadName || file}
                 </Badge>
               ))}
             </div>
@@ -522,7 +545,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {/* Status Actions */}
         <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
-            <div 
+            <div
               className={`h-2 w-2 rounded-full ${
                 status === 'completed' ? 'bg-status-success' :
                 status === 'failed' ? 'bg-status-error' :
@@ -531,20 +554,16 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             />
             <span className="text-sm font-medium capitalize">{status}</span>
           </div>
-          
-          {status === 'completed' && (
+
+          {status === 'completed' && !noFilesGenerated && (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={handleDownloadFiles}>
-                <Download className="h-4 w-4" />
-                Download Files
+              <Button size="sm" variant="outline" onClick={handleDownloadFiles} disabled={downloading}>
+                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {downloading ? 'Downloading...' : 'Download Files'}
               </Button>
               <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 {saving ? 'Saving...' : 'Save to Account'}
-              </Button>
-              <Button size="sm">
-                <ExternalLink className="h-4 w-4" />
-                View Results
               </Button>
             </div>
           )}

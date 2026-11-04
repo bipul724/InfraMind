@@ -1,87 +1,104 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { 
-  Github, 
-  GitBranch, 
-  Zap, 
-  Rocket, 
-  Code, 
-  Play, 
-  CheckCircle, 
+import {
+  Github,
+  GitBranch,
+  Zap,
+  Code,
+  CheckCircle,
   AlertCircle,
   ExternalLink,
-  Settings,
   LogOut,
-  User,
-  Home,
   Activity,
-  Clock,
-  Star,
   Plus,
-  Search,
-  Filter,
-  FileText
+  FileText,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGitHub } from '@/contexts/GitHubContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AgentGenerationForm } from '@/components/AgentGenerationForm';
 import { AgentProgress } from '@/components/AgentProgress';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SavedFiles } from '@/components/dashboard/SavedFiles';
-
-interface Repository {
-  id: string;
-  name: string;
-  fullName: string;
-  description?: string;
-  language: string;
-  private: boolean;
-  stars: number;
-  updatedAt: string;
-  url: string;
-}
+import { useToast } from '@/hooks/use-toast';
+import { apiFetch } from '@/lib/apiClient';
+import { isStatusRegression, isUuidV4 } from '@/lib/session';
+import type {
+  AgentMessage,
+  GenerationResult,
+  ProgressPayload,
+  SessionFilesResponse,
+  SessionStatus,
+  SessionStatusResponse,
+  TechStack
+} from '@/lib/session';
 
 interface Project {
-  id: string;
+  id: string; // session id
   name: string;
   repoUrl: string;
   techStack: string;
-  status: 'generating' | 'completed' | 'failed';
+  status: 'completed';
   createdAt: string;
-  progress?: number;
 }
+
+// A session opened with /dashboard?session=<id>
+interface SessionView {
+  id: string;
+  phase: 'loading' | 'ready' | 'error';
+  status?: SessionStatus;
+  repoUrl?: string;
+  error?: string;
+  currentStep: string;
+  progress: number;
+  messages?: AgentMessage[];
+  errors: string[];
+  techStack: TechStack | null;
+  generatedFiles: string[];
+}
+
+// The step and percentage the server emits when a session enters each status
+// (server/server.js handleCloneRequest and /api/analyze); the socket snapshot replaces them
+const STATUS_START: Record<SessionStatus, { step: string; progress: number }> = {
+  cloning: { step: 'Cloning repository...', progress: 10 },
+  cloned: { step: 'Repository cloned successfully', progress: 25 },
+  analyzing: { step: 'Starting AI agent analysis...', progress: 30 },
+  completed: { step: 'Analysis complete!', progress: 100 },
+  failed: { step: 'Analysis failed', progress: 0 }
+};
+
+// "https://github.com/owner/repo(.git)" -> "owner/repo"
+const repoLabel = (url: string) =>
+  url.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '') || url;
 
 export const ModernDashboard = () => {
   const { user, logout } = useAuth();
-  const { user: githubUser, isConnected, isLoading, error, connectGitHub, disconnect } = useGitHub();
+  const { user: githubUser, isConnected, isLoading, connectGitHub } = useGitHub();
   const navigate = useNavigate();
-  
+  const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sessionParam = searchParams.get('session');
+
   // State management
   const [activeTab, setActiveTab] = useState('generate');
-  const [repositories, setRepositories] = useState<Repository[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null);
   const [githubConnected, setGithubConnected] = useState(false);
-  const [manualRepoUrl, setManualRepoUrl] = useState('');
   const [useManualUrl, setUseManualUrl] = useState(false);
+  const [sessionView, setSessionView] = useState<SessionView | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // GitHub connection status - use context values
   const githubUsername = githubUser?.login;
 
   useEffect(() => {
     setGithubConnected(isConnected);
-    if (isConnected) {
-      loadRepositories();
-    }
   }, [isConnected]);
 
   // Move focus to the repository URL field once the manual form appears
@@ -91,49 +108,132 @@ export const ModernDashboard = () => {
     }
   }, [useManualUrl]);
 
-  const loadRepositories = async () => {
-    try {
-      // Mock repositories for demonstration
-      const mockRepos: Repository[] = [
-        {
-          id: '1',
-          name: 'my-awesome-app',
-          fullName: 'user/my-awesome-app',
-          description: 'A modern React application with TypeScript',
-          language: 'TypeScript',
-          private: false,
-          stars: 42,
-          updatedAt: '2024-01-20',
-          url: 'https://github.com/user/my-awesome-app'
-        },
-        {
-          id: '2',
-          name: 'api-server',
-          fullName: 'user/api-server',
-          description: 'Node.js REST API with Express and MongoDB',
-          language: 'JavaScript',
-          private: true,
-          stars: 15,
-          updatedAt: '2024-01-19',
-          url: 'https://github.com/user/api-server'
-        },
-        {
-          id: '3',
-          name: 'python-ml-project',
-          fullName: 'user/python-ml-project',
-          description: 'Machine learning project with Python and scikit-learn',
-          language: 'Python',
-          private: false,
-          stars: 128,
-          updatedAt: '2024-01-18',
-          url: 'https://github.com/user/python-ml-project'
-        }
-      ];
-      setRepositories(mockRepos);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
+  const clearSessionParam = useCallback(() => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('session');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // /dashboard?session=<id>: load that session's status and, once completed, its results
+  useEffect(() => {
+    if (!sessionParam) {
+      setSessionView(null);
+      return;
     }
-  };
+    if (!isUuidV4(sessionParam)) {
+      setSessionView(null);
+      clearSessionParam();
+      return;
+    }
+
+    const id = sessionParam;
+    let cancelled = false;
+    setActiveTab('generate');
+    setSessionView({
+      id,
+      phase: 'loading',
+      currentStep: '',
+      progress: 0,
+      errors: [],
+      techStack: null,
+      generatedFiles: []
+    });
+
+    // Returns true when the response was an error that has been handled
+    const handleFailure = (status: number): boolean => {
+      if (status === 404) {
+        toast({ title: 'This analysis was not found or has expired', variant: 'destructive' });
+        setSessionView(null);
+        clearSessionParam();
+        return true;
+      }
+      const description =
+        status === 401
+          ? 'Your sign-in has expired. Sign in again to open this analysis.'
+          : status === 503
+            ? 'The service is unavailable right now. Please try again shortly.'
+            : 'Please try again.';
+      toast({ title: 'Could not load this analysis', description, variant: 'destructive' });
+      setSessionView((previous) => (previous && previous.id === id ? { ...previous, phase: 'error' } : previous));
+      return true;
+    };
+
+    const load = async () => {
+      try {
+        const statusResponse = await apiFetch(`/api/status/${id}`);
+        if (cancelled) return;
+        if (!statusResponse.ok) {
+          handleFailure(statusResponse.status);
+          return;
+        }
+        const session: SessionStatusResponse = await statusResponse.json();
+        if (cancelled) return;
+
+        const start = STATUS_START[session.status] ?? STATUS_START.cloning;
+        const base: SessionView = {
+          id,
+          phase: 'ready',
+          status: session.status,
+          repoUrl: session.repoUrl,
+          error: session.error,
+          currentStep: start.step,
+          progress: start.progress,
+          errors: [],
+          techStack: null,
+          generatedFiles: []
+        };
+
+        if (session.status !== 'completed') {
+          setSessionView(base);
+          return;
+        }
+
+        const filesResponse = await apiFetch(`/api/files/${id}`);
+        if (cancelled) return;
+        if (!filesResponse.ok) {
+          handleFailure(filesResponse.status);
+          return;
+        }
+        const result: SessionFilesResponse = await filesResponse.json();
+        if (cancelled) return;
+        setSessionView({
+          ...base,
+          techStack: result.techStack ?? null,
+          generatedFiles: Object.keys(result.files ?? {}),
+          ...(Array.isArray(result.messages) ? { messages: result.messages } : {}),
+          ...(Array.isArray(result.errors) ? { errors: result.errors } : {})
+        });
+      } catch {
+        if (!cancelled) handleFailure(0);
+      }
+    };
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionParam, reloadKey, clearSessionParam, toast]);
+
+  // Live updates for an opened session that is still in progress
+  const handleSessionProgress = useCallback((data: ProgressPayload) => {
+    setSessionView((previous) => {
+      if (!previous || previous.id !== data.sessionId || !previous.status) return previous;
+      const next = { ...previous };
+      if (!data.status || !isStatusRegression(previous.status, data.status)) {
+        if (data.status) next.status = data.status;
+        if (data.step) next.currentStep = data.step;
+        if (typeof data.progress === 'number') next.progress = data.progress;
+      }
+      if (Array.isArray(data.messages)) next.messages = data.messages;
+      if (Array.isArray(data.errors)) next.errors = data.errors;
+      if (data.error) next.error = data.error;
+      if (data.techStack) next.techStack = data.techStack;
+      if (Array.isArray(data.generatedFiles)) next.generatedFiles = data.generatedFiles;
+      return next;
+    });
+  }, []);
 
   const handleGitHubConnect = async () => {
     try {
@@ -152,40 +252,95 @@ export const ModernDashboard = () => {
     }
   };
 
-  const handleRepoSelect = (repo: Repository) => {
-    setSelectedRepo(repo);
-    setManualRepoUrl(repo.url);
+  const handleProjectComplete = useCallback((result: GenerationResult) => {
+    setProjects((previous) => {
+      if (previous.some((project) => project.id === result.sessionId)) return previous;
+      const newProject: Project = {
+        id: result.sessionId,
+        name: repoLabel(result.repoUrl),
+        repoUrl: result.repoUrl,
+        techStack: result.techStack?.primary || 'Detected',
+        status: 'completed',
+        createdAt: new Date().toISOString()
+      };
+      return [newProject, ...previous];
+    });
+  }, []);
+
+  const openSession = (id: string) => {
+    setActiveTab('generate');
+    setSearchParams({ session: id });
   };
 
-  const handleProjectComplete = (result: any) => {
-    const newProject: Project = {
-      id: Date.now().toString(),
-      name: selectedRepo?.name || 'Manual Project',
-      repoUrl: selectedRepo?.url || manualRepoUrl,
-      techStack: result.techStack?.primary || 'Detected',
-      status: 'completed',
-      createdAt: new Date().toISOString(),
-      progress: 100
-    };
-    setProjects(prev => [newProject, ...prev]);
-  };
+  const renderSessionView = (view: SessionView) => (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold">Analysis Result</h3>
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+              {view.repoUrl ? repoLabel(view.repoUrl) : `Session ${view.id.substring(0, 8)}...`}
+            </p>
+          </div>
+          <Button onClick={clearSessionParam} className="shrink-0">
+            <Plus className="h-4 w-4" />
+            Start a New Generation
+          </Button>
+        </CardContent>
+      </Card>
 
-  const filteredRepos = repositories.filter(repo =>
-    repo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    repo.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      {view.phase === 'loading' && (
+        <Card>
+          <CardContent className="flex items-center gap-3 p-6 text-sm text-muted-foreground" aria-busy="true">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading analysis...
+          </CardContent>
+        </Card>
+      )}
+
+      {view.phase === 'error' && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>This analysis could not be loaded.</span>
+            <Button size="sm" variant="outline" onClick={() => setReloadKey((key) => key + 1)} className="w-fit">
+              <RefreshCw className="h-4 w-4" />
+              Try Again
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {view.phase === 'ready' && view.status === 'failed' && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <p className="font-medium">This analysis failed</p>
+            <p className="mt-1 break-words">{view.error || 'No error message was stored for this session.'}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {view.phase === 'ready' && view.status && view.status !== 'failed' && (
+        <Card>
+          <CardContent className="p-5 sm:p-6">
+            <AgentProgress
+              sessionId={view.id}
+              repoUrl={view.repoUrl}
+              currentStep={view.currentStep}
+              progress={view.progress}
+              status={view.status}
+              messages={view.messages}
+              errors={view.errors}
+              techStack={view.techStack}
+              generatedFiles={view.generatedFiles}
+              onProgressUpdate={handleSessionProgress}
+            />
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
-
-  const getLanguageColor = (language: string) => {
-    const colors: { [key: string]: string } = {
-      TypeScript: 'bg-primary/10 text-primary border-primary/20',
-      JavaScript: 'bg-status-warning/10 text-status-warning border-status-warning/30',
-      Python: 'bg-status-success/10 text-status-success border-status-success/30',
-      Java: 'bg-status-error/10 text-status-error border-status-error/30',
-      Go: 'bg-muted text-muted-foreground border-border',
-      Rust: 'bg-secondary text-secondary-foreground border-border',
-    };
-    return colors[language] || 'bg-muted text-muted-foreground border-border';
-  };
 
   return (
     <ErrorBoundary>
@@ -199,7 +354,7 @@ export const ModernDashboard = () => {
                 Welcome back, {user?.name?.split(' ')[0]}!
               </h2>
               <p className="mt-2 max-w-2xl text-base leading-7 text-muted-foreground">
-                Generate production-ready CI/CD configurations with our AI-powered agents
+                Generate a Dockerfile, a GitHub Actions workflow and a .env.example for a GitHub repository
               </p>
             </div>
 
@@ -232,14 +387,10 @@ export const ModernDashboard = () => {
 
           {/* Main Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid h-auto w-full grid-cols-2 sm:inline-flex sm:h-11 sm:w-auto">
+            <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-flex sm:h-11 sm:w-auto">
               <TabsTrigger value="generate" className="h-9 sm:h-full">
                 <Zap className="h-4 w-4" />
                 <span>Generate</span>
-              </TabsTrigger>
-              <TabsTrigger value="repositories" className="h-9 sm:h-full">
-                <GitBranch className="h-4 w-4" />
-                <span>Repositories</span>
               </TabsTrigger>
               <TabsTrigger value="projects" className="h-9 sm:h-full">
                 <Activity className="h-4 w-4" />
@@ -257,7 +408,9 @@ export const ModernDashboard = () => {
                 <Zap className="h-4 w-4 text-primary" />
                 <h3 className="text-sm font-semibold tracking-tight">AI Agent Generation</h3>
               </div>
-              {!githubConnected && !useManualUrl ? (
+              {sessionView ? (
+                renderSessionView(sessionView)
+              ) : !useManualUrl ? (
                 <Card>
                   <CardContent className="px-5 py-12 sm:px-6 sm:py-14">
                     <div className="mx-auto max-w-md space-y-6 text-center">
@@ -265,19 +418,30 @@ export const ModernDashboard = () => {
                         <Github className="h-7 w-7 text-foreground" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold">Connect GitHub for Best Experience</h3>
+                        <h3 className="text-lg font-semibold">
+                          {githubConnected ? 'Choose a Repository or Enter a URL' : 'Connect GitHub or Enter a URL'}
+                        </h3>
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          Connect your GitHub account to browse repositories and get enhanced features
+                          {githubConnected
+                            ? 'Your repositories, including private ones, are on the Repositories page linked in the header. A typed URL works for public repositories.'
+                            : 'With GitHub connected, you can pick from your repositories, including private ones, on the Repositories page linked in the header. A typed URL works for public repositories.'}
                         </p>
                       </div>
                       <div className="flex flex-col justify-center gap-3 sm:flex-row">
-                        <Button
-                          onClick={handleGitHubConnect}
-                          disabled={isLoading}
-                        >
-                          <Github className="h-4 w-4" />
-                          {isLoading ? 'Connecting...' : 'Connect GitHub'}
-                        </Button>
+                        {githubConnected ? (
+                          <Button onClick={() => navigate('/select-repo')}>
+                            <GitBranch className="h-4 w-4" />
+                            Choose from Your Repositories
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={handleGitHubConnect}
+                            disabled={isLoading}
+                          >
+                            <Github className="h-4 w-4" />
+                            {isLoading ? 'Connecting...' : 'Connect GitHub'}
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           onClick={() => setUseManualUrl(true)}
@@ -290,127 +454,10 @@ export const ModernDashboard = () => {
                 </Card>
               ) : (
                 <AgentGenerationForm
-                  repoUrl={manualRepoUrl}
                   onComplete={handleProjectComplete}
                   onError={(error) => console.error('Generation failed:', error)}
                 />
               )}
-            </TabsContent>
-
-            {/* Repositories Tab */}
-            <TabsContent value="repositories" className="mt-0 space-y-6">
-              <Card>
-                <CardHeader className="pb-4">
-                  <CardTitle className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="h-5 w-5 text-primary" />
-                      <span>Your Repositories</span>
-                    </div>
-                    {githubConnected && (
-                      <Badge variant="outline" className="border-status-success/30 bg-status-success/[0.06] text-status-success">
-                        GitHub Connected
-                      </Badge>
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {githubConnected ? (
-                    <div className="space-y-4">
-                      {/* Search */}
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          placeholder="Search repositories..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-10"
-                        />
-                      </div>
-
-                      {/* Repository List */}
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        {filteredRepos.map((repo) => (
-                          <Card
-                            key={repo.id}
-                            className={`cursor-pointer shadow-none transition-colors duration-150 hover:border-primary/30 hover:bg-accent/30 ${
-                               selectedRepo?.id === repo.id ? 'border-primary bg-primary/[0.04] ring-1 ring-primary' : ''
-                            }`}
-                            onClick={() => handleRepoSelect(repo)}
-                          >
-                            <CardContent className="p-4 sm:p-4">
-                              <div className="flex h-full flex-col gap-3">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0 flex-1">
-                                    <h3 className="truncate font-mono text-sm font-semibold">
-                                      {repo.name}
-                                    </h3>
-                                    <p className="truncate text-xs text-muted-foreground">
-                                      {repo.fullName}
-                                    </p>
-                                  </div>
-                                  {repo.private && (
-                                    <Badge variant="outline" className="shrink-0 text-[11px]">
-                                      Private
-                                    </Badge>
-                                  )}
-                                </div>
-
-                                {repo.description && (
-                                   <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                    {repo.description}
-                                  </p>
-                                )}
-
-                                <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className={getLanguageColor(repo.language)}>
-                                      {repo.language}
-                                    </Badge>
-                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                      <Star className="h-3 w-3" />
-                                      <span>{repo.stars}</span>
-                                    </div>
-                                  </div>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 px-2.5"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setActiveTab('generate');
-                                      setManualRepoUrl(repo.url);
-                                    }}
-                                  >
-                                    <Play className="h-3 w-3" />
-                                    Generate
-                                  </Button>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mx-auto max-w-md py-10 text-center">
-                       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
-                         <Github className="h-6 w-6 text-muted-foreground" />
-                       </div>
-                       <h3 className="text-base font-semibold">No GitHub Connection</h3>
-                       <p className="mt-2 text-sm text-muted-foreground">
-                        Connect your GitHub account to browse repositories
-                      </p>
-                      <Button
-                        onClick={handleGitHubConnect}
-                         className="mt-5"
-                      >
-                        <Github className="h-4 w-4" />
-                        Connect GitHub
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
             </TabsContent>
 
             {/* Projects Tab */}
@@ -419,7 +466,7 @@ export const ModernDashboard = () => {
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center gap-2">
                     <Activity className="h-5 w-5 text-primary" />
-                    <span>Your Projects</span>
+                    <span>Results from This Visit</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -428,16 +475,16 @@ export const ModernDashboard = () => {
                       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
                         <Code className="h-6 w-6 text-muted-foreground" />
                       </div>
-                       <h3 className="text-base font-semibold">No Projects Yet</h3>
+                       <h3 className="text-base font-semibold">No Results Yet</h3>
                        <p className="mt-2 text-sm text-muted-foreground">
-                        Generate your first CI/CD configuration to get started
+                        Generations completed on this page appear here until you leave it. To keep files, use Save to Account.
                       </p>
                       <Button
                         onClick={() => setActiveTab('generate')}
                         className="mt-5"
                       >
                         <Plus className="h-4 w-4" />
-                        Create Project
+                        Start a Generation
                       </Button>
                     </div>
                   ) : (
@@ -457,20 +504,18 @@ export const ModernDashboard = () => {
                             <div className="flex items-center gap-2">
                               <Badge
                                 variant="outline"
-                                className={
-                                  project.status === 'completed'
-                                     ? 'border-status-success/30 bg-status-success/[0.06] capitalize text-status-success'
-                                     : 'border-status-warning/30 bg-status-warning/10 capitalize text-status-warning'
-                                }
+                                className="border-status-success/30 bg-status-success/[0.06] capitalize text-status-success"
                               >
-                                {project.status === 'completed' ? (
-                                  <CheckCircle className="h-3 w-3" />
-                                ) : (
-                                  <Clock className="h-3 w-3" />
-                                )}
+                                <CheckCircle className="h-3 w-3" />
                                 {project.status}
                               </Badge>
-                              <Button size="sm" variant="outline" className="h-8 px-2.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2.5"
+                                onClick={() => openSession(project.id)}
+                                aria-label={`View the result for ${project.name}`}
+                              >
                                 <ExternalLink className="h-3 w-3" />
                                 View
                               </Button>

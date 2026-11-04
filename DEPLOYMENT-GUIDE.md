@@ -1,291 +1,53 @@
-# 🚀 InfraMind Deployment Guide
+# InfraMind Deployment Guide
 
-Complete deployment guide for the multi-agent AI DevOps automation platform.
+How to configure and deploy InfraMind as it is implemented in this repository. For how the parts work together see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 📋 **Prerequisites**
+## What you need
 
-### Required Services & API Keys
+- **Node.js** matching `server/package.json` `engines`: `^20.19 || ^22.12 || >=24.0`
+- **`git`** on the server machine: clones run the `git` binary (`server/utils/git.js`)
+- **A Supabase project:** Auth, and Postgres for `saved_files` and (optionally) `github_connections`
+- **A GitHub OAuth App** for repository access, separate from the GitHub sign-in provider in Supabase
+- **At least one AI provider account:** `gemini`, `groq`, `openrouter` or `novita` (`server/ai/providers.js`)
+- **Postgres for sessions** if you use `SESSION_STORE=database`. `server/.env.example` describes the Supabase session pooler for this
 
-1. **Novita.ai API Key** (Required, set as `LLAMA_API_KEY`)
-   - Sign up at [Novita.ai](https://novita.ai)
-   - The agents call `meta-llama/llama-3-70b-instruct` through Novita.ai's OpenAI-compatible API (`server/agents/index.js`)
-
-2. **Supabase Project** (Authentication & Database)
-   - Create one at [Supabase](https://supabase.com/dashboard)
-   - Features used: Supabase Auth (email/password, Google, GitHub) and PostgreSQL (`public.saved_files` with Row Level Security)
-   - Accessed from the browser only. The server needs no Supabase credentials
-
-3. **Keywords AI** (Optional - Observability)
-   - Sign up at [Keywords AI](https://keywordsai.co)
-   - Used for monitoring and analytics
-
-4. **Mem0** (Optional - Memory & Context)
-   - Sign up at [Mem0](https://mem0.ai)
-   - Stores interaction history
-
-5. **Tavily** (Optional - Enhanced Search)
-   - Sign up at [Tavily](https://tavily.com)
-   - AI-powered search capabilities
-
-Keywords AI, Mem0 and Tavily are only used by the legacy generator in `server/index.js`. That code runs only for `POST /api/devpilot` with `useAgents: false`, which the web client never sends. The four-agent pipeline doesn't use them.
-
-### System Requirements
-
-- **Node.js 18+**
-- **Git**
-- **2GB+ RAM** (for agent processing)
-- **1GB+ Storage** (for temporary repos)
+The server refuses to start without the Supabase, GitHub token store, AI and session store settings; see [Startup checks](#startup-checks).
 
 ---
 
-## 🏗️ **Local Development Setup**
+## 1. Supabase
 
-### 1. Clone & Install
+### 1.1 Project and keys
 
-```bash
-# Clone the repository
-git clone https://github.com/your-org/inframind.git
-cd inframind
+1. Create a project in the [Supabase dashboard](https://supabase.com/dashboard)
+2. In **Project Settings → API Keys**, copy:
 
-# Install server dependencies
-cd server
-npm install
+| Supabase value | Client variable | Server variable |
+|---|---|---|
+| Project URL | `VITE_SUPABASE_URL` | `SUPABASE_URL` |
+| Publishable (anon) key | `VITE_SUPABASE_ANON_KEY` | `SUPABASE_ANON_KEY` |
+| Secret (`service_role`) key | never | `SUPABASE_SERVICE_ROLE_KEY`, only with `GITHUB_TOKEN_STORE=supabase` |
 
-# Install client dependencies
-cd ../client
-npm install
-```
+The server uses the URL and anon key to verify user access tokens (`server/utils/auth.js`). It uses the service-role key only for `public.github_connections` (`server/utils/githubConnections.js`). The service-role key bypasses Row Level Security: never put it in a `VITE_` variable, because Vite bundles those into browser code.
 
-### 2. Environment Configuration
+### 1.2 Database setup
 
-Create environment files:
+**`public.saved_files`** (used by the browser for "Save to Account" and the Saved Files tab). Apply `supabase/migrations/20261104000000_saved_files.sql`: paste it into the **SQL Editor** and run it, or apply it with the Supabase CLI against your linked project (`supabase db push` applies the files in `supabase/migrations/`).
 
-#### **Server Environment** (`server/.env`)
-```bash
-# Required - AI Core (Novita.ai key for Llama 3 70B)
-LLAMA_API_KEY=your-novita-ai-api-key
-NODE_ENV=development
-PORT=3001
+The migration is idempotent and non-destructive, so it is safe on a project where the table was already created from the SQL this guide used to contain. It uses `create table if not exists` and `create index if not exists`, enables RLS, drops and recreates its three policies by name, and never drops the table, changes columns or touches rows. Before applying it to an existing project, compare the live table and policies with the file: a policy with a different name is not replaced and stays active alongside the new ones.
 
-# Required - Frontend URL (used for CORS and GitHub OAuth redirects)
-CLIENT_URL=http://localhost:5173
+What it sets up:
+- The table `id`, `user_id` (references `auth.users`, cascades on delete), `name`, `type`, `repo_url`, `content`, `created_at`, and the index on `(user_id, created_at desc)`
+- Policies for `authenticated` only: a signed-in user can read, insert and delete only rows whose `user_id` matches their own `auth.uid()`. There is no `update` policy, so saved files can't be edited (the app never edits them)
+- Privileges: `authenticated` gets exactly `select`, `insert` and `delete`; everything else Supabase grants by default on new tables, including all of `anon`'s access, is revoked. A request without a session (anon key only) is refused
 
-# Required for GitHub repository access (repo listing, private repos)
-GITHUB_CLIENT_ID=your-github-oauth-app-client-id
-GITHUB_CLIENT_SECRET=your-github-oauth-app-client-secret
-GITHUB_REDIRECT_URI=http://localhost:3001/auth/github/callback
-JWT_SECRET=your-jwt-secret-for-github-sessions
+The client uses the columns `id`, `user_id`, `name`, `type`, `repo_url`, `content` and `created_at` (`SavedFilesAPI` in `client/src/lib/api.ts`).
 
-# Optional - legacy useAgents:false path only
-MEM0_API_KEY=your-mem0-api-key
-KEYWORDS_AI_API_KEY=your-keywords-ai-api-key
-KEYWORDS_AI_BASE_URL=https://api.keywordsai.co
-TAVILY_API_KEY=your-tavily-api-key
-```
+**`public.github_connections`** (needed only with `GITHUB_TOKEN_STORE=supabase`). Apply `supabase/migrations/20261103000000_github_connections.sql`. It creates the table, enables RLS with no policies and revokes all access from `anon` and `authenticated`, so only the service-role key can use it.
 
-Variables the server does **not** read: `OPENAI_API_KEY`, `NOVITA_API_KEY`, `CORS_ORIGIN`, `GITHUB_TOKEN`, `TEMP_DIR`, `CLEANUP_INTERVAL` and `LOG_LEVEL`.
-- Cloned repos always go to `server/temp`, and old sessions are cleaned up every hour.
-- Private repos are cloned with the user's GitHub OAuth token, not a server-wide token.
+The session tables (`analysis_sessions`, `generated_files`, `ai_calls`) are created by Prisma, not by Supabase SQL; see [section 4](#4-session-database-session_storedatabase).
 
-#### **Client Environment** (`client/.env.local`)
-```bash
-# Express server URL (must match the server's PORT; server.js defaults to 3001)
-VITE_API_URL=http://localhost:3001
-
-# Supabase Configuration (Project Settings → API Keys)
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
-```
-
-### 3. Run Development Servers
-
-```bash
-# Terminal 1 - Start AI Agent Server
-cd server
-npm run dev
-
-# Terminal 2 - Start React Client
-cd client
-npm run dev
-```
-
-Access the application at `http://localhost:5173`
-
-### API URL Variables: `VITE_API_URL` vs `VITE_SERVER_URL`
-
-| Variable | Read by | Default | Status |
-|----------|---------|---------|--------|
-| `VITE_API_URL` | `client/src/lib/api.ts`, `components/AgentGenerationForm.tsx`, `components/AgentProgress.tsx`, `components/RepositorySelector.tsx` | `http://localhost:10000` (`AgentGenerationForm.tsx` has **no** default) | **Used.** Base URL for clone, analyze, file download, repository listing and the Socket.IO progress connection |
-| `VITE_SERVER_URL` | `client/src/lib/agentApi.ts` only | `http://localhost:3001` | **Currently unused.** No page or component imports `agentApi.ts` |
-
-- **Always set `VITE_API_URL`** to the Express server's URL. Locally that's `http://localhost:3001`, because `server.js` defaults to port 3001 while the client's fallback is 10000.
-- **On Render, the backend runs with `PORT=10000`** (set in `render.yaml`). Set `VITE_API_URL` to the backend's public URL, e.g. `https://your-backend-domain.onrender.com`.
-- **`VITE_SERVER_URL` only matters if `agentApi.ts` is wired back in.** If it is, point it at the same server.
-
----
-
-## 🚀 Quick Production Deployment
-
-### Deployment Issue Resolution
-
-**FIXED**: The deployment issue was caused by a missing Vite plugin dependency.
-
-**Solution Applied**:
-- Updated `client/package.json` to use `@vitejs/plugin-react-swc` instead of `@vitejs/plugin-react`
-- Updated `render.yaml` to include both frontend and backend services
-- Enhanced build process for production deployment
-
-### Platform-Specific Deployment
-
-#### 1. Vercel Deployment (Frontend)
-
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy frontend
-cd client
-vercel --prod
-
-# Configure environment variables in Vercel dashboard:
-# VITE_API_URL=https://your-backend-domain.onrender.com
-# VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-# VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
-# (VITE_ variables are inlined at build time: redeploy after changing them)
-```
-
-#### 2. Render.com Deployment (Full Stack)
-
-The project includes a `render.yaml` configuration for automatic deployment. Current contents:
-
-```yaml
-services:
-  # Backend API Service
-  - type: web
-    name: inframind-backend
-    env: node
-    buildCommand: cd server && npm install
-    startCommand: cd server && npm start
-    plan: free
-    envVars:
-      - key: NODE_VERSION
-        value: 18.0.0
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 10000
-    healthCheckPath: /health
-
-  # Frontend Static Site
-  - type: web
-    name: inframind-frontend
-    env: static
-    buildCommand: cd client && npm install && npm run build
-    staticPublishPath: ./client/dist
-    plan: free
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: NODE_VERSION
-        value: 18.0.0
-```
-
-`render.yaml` has no `rootDir`, so commands run from the repository root, and `cd server` is required. `npm start` runs `node server.js`, the real Express API. Its `/health` route reports the live process status, and unknown paths return 404.
-
-> Until October 2026 the start command was `cd server && node test-render.js`. That file is a deployment smoke test that answers every request, including `/health`, with `{"message": "Render deployment test successful"}`. So a deploy looked healthy while serving no API. `test-render.js` is still available via `npm run test:render`, but it must never be the production start command.
-
-**Deploy Steps**:
-1. Connect your GitHub repository to Render
-2. Use the `render.yaml` file for automatic configuration
-3. Set the backend's environment variables in the Render dashboard (see Backend Environment Variables below)
-4. Set the frontend's `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Render dashboard. `render.yaml` doesn't define them, and Vite needs them at build time
-
-## 🔧 Environment Configuration
-
-### Frontend Environment Variables (.env.local)
-
-```bash
-# Client Environment Variables
-VITE_API_URL=https://your-backend-domain.onrender.com
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
-```
-
-Use only the publishable (anon) key in the frontend. Never put the secret (`service_role`) key in any `VITE_` variable: it bypasses Row Level Security, and Vite would publish it in the browser bundle.
-
-### Backend Environment Variables (.env)
-
-```bash
-# Server Configuration
-PORT=10000                 # render.yaml sets 10000 on Render; server.js defaults to 3001
-NODE_ENV=production
-CLIENT_URL=https://your-frontend-domain.vercel.app   # allowed CORS origin + GitHub OAuth redirect target
-
-# No Supabase variables: the server does not access Supabase
-
-# GitHub OAuth Configuration (repository access)
-GITHUB_CLIENT_ID=your-github-oauth-app-client-id
-GITHUB_CLIENT_SECRET=your-github-oauth-app-client-secret
-GITHUB_REDIRECT_URI=https://your-backend-domain.onrender.com/auth/github/callback
-JWT_SECRET=your-jwt-secret-for-github-sessions
-
-# AI Service Configuration
-LLAMA_API_KEY=your-novita-ai-api-key          # required: Llama 3 70B via Novita.ai
-TAVILY_API_KEY=your-tavily-api-key            # optional: legacy useAgents:false path only
-MEM0_API_KEY=your-mem0-api-key                # optional: legacy useAgents:false path only
-KEYWORDS_AI_API_KEY=your-keywords-ai-api-key  # optional: legacy useAgents:false path only
-```
-
-## 🔒 Supabase Configuration
-
-InfraMind uses Supabase for two things:
-- **Supabase Auth**: email/password, Google and GitHub sign-in
-- **One PostgreSQL table**: `public.saved_files`, for generated files that users choose to save
-
-The React app talks to Supabase directly using the publishable (anon) key and the signed-in user's session. Row Level Security keeps each user's rows private. The Express server does not connect to Supabase.
-
-> InfraMind used Appwrite for these features until October 2026. The Appwrite collections, API key scopes and callback URLs from older versions of this guide no longer apply.
-
-### 1. Create the Supabase Project
-
-1. Go to the [Supabase dashboard](https://supabase.com/dashboard) and create a new project
-2. Open **Project Settings → API Keys** and copy:
-   - **Project URL** → `VITE_SUPABASE_URL`
-   - **Publishable (anon) key** → `VITE_SUPABASE_ANON_KEY`
-3. Do not copy the secret / `service_role` key into either app. Nothing in InfraMind uses it
-
-### 2. Database Setup
-
-Run this in the **SQL Editor**:
-
-```sql
-create table public.saved_files (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  name text not null,
-  type text not null,
-  repo_url text,
-  content text not null,
-  created_at timestamptz not null default now()
-);
-
-create index saved_files_user_created_idx on public.saved_files (user_id, created_at desc);
-
-alter table public.saved_files enable row level security;
-
-create policy "Users read own files"   on public.saved_files for select using (auth.uid() = user_id);
-create policy "Users insert own files" on public.saved_files for insert with check (auth.uid() = user_id);
-create policy "Users delete own files" on public.saved_files for delete using (auth.uid() = user_id);
-```
-
-What these policies do:
-- A signed-in user can read, insert and delete only rows whose `user_id` matches their own `auth.uid()`
-- There is no `update` policy, so saved files can't be edited (the app never edits them)
-- Requests without a session (anon key only) get an empty result
-
-### 3. URL Configuration (Redirects)
+### 1.3 URL configuration (redirects)
 
 After an OAuth sign-in, the app asks Supabase to send the user back to `<current origin>/dashboard` (see `client/src/lib/supabase.ts`). Supabase only redirects to URLs on its allow list. For any other URL it falls back to the Site URL.
 
@@ -293,13 +55,13 @@ In **Authentication → URL Configuration**:
 
 | Setting | Local development | Production |
 |---------|-------------------|------------|
-| Site URL | `http://localhost:5173` | `https://your-frontend-domain.vercel.app` |
-| Redirect URLs | `http://localhost:5173/**` | `https://your-frontend-domain.vercel.app/**` |
+| Site URL | `http://localhost:5173` | your frontend URL |
+| Redirect URLs | `http://localhost:5173/**` | `<your frontend URL>/**` |
 
 - Site URL holds a single value. Switch it to the production URL when you deploy
 - Redirect URLs can hold several. Keep the localhost entry if you also develop against this project, and add any preview-deployment domains you use
 
-### 4. Google OAuth
+### 1.4 Google sign-in
 
 1. In [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services → Credentials**, create an **OAuth client ID** of type **Web application** (set up the OAuth consent screen first if prompted)
 2. Under **Authorized redirect URIs**, add `https://<project-ref>.supabase.co/auth/v1/callback`. Supabase shows this exact URL on its Google provider page
@@ -307,202 +69,193 @@ In **Authentication → URL Configuration**:
 
 The callback URL points at Supabase, not at your frontend, so it's the same for local development and production.
 
-### 5. GitHub OAuth (User Sign-In)
+### 1.5 GitHub sign-in
 
 1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**
    - Homepage URL: your frontend URL
    - Authorization callback URL: `https://<project-ref>.supabase.co/auth/v1/callback`
 2. In Supabase → **Authentication → Sign In / Providers → GitHub**, enable the provider and paste the Client ID and Client Secret
 
-This is a different OAuth App from the repository-access app described below, whose callback goes to the Express server.
+This app is only for signing in to InfraMind. It gives the server no repository access; that is the separate app in [section 2](#2-github-oauth-app-for-repository-access).
 
-### 6. Email/Password
+### 1.6 Email and password
 
-The Email provider is enabled by default. With **Confirm email** on (the default), new users must click the confirmation link before they can sign in. In that case the app shows "Check your email to confirm your account, then sign in." You can turn confirmation off for local testing. Supabase's built-in email sender is rate-limited, so configure custom SMTP under **Authentication → Emails** before production.
-
-## 🔑 GitHub OAuth App Setup
-
-### 1. Create GitHub OAuth App
-
-1. Go to GitHub Settings > Developer settings > OAuth Apps
-2. Click "New OAuth App"
-
-**Application Details**:
-- Application name: `InfraMind`
-- Homepage URL: `https://your-frontend-domain.vercel.app`
-- Authorization callback URL: `https://your-backend-domain.onrender.com/auth/github/callback`
-
-### 2. Configure for Production
-
-**Dual OAuth System**:
-1. **Supabase GitHub OAuth**: For user authentication (callback `https://<project-ref>.supabase.co/auth/v1/callback`)
-2. **Direct GitHub OAuth**: For repository access (callback `https://your-backend-domain.onrender.com/auth/github/callback`)
-
-Both need separate OAuth apps in GitHub.
-
-## 🤖 AI Services Setup
-
-### 1. Novita.ai (Llama 3 70B)
-```bash
-# Get API key from https://novita.ai
-LLAMA_API_KEY=your-novita-api-key
-```
-
-### 2. Tavily (Search & Analysis)
-```bash
-# Get API key from https://tavily.com
-TAVILY_API_KEY=your-tavily-api-key
-```
-
-### 3. Mem0 (AI Memory)
-```bash
-# Get API key from https://mem0.ai
-MEM0_API_KEY=your-mem0-api-key
-```
-
-### 4. Keywords AI (Observability)
-```bash
-# Get API key from https://keywordsai.co
-KEYWORDS_AI_API_KEY=your-keywords-ai-api-key
-```
-
-## 🚀 Production Checklist
-
-### Pre-Deployment
-
-- [ ] **Dependencies Fixed**: Updated to `@vitejs/plugin-react-swc`
-- [ ] **Build Process**: Verified `npm run build` works locally
-- [ ] **Environment Variables**: All required variables configured
-- [ ] **Supabase Project**: Created and configured
-- [ ] **GitHub OAuth**: Both apps created and configured
-- [ ] **AI Service Keys**: All API keys obtained and tested
-
-### Supabase Configuration
-
-- [ ] **Project Created**: Project URL and publishable (anon) key set in the frontend environment
-- [ ] **Database Schema**: `public.saved_files` table, index and RLS policies created
-- [ ] **URL Configuration**: Site URL set to the production frontend; production (and any local/preview) URLs in Redirect URLs
-- [ ] **OAuth Providers**: Google and GitHub enabled, each with callback `https://<project-ref>.supabase.co/auth/v1/callback`
-- [ ] **Email**: Confirm-email setting decided; custom SMTP configured
-- [ ] **No secret key exposed**: `service_role` key not present in any frontend variable
-
-### GitHub OAuth Setup
-
-- [ ] **User Auth OAuth**: Supabase GitHub provider configured
-- [ ] **Repository Access OAuth**: Direct GitHub OAuth for repo operations
-- [ ] **Callback URLs**: Proper callback URLs for both environments
-- [ ] **Client Secrets**: Securely stored in environment variables
-
-### AI Services Integration
-
-- [ ] **Novita.ai**: `LLAMA_API_KEY` configured for Llama 3 70B access
-- [ ] **Tavily** (optional, legacy path): Search API configured
-- [ ] **Mem0** (optional, legacy path): Memory service configured
-- [ ] **Keywords AI** (optional, legacy path): Observability configured
-
-### Deployment Testing
-
-- [ ] **Frontend Build**: Vercel deployment successful
-- [ ] **Backend API**: Render runs `server.js` via `npm start`. `/health` returns the real health status, and an unknown path returns 404
-- [ ] **Authentication Flow**: OAuth login/signup working
-- [ ] **GitHub Integration**: Repository selection and access working
-- [ ] **AI Agent Pipeline**: Multi-agent workflow functional
-- [ ] **Real-time Updates**: WebSocket connections working
-- [ ] **File Downloads**: Generated files downloadable
-- [ ] **Saved Files**: Saving a file and seeing it in Saved Files works. A second user can't see it
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-1. **Build Failures**
-   - Ensure `@vitejs/plugin-react-swc` is installed
-   - Check for TypeScript errors
-   - Verify all environment variables are set
-
-2. **Authentication Issues**
-   - Check `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and rebuild the frontend after changing them
-   - Verify the provider's callback URL is `https://<project-ref>.supabase.co/auth/v1/callback`
-   - OAuth returns to the Site URL instead of `/dashboard`: add the app's origin (`https://your-domain/**`) to Redirect URLs
-   - Email sign-in fails right after sign-up: the user hasn't confirmed their email yet
-
-3. **Saved Files Issues**
-   - Insert errors mentioning row-level security: the user has no active session, or the inserted `user_id` isn't theirs
-   - Empty list: check that the `saved_files` table and its `select` policy exist
-
-4. **GitHub Integration Issues**
-   - Verify both GitHub OAuth apps are configured
-   - Check redirect URIs match exactly
-   - Ensure GitHub permissions are granted
-
-5. **AI Service Issues**
-   - Verify all API keys are valid
-   - Check rate limits and quotas
-   - Monitor error logs for specific failures
-
-### Performance Optimization
-
-1. **Frontend**
-   - Enable gzip compression
-   - Optimize bundle size with code splitting
-   - Use CDN for static assets
-
-2. **Backend**
-   - Enable API response caching
-   - Implement connection pooling
-   - Monitor memory usage
-
-3. **AI Services**
-   - Implement request queuing
-   - Add retry logic with exponential backoff
-   - Cache frequent AI responses
-
-## 📊 Monitoring & Analytics
-
-### Production Monitoring
-
-1. **Keywords AI Dashboard**: Monitor AI service usage and performance
-2. **Supabase Dashboard**: Track sign-ups under Authentication → Users, and auth/database requests in Logs
-3. **Render Logs**: Monitor backend performance and errors
-4. **Vercel Analytics**: Track frontend performance and user engagement
-
-### Key Metrics to Track
-
-- User registration and authentication success rates
-- GitHub repository connection success rates
-- AI agent pipeline completion rates
-- File generation and download success rates
-- Response times for critical API endpoints
-- Error rates across all services
-
-## 🔒 Security Considerations
-
-### Production Security
-
-1. **Environment Variables**: Never commit sensitive keys to version control
-2. **HTTPS Everywhere**: Ensure all services use HTTPS in production
-3. **API Rate Limiting**: Implement rate limiting on all public endpoints
-4. **Input Validation**: Validate all user inputs and API requests
-5. **Secret Rotation**: Regularly rotate API keys and OAuth secrets
-
-### Compliance
-
-- **Data Privacy**: Ensure GDPR compliance for user data
-- **API Security**: Follow OAuth 2.0 security best practices  
-- **Audit Logging**: Log all security-relevant events
-- **Access Control**: Implement proper user authorization
+The Email provider is enabled by default. With **Confirm email** on (the default), new users must click the confirmation link before they can sign in. In that case the app shows "Check your email to confirm your account, then sign in." (`client/src/lib/supabase.ts`). You can turn confirmation off for local testing. Supabase's built-in email sender is rate-limited, so configure custom SMTP under **Authentication → Emails** before production.
 
 ---
 
-## 🎯 Ready for Production!
+## 2. GitHub OAuth App for repository access
 
-With these configurations, InfraMind is ready for production deployment with:
+This app is run by the InfraMind server (`server/github.js`). It requests the scope `repo,user:email`.
 
-✅ **Multi-Agent AI System**: Four specialized agents working in harmony
-✅ **Authentication**: Supabase Auth with email/password, Google and GitHub OAuth, plus RLS-protected saved files
-✅ **GitHub Integration**: Seamless repository access and operations  
-✅ **Real-time Updates**: WebSocket-powered progress tracking
-✅ **Scalable Infrastructure**: Cloud-native deployment architecture
-✅ **Comprehensive Monitoring**: Full observability across all services
+1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**
+2. Authorization callback URL: the server's `/auth/github/callback`, for example `http://localhost:10000/auth/github/callback` locally (as in `server/.env.example`) or `https://<your-backend>/auth/github/callback` in production
+3. Set on the server:
 
-**Next Steps**: Follow the deployment checklist above and deploy to your preferred platform! 
+```bash
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+GITHUB_REDIRECT_URI=<the callback URL from step 2>
+CLIENT_URL=<your frontend URL>     # the server redirects to CLIENT_URL/auth/success after the callback
+GITHUB_TOKEN_STORE=supabase        # or memory (connections are lost on restart)
+GITHUB_TOKEN_ENC_KEY=<openssl rand -base64 32>
+```
+
+`GITHUB_REDIRECT_URI` may instead point at the client's `/auth/github/callback` route, which forwards the query string to the server (`client/src/pages/GitHubCallback.tsx`). The step-by-step connect flow is diagram 3 in [ARCHITECTURE.md](ARCHITECTURE.md#3-github-connection).
+
+`GITHUB_TOKEN_ENC_KEY` encrypts every stored token. Changing it makes existing connections unreadable: the server deletes an unreadable connection on its next read, and the user has to connect again (`server/utils/githubConnections.js`).
+
+---
+
+## 3. AI providers
+
+```bash
+AI_PROVIDERS=gemini,groq,openrouter      # default chain, in order
+# Optional per-task chains:
+# AI_ROUTE_PLANNER=gemini,groq
+# AI_ROUTE_GENERATOR=gemini,openrouter
+# AI_ROUTE_VERIFIER=groq,gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=<model id>
+# ...the same pair for every other provider in any chain
+```
+
+- Every provider in any chain needs `<NAME>_API_KEY` and `<NAME>_MODEL`. There are no default model IDs (`server/ai/providers.js`, `server/ai/config.js`).
+- The repository's file list, detected tech stack and `package.json` dependency list are sent to these providers ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers)).
+- Limits: `AI_TIMEOUT_MS` (default 60000), `AI_CALL_BUDGET_MS` (default 180000), `AI_MAX_ATTEMPTS_PER_PROVIDER` (default 2) (`server/ai/config.js`).
+- Check the configuration against the real providers with `RUN_LIVE_AI=1 npm run ai:smoke` in `server/` (`server/scripts/ai-smoke.js`).
+
+---
+
+## 4. Session database (`SESSION_STORE=database`)
+
+With `SESSION_STORE=memory` every session and result is lost on restart. For production use `database`, which keeps sessions in Postgres through Prisma (`server/utils/sessionStore.js`).
+
+1. Set `DATABASE_URL`. `server/.env.example` describes the Supabase **Session pooler** string (port 5432)
+2. Generate the Prisma client: `npm run db:generate` in `server/` (writes `server/generated/prisma`)
+3. Apply the migration **manually**: `npm run db:deploy` in `server/` (`prisma migrate deploy`). `npm run db:status` shows what is applied
+4. Start the server with `SESSION_STORE=database`
+
+At startup the server checks that the database answers and that the schema exists. Otherwise it exits with "Database unreachable (DATABASE_URL)" or "Database schema missing: run npm run db:deploy" (`server/server.js`).
+
+Never run `npm run db:migrate:dev` against Supabase. It runs `server/scripts/assert-local-db.js` first, which refuses any `DATABASE_URL` host other than `localhost`, `127.0.0.1` or `::1`.
+
+TLS: for any non-local host the server always uses TLS and verifies the certificate. If verification fails, point `DATABASE_SSL_CA_FILE` at the CA certificate; `DATABASE_SSL_INSECURE_SKIP_VERIFY=true` turns verification off and logs a warning at startup (`server/db/config.js`).
+
+---
+
+## 5. Local development
+
+```bash
+npm run install:all                       # root, client and server dependencies
+cp server/.env.example server/.env        # then fill it in
+cp client/.env.example client/.env.local  # then fill it in
+npm run dev                               # client and server together (concurrently)
+```
+
+| Setting | Where it comes from |
+|---|---|
+| Client dev server | `http://localhost:5173` (`client/vite.config.ts`) |
+| Server port | `PORT`; without it 10000 (`server/utils/port.js`), the same value as `server/.env.example` and `render.yaml` |
+| Client → server URL | `VITE_API_URL`; without it the client uses `http://localhost:10000` (`client/src/lib/api.ts`) |
+| CORS origins | `CLIENT_URL`, `http://localhost:5173`, `https://dev-pilot.vercel.app` (`server/server.js`) |
+
+Set `VITE_API_URL` to the server's actual URL whenever the port is not 10000. The client reads `VITE_*` variables at build time (Vite), so restart the dev server or rebuild after changing them.
+
+---
+
+## Deployment on Render
+
+`render.yaml` defines two services. It defines no environment groups; every secret is set per service in the Render dashboard.
+
+```mermaid
+flowchart TB
+    Repo["Git repository with render.yaml"]
+    YamlEnv["Set in render.yaml: NODE_VERSION 24, NODE_ENV production, PORT 10000"]
+    BackEnv["Set in the Render dashboard: SUPABASE_*, GITHUB_*, AI settings, SESSION_STORE, DATABASE_URL, CLIENT_URL, METRICS_TOKEN"]
+    FrontEnv["Set in the Render dashboard: VITE_API_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY"]
+    subgraph Render
+        Backend["inframind-backend, web, node. Build: cd server && npm ci --include=dev && npm run db:generate. Start: cd server && npm start. Health check: /health"]
+        Frontend["inframind-frontend, static, NODE_VERSION 18.0.0. Build: cd client && npm install && npm run build. Publish: client/dist. Rewrite all paths to /index.html"]
+    end
+    Operator["Operator, manually before deploying"]
+    DB[("Postgres at DATABASE_URL")]
+    SB[("Supabase: supabase/migrations SQL for github_connections and saved_files")]
+
+    Repo --> Backend
+    Repo --> Frontend
+    YamlEnv --> Backend
+    BackEnv --> Backend
+    FrontEnv -->|"inlined at build time"| Frontend
+    Operator -->|"npm run db:deploy"| DB
+    Operator -->|"run the SQL"| SB
+    Backend -->|"SESSION_STORE=database"| DB
+```
+
+Source: `render.yaml`, `server/package.json` (`db:generate`, `db:deploy`, `start`), `server/server.js`, `supabase/migrations/20261103000000_github_connections.sql`, `client/src/lib/api.ts`, `client/src/lib/supabase.ts`.
+
+Notes:
+
+- The backend build installs dev dependencies (`--include=dev`) so the Prisma CLI is available for `npm run db:generate`. The build never runs migrations: `render.yaml` says the owner runs `npm run db:deploy` deliberately before deploying.
+- `npm start` runs `node server.js`. Render's health check calls `/health`, a liveness check that returns `{ status: "ok", timestamp, uptime }`; it does not check the database, Supabase or the AI providers (`server/utils/performance.js`).
+- `render.yaml` sets no `VITE_*` variables for the frontend. Set them in the dashboard before the build, and rebuild after changing them.
+- Set `CLIENT_URL` on the backend to the frontend's URL. It is a CORS origin and the target of the GitHub OAuth redirect (`server/server.js`).
+- Set `GITHUB_REDIRECT_URI` to `https://<backend URL>/auth/github/callback` and use the same URL as the OAuth App's callback.
+
+Backend variables to set in the dashboard, at minimum:
+
+```bash
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...          # with GITHUB_TOKEN_STORE=supabase
+GITHUB_TOKEN_STORE=supabase
+GITHUB_TOKEN_ENC_KEY=...               # openssl rand -base64 32
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+GITHUB_REDIRECT_URI=https://<backend URL>/auth/github/callback
+CLIENT_URL=https://<frontend URL>
+AI_PROVIDERS=...
+<NAME>_API_KEY=...                     # for every provider in a chain
+<NAME>_MODEL=...
+SESSION_STORE=database
+DATABASE_URL=...
+METRICS_TOKEN=...                      # optional, 32+ characters
+```
+
+In production the server warns at startup when `GITHUB_TOKEN_STORE=memory` or `SESSION_STORE=memory`, because both lose their data on every restart (`server/server.js`).
+
+### Other frontend hosts
+
+The client is a static build (`cd client && npm run build`, output `client/dist`). Any static host works if it serves `index.html` for every path, as the Render rewrite does, and has the three `VITE_*` variables at build time. The server's CORS list contains `CLIENT_URL`, `http://localhost:5173` and `https://dev-pilot.vercel.app` only.
+
+---
+
+## Startup checks
+
+`startServer()` in `server/server.js` exits with one of these messages when the configuration is unusable. Messages name variables, never values.
+
+| Message (start) | Fix |
+|---|---|
+| `SUPABASE_URL ...` / `SUPABASE_ANON_KEY is not set` | Set both (https URL; http only for localhost) |
+| `GITHUB_TOKEN_STORE is not set` / `must be "memory" or "supabase"` | Set `GITHUB_TOKEN_STORE` |
+| `GITHUB_TOKEN_ENC_KEY ...` | `openssl rand -base64 32` |
+| `SUPABASE_SERVICE_ROLE_KEY is not set (required when GITHUB_TOKEN_STORE=supabase)` | Set it, or use `memory` |
+| `AI_PROVIDERS is not set ...`, `<NAME>_API_KEY is not set ...`, `<NAME>_MODEL is not set ...` | Fix the AI settings |
+| `SESSION_STORE is not set (use "memory" or "database")` | Set `SESSION_STORE` |
+| `DATABASE_URL ...` | Set a `postgres://` or `postgresql://` URL |
+| `Prisma client not generated: run npm run db:generate` | Run it in `server/` |
+| `Database unreachable (DATABASE_URL)` | Check the URL, network and TLS settings |
+| `Database schema missing: run npm run db:deploy` | Apply the migration |
+
+## Troubleshooting
+
+| Symptom | Where to look |
+|---|---|
+| Every API call returns 401 `AUTH_REQUIRED` | The client is not sending a Supabase session token, or the server's `SUPABASE_URL` / `SUPABASE_ANON_KEY` belong to another project (`server/utils/auth.js`) |
+| API calls return 503 `AUTH_UNAVAILABLE` | The server cannot reach Supabase Auth (`server/utils/auth.js`) |
+| "Connect GitHub" ends on `/auth/success` with an error | `invalid_state` (cookie missing or expired), `connect_expired` (ticket older than 2 minutes), `access_denied`, or `github_auth_failed`; check `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` and `CLIENT_URL` (`server/server.js`) |
+| 503 `GITHUB_STORE_UNAVAILABLE` | The `github_connections` table or the service-role key is not reachable (`server/utils/githubConnections.js`) |
+| 503 `SESSION_STORE_UNAVAILABLE` | The session database is not reachable (`server/server.js`) |
+| Clone fails with 404 "Repository not found or access denied" | The repository is private and was entered as a URL without a token, or the GitHub connection cannot see it (`server/utils/git.js`, `server/server.js`) |
+| Saved files list is empty or an insert fails | The `saved_files` table or its policies are missing, or the user has no session |
+| `errors` shows "AI providers are unavailable" | See the `ai_call` log lines ([server/OBSERVABILITY.md](server/OBSERVABILITY.md)) |

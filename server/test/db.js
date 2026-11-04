@@ -32,10 +32,12 @@ export async function adminQuery(sql, params = [], database) {
   }
 }
 
-// The roles Supabase's Data API uses; plain Postgres does not have them
+// The roles Supabase's Data API uses; plain Postgres does not have them. Test files run
+// in parallel: when two create the same role at once, the loser gets unique_violation
+// (pg_authid_rolname_index) rather than duplicate_object, so both mean "already exists".
 export async function ensureBrowserRoles() {
   for (const role of ['anon', 'authenticated']) {
-    await adminQuery(`DO $$ BEGIN CREATE ROLE ${role} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+    await adminQuery(`DO $$ BEGIN CREATE ROLE ${role} NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$`);
   }
 }
 

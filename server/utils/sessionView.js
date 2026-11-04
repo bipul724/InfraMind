@@ -18,6 +18,27 @@ export function toStatusResponse(sessionId, session) {
   };
 }
 
+// Agent messages as sent to the browser: { agent, message, timestamp } copied field by
+// field. An entry is kept only when agent and message are strings; timestamp is copied
+// only when it is a string. Anything that is not an array gives [].
+export function toAgentMessages(value) {
+  if (!Array.isArray(value)) return [];
+  const messages = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (typeof entry.agent !== 'string' || typeof entry.message !== 'string') continue;
+    const message = { agent: entry.agent, message: entry.message };
+    if (typeof entry.timestamp === 'string') message.timestamp = entry.timestamp;
+    messages.push(message);
+  }
+  return messages;
+}
+
+// Agent errors as sent to the browser: the string entries only
+export function toErrorList(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : [];
+}
+
 export function toFilesResponse(session) {
   const result = session.analysisResult || {};
   return {
@@ -25,6 +46,8 @@ export function toFilesResponse(session) {
     techStack: result.techStack,
     codebaseAnalysis: result.codebaseAnalysis,
     verificationResults: result.verificationResults,
+    messages: toAgentMessages(session.messages),
+    errors: toErrorList(session.errors),
     metadata: {
       repoUrl: session.displayUrl,
       repoName: session.repoName,

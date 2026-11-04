@@ -156,6 +156,9 @@ describe('database sessions: restart, ownership, recovery and cleanup', { skip: 
       techStack: { primary: 'node', frameworks: [] },
       codebaseAnalysis: { entryPoints: ['index.js'] },
       verificationResults: 'verified',
+      // SERVER-FIX D.1: the stored messages and errors, through the sanitizers
+      messages: [{ agent: 'planner', message: 'ok' }],
+      errors: [],
       metadata: { repoUrl: 'https://github.com/octocat/Hello-World', repoName: 'Hello-World', completedAt: at(60).toISOString() }
     }));
     assert.equal(first.download.status, 200);

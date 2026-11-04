@@ -46,38 +46,12 @@ export class ErrorBoundary extends Component<Props, State> {
       console.error('Error Boundary caught an error:', error);
       console.error('Error Info:', errorInfo);
     }
-
-    // Send error to monitoring service in production
-    if (process.env.NODE_ENV === 'production') {
-      this.logErrorToService(error, errorInfo);
-    }
+    // Nothing is sent anywhere: error details stay in this browser
+    // (the console in development, and "copy error details" below)
   }
 
   generateErrorId(): string {
     return `error_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  async logErrorToService(error: Error, errorInfo: React.ErrorInfo) {
-    try {
-      // Send error to your monitoring service
-      await fetch('/api/errors', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          errorId: this.state.errorId,
-          message: error.message,
-          stack: error.stack,
-          componentStack: errorInfo.componentStack,
-          timestamp: new Date().toISOString(),
-          url: window.location.href,
-          userAgent: navigator.userAgent
-        })
-      });
-    } catch (logError) {
-      console.error('Failed to log error to service:', logError);
-    }
   }
 
   handleRetry = () => {
@@ -98,7 +72,7 @@ export class ErrorBoundary extends Component<Props, State> {
         timestamp: new Date().toISOString()
       }, null, 2));
       
-      alert('Error details copied to clipboard. Please report this to our support team.');
+      alert('Error details copied to clipboard.');
     } catch (err) {
       console.error('Failed to copy error details:', err);
     }

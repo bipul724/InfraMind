@@ -1,177 +1,85 @@
-# InfraMind Keywords AI Observability Integration
+# InfraMind Server Observability
 
-## 🎯 Overview
+What the running server (`server.js`) records and exposes, and where. Nothing here sends data to an external monitoring service.
 
-Your InfraMind function has been successfully enhanced with **Keywords AI** observability to track all major events and provide comprehensive insights into function performance.
+## AI call records
 
-## 📊 Tracked Events
+Every attempt the AI layer makes produces one record with: `task`, `provider`, `model`, `attempt`, `outcome`, `httpStatus`, `latencyMs`, `inputTokens`, `outputTokens`, `sessionId`, `userId` and a timestamp. Records never contain prompt, response, header, key or URL text (`server/ai/client.js`).
 
-### 1. **Request Lifecycle**
-- `devpilot_request_started` - Function invocation with input parameters
-- `devpilot_request_completed` - Successful completion with response metrics
-- `devpilot_request_failed` - Error tracking with stack traces
+Each record goes to two places (`setDefaultAiCallSink` in `server/server.js`):
 
-### 2. **Dockerfile Generation**
-- `dockerfile_generation_started` - Generation initiation
-- `dockerfile_generation_completed` - Success metrics (length, lines, duration)
-- `dockerfile_generation_failed` - Error handling
+1. **stdout**, as one line (the user id is left out):
 
-### 3. **GitHub Actions Workflow**
-- `github_actions_generation_started` - Workflow generation start
-- `github_actions_generation_completed` - Success metrics (YAML length, duration)
-- `github_actions_generation_failed` - Error tracking
-
-### 4. **Tavily API Integration**
-- `tavily_query_started` - Search query initiation
-- `tavily_query_completed` - Successful results with metrics
-- `tavily_query_failed` - API failures and fallback usage
-- `tavily_query_empty_results` - Empty result tracking
-- `tavily_query_error` - Exception handling
-
-## 🔧 Configuration
-
-### Environment Variables
-```bash
-# Required for observability
-KEYWORDS_AI_API_KEY=your_keywords_ai_api_key_here
-
-# Optional (uses default if not set)
-KEYWORDS_AI_BASE_URL=https://api.keywordsai.co
-```
-
-### Metadata Attached to All Events
-```json
-{
-  "service": "DevPilotAI",
-  "version": "1.0.0",
-  "environment": "development|production",
-  "userId": "user-identifier",
-  "techStack": "React + Node",
-  "repoUrl": "https://github.com/..."
-}
-```
-
-## 📈 Event Data Examples
-
-### Request Started
-```json
-{
-  "event_type": "devpilot_request_started",
-  "data": {
-    "repoUrl": "https://github.com/example/app",
-    "techStack": "React + Node",
-    "userId": "user-123"
-  },
-  "metadata": {
-    "service": "DevPilotAI",
-    "userId": "user-123",
-    "techStack": "React + Node"
-  }
-}
-```
-
-### Dockerfile Generation Completed
-```json
-{
-  "event_type": "dockerfile_generation_completed",
-  "data": {
-    "techStack": "React + Node",
-    "dockerfile_length": 1250,
-    "lines_count": 45,
-    "generation_time_ms": 15,
-    "dockerfile_preview": "# Multi-stage build for React + Node.js application..."
-  }
-}
-```
-
-### Tavily Query Completed
-```json
-{
-  "event_type": "tavily_query_completed",
-  "data": {
-    "query": "How to deploy a React + Node application to cloud platforms",
-    "techStack": "React + Node",
-    "results_count": 5,
-    "response_time_ms": 850,
-    "results_preview": "Deploy React Apps, Docker Guide, AWS Deployment..."
-  }
-}
-```
-
-## 🚀 Implementation Details
-
-### Graceful Degradation
-- Function works perfectly without Keywords AI API key
-- Logs informative messages when tracking is unavailable
-- No impact on core functionality if observability fails
-
-### Performance Optimized
-- Asynchronous tracking calls don't block main execution
-- Minimal overhead (< 5ms per event)
-- Error handling prevents tracking failures from affecting function
-
-### Direct API Integration
-- Uses HTTP calls instead of SDK for maximum compatibility
-- Works in any Node.js environment
-- No additional dependencies required
-
-## 📋 Testing
-
-### Current Test Output
-```bash
-npm test
-```
-
-Shows tracking messages like:
-```
-Keywords AI API key not available, skipping tracking for event: devpilot_request_started
-Keywords AI API key not available, skipping tracking for event: dockerfile_generation_started
-...
-```
-
-### With API Key
-When `KEYWORDS_AI_API_KEY` is configured:
-```
-✅ Tracked event: devpilot_request_started
-✅ Tracked event: dockerfile_generation_completed
-✅ Tracked event: tavily_query_completed
-✅ Tracked event: devpilot_request_completed
-```
-
-## 🔍 Analytics Dashboard
-
-Once Keywords AI API key is configured, you can monitor:
-
-1. **Request Volume** - How often InfraMind is called
-2. **Tech Stack Popularity** - Which stacks are most requested
-3. **Performance Metrics** - Generation times and API response times
-4. **Error Rates** - Failed generations and API errors
-5. **User Patterns** - Usage by userId and repository
-
-## 🎯 Next Steps
-
-1. **Get Keywords AI API Key**
-   - Sign up at [keywords.co](https://keywords.co)
-   - Get API key from dashboard
-   - Add to your environment variables
-
-2. **Deploy with Observability**
-   ```bash
-   # Set in server/.env locally, or in your host's environment settings (e.g. Render) in production
-   KEYWORDS_AI_API_KEY=your_actual_key_here
+   ```
+   ai_call task=generator provider=gemini model=<model> attempt=1 outcome=ok http_status=200 latency_ms=<n> input_tokens=<n> output_tokens=<n> session=<session id>
    ```
 
-3. **Monitor Your Function**
-   - View analytics in Keywords AI dashboard
-   - Set up alerts for errors or performance issues
-   - Optimize based on usage patterns
+2. **The session store** (`recordAiCall` in `server/utils/sessionStore.js`):
+   - `SESSION_STORE=database`: a row in `ai_calls`. Rows older than 30 days are deleted by the session cleanup
+   - `SESSION_STORE=memory`: kept in process memory, at most 1,000 records
 
-## ✅ Benefits
+A failed write never affects the AI call; it logs `ai_call sink failed` (`server/ai/client.js`).
 
-- **📊 Complete Visibility** - Track every aspect of your AI function
-- **🔍 Performance Insights** - Identify bottlenecks and optimization opportunities  
-- **🚨 Error Monitoring** - Quickly identify and resolve issues
-- **📈 Usage Analytics** - Understand user patterns and popular tech stacks
-- **⚡ Zero Impact** - Observability doesn't affect function performance
+Outcome values (`server/ai/errors.js`): `ok`, `rate_limited`, `server_error`, `timeout`, `network`, `auth`, `bad_request`, `invalid_response`, `schema_invalid`.
 
-Your InfraMind function is now production-ready with enterprise-grade observability! 🚀 
+Useful query with `SESSION_STORE=database`:
+
+```sql
+select provider, model, outcome, count(*), round(avg(latency_ms)) as avg_ms
+from ai_calls
+where created_at > now() - interval '1 day'
+group by provider, model, outcome
+order by provider, outcome;
+```
+
+Other AI log lines: the startup route summary (`🤖 AI route planner: ...`, provider names and models only) and circuit-breaker warnings (`ai provider <name> circuit open for <n>s (<outcome>)`) (`server/server.js`, `server/ai/client.js`).
+
+## Log files
+
+`utils/logger.js` writes JSON lines into `logs/` under the server's working directory, and the same messages to the console:
+
+| File | Written by |
+|---|---|
+| `logs/app.log` | `logger.info` and `logger.warn`: one line per HTTP request (method, redacted URL, status, duration, IP, user agent), rate-limit hits, slow requests (over 1 s) |
+| `logs/error.log` | `logger.error`, for example a failed `/api/metrics` or `/api/analytics` |
+| `logs/performance.log` | One line per HTTP request with its duration |
+| `logs/debug.log` | `logger.debug`, only when `NODE_ENV=development` |
+| `logs/agents.log` | One line per tracked clone or analysis phase (`trackAgentSession`): session id, phase, duration, `outcome` and, for analyses, the number of generated files. No user id, repository name, URL or error text |
+| `logs/websocket.log` | Never written: nothing calls `logger.websocket` |
+
+Every JSON line includes a timestamp, level, the process id and `process.memoryUsage()`. With `NODE_ENV=production`, files older than 30 days are deleted at startup (`cleanupLogs`). The query values `code`, `state`, `token`, `access_token`, `ticket` and `complete` are replaced with `REDACTED` in logged URLs (`redactUrl` in `server/utils/logger.js`).
+
+Most other server messages, including clone failures, session cleanup and progress updates, go to the console only (`console.log` / `console.error` in `server/server.js` and `server/utils/realtime.js`). Error messages pass through `redactSecrets`, which removes known tokens and temp paths (`server/utils/repository.js`).
+
+## Endpoints
+
+| Endpoint | Access | Returns |
+|---|---|---|
+| `GET /health` | public | Exactly `{ status: "ok", timestamp, uptime }`, always 200 while the process serves requests. A liveness check: it queries no database or service |
+| `GET /api/metrics` | `X-Metrics-Token` equal to `METRICS_TOKEN` (32+ characters), otherwise 404 | Uptime, Node `version`, `environment`, request totals, error count, success rate, average response time, memory, CPU usage, `trackedSessions` (entries in the analytics map, not active sessions) |
+| `GET /api/analytics` | same as `/api/metrics` | `total` sessions, `avgDuration`, and per phase (`clone`, `analysis`) `count`, `totalDuration`, `avgDuration` and `outcomes` (`ok` / `failed` counts), plus the last 10 sessions |
+
+Source: `server/server.js`, `server/utils/performance.js`.
+
+Limits of these numbers:
+
+- They are in-process counters, reset on every restart.
+- A request counts as an error when its status is 400 or higher, so 401 and 404 answers count too (`trackRequest`).
+- Analytics record one `clone` phase per clone request (from session creation to clone success or failure) and one `analysis` phase per analysis (from `analyzing` to `completed` or `failed`) (`server/server.js`).
+- Analytics keep sessions for one hour and at most 1,000, oldest dropped first. Expired entries are pruned on every insert and read and by the hourly session cleanup (`server/utils/performance.js`).
+- `/health` does not check the database, Supabase, GitHub or the AI providers.
+
+```bash
+curl -s http://localhost:<port>/health
+curl -s -H "X-Metrics-Token: $METRICS_TOKEN" http://localhost:<port>/api/metrics
+```
+
+## Sessions
+
+Session state is the main record of what happened to an analysis: `status`, `error`, timestamps and the last progress snapshot (`analysis_sessions` with `SESSION_STORE=database`). The owner can read it from `GET /api/status/:sessionId` (`server/server.js`, `server/utils/sessionView.js`).
+
+Startup prints how many interrupted sessions were marked failed and how many expired sessions and temp directories were removed (`🧹 ...` lines in `server/server.js`).
+
+## Legacy: Keywords AI tracking
+
+`server/index.js` (the legacy `devPilotAI` generator) sends events such as `devpilot_request_started`, `dockerfile_generation_completed` and `tavily_query_completed` to Keywords AI when `KEYWORDS_AI_API_KEY` is set (`KEYWORDS_AI_BASE_URL` defaults to `https://api.keywordsai.co`). That file is imported only by `server/test.js` (`npm run test:legacy`); the running server does not load it and sends nothing to Keywords AI.

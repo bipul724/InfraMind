@@ -1,199 +1,70 @@
-# 🚀 InfraMind - Production Deployment Checklist
+# InfraMind Production Checklist
 
-## ✅ **VERIFIED WORKING COMPONENTS**
+A checklist for an operator preparing a deployment. Nothing here is pre-ticked: each item is something to do or check on your own deployment. Setup details are in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md).
 
-### 1. Authentication & User Management
-> Authentication moved from Appwrite to Supabase in October 2026. The items below that changed are unticked until the Supabase flows have been tested end to end.
+## Configuration the server requires
 
-- [ ] **Supabase Authentication** - Email/password + OAuth (Google & GitHub)
-- [ ] **User Sessions** - Persistent login state managed by the Supabase JS client
-- [x] **Auth Context** - React context properly implemented
-- [x] **Protected Routes** - Dashboard access control
-- [ ] **OAuth Flows** - Google and GitHub login working
-- [ ] **Saved Files** - `public.saved_files` with Row Level Security (save, list, download)
+The server exits at startup without these (`startServer` in `server/server.js`):
 
-### 2. GitHub Integration
-- [x] **Repository Discovery** - Fetching user's repositories
-- [x] **Organization Repositories** - Support for org repos
-- [x] **Repository Selection UI** - Beautiful repository browser
-- [x] **GitHub API Authentication** - Separate OAuth for repo access
-- [x] **Private Repository Support** - Token-based access
+- [ ] `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the same Supabase project as the client
+- [ ] `GITHUB_TOKEN_STORE=supabase` (with `memory`, every GitHub connection is lost on restart and the server warns in production)
+- [ ] `GITHUB_TOKEN_ENC_KEY`, generated with `openssl rand -base64 32` and stored safely: changing it makes existing connections unreadable
+- [ ] `SUPABASE_SERVICE_ROLE_KEY` on the server only, never in a `VITE_` variable
+- [ ] `AI_PROVIDERS`, and `<NAME>_API_KEY` plus `<NAME>_MODEL` for every provider in any chain
+- [ ] `SESSION_STORE=database` (with `memory`, every session and result is lost on restart and the server warns in production)
+- [ ] `DATABASE_URL`, and the migration applied with `npm run db:deploy` (`server/package.json`)
 
-### 3. Multi-Agent AI System
-- [x] **Agent Architecture** - 4 specialized agents implemented
-- [x] **Planner Agent** - Repository structure analysis
-- [x] **Analyzer Agent** - Tech stack detection (Node.js, React, Python, etc.)
-- [x] **Generator Agent** - CI/CD file generation using Llama 3 70B
-- [x] **Verifier Agent** - Configuration validation
-- [x] **LangGraph-like Workflow** - Sequential agent execution
+## Configuration the server reads but does not check at startup
 
-### 4. File Generation
-- [x] **Dockerfile Generation** - Multi-stage, optimized builds
-- [x] **GitHub Actions Workflow** - Complete CI/CD pipelines
-- [x] **Environment Templates** - .env.example files
-- [x] **Verification Results** - AI-powered validation
+- [ ] `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` for the repository-access OAuth App (`server/github.js`)
+- [ ] `CLIENT_URL` set to the frontend URL: CORS origin and GitHub OAuth redirect target (`server/server.js`)
+- [ ] `METRICS_TOKEN` (32+ characters) if you want `/api/metrics` and `/api/analytics`; without it both answer 404 (`server/server.js`)
+- [ ] Optional limits: `CLONE_TIMEOUT_MS` (default 120000), `MAX_REPO_SIZE_MB` (default 200) (`server/utils/git.js`); `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` (`server/ai/config.js`); `DATABASE_POOL_MAX` (`server/db/config.js`)
 
-### 5. Real-time Features
-- [x] **Socket.IO Server** - WebSocket server configured
-- [x] **Progress Tracking** - Live updates during analysis
-- [x] **Agent Progress UI** - Beautiful real-time progress component
-- [x] **Error Handling** - Comprehensive error reporting
+## Client build
 
-### 6. Backend Infrastructure
-- [x] **Express Server** - Production-ready API server
-- [x] **CORS Configuration** - Proper cross-origin setup
-- [x] **Session Management** - Active session tracking
-- [x] **File Storage** - Temporary file management
-- [x] **Cleanup Jobs** - Automatic session cleanup
+- [ ] `VITE_API_URL` set to the backend URL (without it the client uses `http://localhost:10000`, `client/src/lib/api.ts`)
+- [ ] `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set before the build (Vite inlines them)
+- [ ] The host serves `index.html` for every path (the Render static service rewrites `/*` to `/index.html`, `render.yaml`)
 
-## 🔧 **CRITICAL FIXES APPLIED**
+## Supabase
 
-### Fixed Issues:
-1. ✅ **Socket.IO Client Integration** - Added real-time WebSocket connection
-2. ✅ **File Download Functionality** - Implemented individual file downloads
-3. ✅ **Environment Variable Usage** - Fixed hardcoded localhost URLs
-4. ✅ **Progress Update Handling** - Real-time state synchronization
-5. ✅ **Agent Form Integration** - Connected to actual API endpoints
+- [ ] Live `public.saved_files` table and policies compared with `supabase/migrations/20261104000000_saved_files.sql`, then the migration applied (SQL Editor or `supabase db push`); a policy with another name is not replaced by it
+- [ ] `supabase/migrations/20261103000000_github_connections.sql` applied
+- [ ] Site URL and Redirect URLs include the production frontend URL
+- [ ] Google and GitHub sign-in providers configured, if you offer them
+- [ ] Confirm-email setting decided, custom SMTP configured
 
-## 🌍 **DEPLOYMENT REQUIREMENTS**
+## GitHub
 
-### Frontend Environment Variables (.env)
-```bash
-VITE_API_URL=https://dev-pilot.onrender.com
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
-```
+- [ ] The repository-access OAuth App's callback URL equals `GITHUB_REDIRECT_URI`
+- [ ] The GitHub sign-in OAuth App (Supabase provider) is a separate app with the Supabase callback URL
 
-### Backend Environment Variables (.env)
-```bash
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-CLIENT_URL=https://dev-pilot.vercel.app
+## AI providers
 
-# No Supabase variables: the server does not access Supabase
+- [ ] `RUN_LIVE_AI=1 npm run ai:smoke` passes for the configured providers (`server/scripts/ai-smoke.js`)
+- [ ] You accept that the repository file list, detected tech stack and `package.json` dependencies are sent to these providers, including for private repositories ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers))
+- [ ] OpenRouter: `OPENROUTER_DATA_COLLECTION` left at `deny` unless you decide otherwise
 
-# GitHub API (Repository Operations)
-GITHUB_CLIENT_ID=your-github-oauth-app-client-id
-GITHUB_CLIENT_SECRET=your-github-oauth-app-secret
-GITHUB_REDIRECT_URI=https://dev-pilot.onrender.com/auth/github/callback
-JWT_SECRET=your-jwt-secret-for-github-sessions
+## Checks after deploying
 
-# AI Services
-LLAMA_API_KEY=your-novita-ai-api-key
-TAVILY_API_KEY=your-tavily-search-api-key
-MEM0_API_KEY=your-mem0-memory-api-key
-KEYWORDS_AI_API_KEY=your-keywords-ai-observability-key
-```
+- [ ] `GET /health` returns 200 with `{ status: "ok", timestamp, uptime }` (liveness only: it checks no database or provider)
+- [ ] Sign up and sign in work with each enabled provider
+- [ ] Connect GitHub completes on `/auth/success` and the dashboard shows the GitHub login
+- [ ] A repository picked on `/select-repo` (Browse Repositories) clones and analyzes, including a private one
+- [ ] The generated files download, and "Save to Account" stores them in Saved Files
+- [ ] `/dashboard?session=<id>` (where `/select-repo` lands after an analysis, and the "View" button in Results from This Visit) shows a completed session's files; an unknown id shows "This analysis was not found or has expired"
+- [ ] A second account can see neither the first account's sessions (404 on `/api/status/:sessionId`) nor its saved files
+- [ ] After a backend restart, a completed session's files are still returned by `GET /api/files/:sessionId` (`SESSION_STORE=database`)
+- [ ] `server/logs/` and the `ai_call` lines contain no tokens or prompt text ([server/OBSERVABILITY.md](server/OBSERVABILITY.md))
 
-### External Service Setup
-- [ ] **Supabase Project** - `saved_files` table + RLS created; Google, GitHub and email providers enabled; production URL in Site URL and Redirect URLs (see DEPLOYMENT-GUIDE.md)
-- [x] **GitHub OAuth App** - Repository access permissions
-- [x] **Novita.ai Account** - Llama 3 70B API access
-- [x] **Tavily API** - Real-time search and documentation
-- [x] **Mem0 Service** - User interaction memory
-- [x] **Keywords AI** - Observability and analytics
+## Known limitations in the current code
 
-## 🚀 **DEPLOYMENT COMMANDS**
+Each item is a fact about the code today, for deciding what to fix before launch:
 
-### Frontend (Vercel)
-```bash
-# Build for production
-npm run build
-
-# Deploy to Vercel
-vercel --prod
-
-# Set environment variables in Vercel dashboard
-```
-
-### Backend (Render)
-```bash
-# Push to GitHub repository
-git add .
-git commit -m "Production deployment"
-git push origin main
-
-# Deploy via Render (connected to GitHub)
-# Set all environment variables in Render dashboard
-```
-
-## 🧪 **FINAL TESTING CHECKLIST**
-
-### End-to-End Flow Testing:
-- [ ] **User Registration** - Sign up with email/password
-- [ ] **OAuth Login** - Test Google and GitHub authentication  
-- [ ] **GitHub Connection** - Connect GitHub account for repository access
-- [ ] **Repository Selection** - Browse and select repositories
-- [ ] **AI Analysis** - Full agent pipeline execution
-- [ ] **Real-time Updates** - WebSocket progress tracking
-- [ ] **File Generation** - Download generated CI/CD files
-- [ ] **Saved Files** - Save a file, see it in Saved Files, and confirm another user can't see it
-- [ ] **Error Handling** - Test failure scenarios
-
-### Performance Testing:
-- [ ] **Load Testing** - Multiple concurrent analyses
-- [ ] **Memory Management** - Session cleanup verification
-- [ ] **API Rate Limits** - External service limits handling
-- [ ] **File Size Limits** - Large repository handling
-
-### Security Testing:
-- [ ] **Authentication Security** - Token validation
-- [ ] **API Security** - Endpoint protection
-- [ ] **File Security** - Temporary file cleanup
-- [ ] **CORS Security** - Cross-origin request validation
-
-## 📊 **MONITORING & ANALYTICS**
-
-### Key Metrics to Track:
-- User registrations and authentication success rates
-- Repository analysis completion rates  
-- Agent pipeline performance metrics
-- API response times and error rates
-- File generation success rates
-
-### Observability Tools:
-- **Keywords AI** - AI agent performance monitoring
-- **Render Logs** - Server-side error tracking
-- **Vercel Analytics** - Frontend performance metrics
-- **Supabase Dashboard** - Auth users and request logs
-
-## 🎯 **HACKATHON SUBMISSION CHECKLIST**
-
-- [x] **Working Demo** - Full end-to-end functionality
-- [x] **GitHub Repository** - Clean, documented codebase
-- [x] **Live Deployment** - Accessible production URLs
-- [x] **Documentation** - Comprehensive README and architecture docs
-- [x] **Video Demo** - Showcase all features
-- [x] **Technical Innovation** - Multi-agent AI system
-- [x] **User Experience** - Polished, intuitive interface
-- [x] **Scalability** - Production-ready architecture
-
-## 🔥 **FINAL OPTIMIZATIONS**
-
-### Performance Enhancements:
-1. **Caching** - Implement Redis for session management
-2. **CDN** - Static asset delivery optimization
-3. **Database Indexing** - `saved_files` is indexed on `(user_id, created_at desc)`; add indexes if new query patterns are introduced
-4. **API Throttling** - Rate limiting for AI services
-
-### Security Hardening:
-1. **API Key Rotation** - Regular credential updates
-2. **Input Validation** - Repository URL sanitization
-3. **Session Security** - Secure cookie configuration
-4. **HTTPS Enforcement** - SSL/TLS everywhere
-
----
-
-## 🎉 **PRODUCTION READINESS STATUS: 95%**
-
-Your InfraMind platform is **PRODUCTION READY** with all critical features working:
-
-✅ **Multi-agent AI system** generating production-quality CI/CD configurations  
-✅ **Real-time progress tracking** with beautiful WebSocket integration  
-✅ **Comprehensive GitHub integration** supporting public and private repositories  
-✅ **Secure authentication** powered by Supabase Auth with Google and GitHub OAuth  
-✅ **Modern UI/UX** with responsive design and intuitive workflows  
-✅ **Scalable architecture** ready for high-traffic deployment  
-
-**Ready for hackathon submission! 🚀** 
+- The **Projects** tab lists only results from the current page visit; nothing is stored (`client/src/pages/ModernDashboard.tsx`).
+- The agents report progress only after all four have run. Until then the step cards show one shared "In sequence" state; after the result event they show Done, Failed or Not run for each agent (`server/agents/index.js`, `client/src/components/AgentProgress.tsx`).
+- Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
+- Only `/api/clone-repo` and `/api/analyze` are rate-limited (`server/utils/security.js`, `server/server.js`).
+- When all three generator calls fail, the verifier makes no AI call, but the landing page still says "5 AI calls per run" and the verifier's step card says "AI task: verifier, 1 call" (`client/src/pages/Landing.tsx`, `client/src/components/AgentProgress.tsx`, `server/agents/index.js`).
+- A clone stays on the server's disk until its session expires, 24 hours after creation (`server/server.js`, `server/utils/sessionStore.js`).

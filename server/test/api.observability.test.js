@@ -1,0 +1,78 @@
+// Spawned servers (memory store, offline): /health, /api/metrics and clone analytics
+// (SERVER-FIX D.4). git is pointed at an unreachable proxy, so a clone fails offline.
+import { describe, test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer } from './helpers.js';
+import { USER_A } from './fakeSupabase.js';
+
+let fakes;
+let server;
+const metricsToken = randomAlphanumeric(48);
+
+const getJson = async (route, headers = {}) => {
+  const response = await fetch(`${server.baseUrl}${route}`, { headers });
+  return { status: response.status, json: await response.json() };
+};
+
+before(async () => {
+  fakes = await getFakes();
+  const deadProxy = `http://127.0.0.1:${await getFreePort()}`;
+  server = await startServer({
+    envOverrides: { METRICS_TOKEN: metricsToken, HTTPS_PROXY: deadProxy, https_proxy: deadProxy, CLONE_TIMEOUT_MS: '20000' }
+  });
+});
+after(async () => {
+  await server?.stop();
+  await closeFakes();
+});
+
+describe('GET /health', () => {
+  test('returns exactly status, timestamp and uptime, publicly', async () => {
+    const { status, json } = await getJson('/health');
+    assert.equal(status, 200);
+    assert.deepEqual(Object.keys(json).sort(), ['status', 'timestamp', 'uptime']);
+    assert.equal(json.status, 'ok');
+    for (const field of ['version', 'environment', 'memory', 'metrics', 'sessionAnalytics']) {
+      assert.ok(!(field in json), `no ${field}`);
+    }
+  });
+});
+
+describe('GET /api/metrics', () => {
+  test('carries version and environment; trackedSessions replaces activeSessions', async () => {
+    const { status, json } = await getJson('/api/metrics', { 'X-Metrics-Token': metricsToken });
+    assert.equal(status, 200);
+    assert.equal(typeof json.version, 'string');
+    assert.match(json.version, /^v\d+/);
+    assert.equal(json.environment, 'test');
+    assert.equal(typeof json.trackedSessions, 'number');
+    assert.ok(!('activeSessions' in json));
+  });
+});
+
+describe('clone analytics', () => {
+  test('a failed clone is recorded as a clone phase with outcome failed, and its log line identifies nobody', { timeout: 60000 }, async () => {
+    const logStart = server.logs().length;
+    const clone = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }, authHeaders(fakes.tokens.A));
+    assert.equal(clone.status, 502);
+
+    const { json } = await getJson('/api/analytics', { 'X-Metrics-Token': metricsToken });
+    assert.equal(json.total, 1);
+    assert.equal(json.phases.clone.count, 1);
+    assert.deepEqual(json.phases.clone.outcomes, { failed: 1 });
+    assert.equal(json.phases.analysis, undefined);
+
+    const lines = server.logs().slice(logStart).split('\n').filter((line) => line.includes('AGENT [performance]'));
+    assert.equal(lines.length, 1, 'one analytics log line');
+    const agentsLog = await fs.readFile(path.join(server.cwd, 'logs', 'agents.log'), 'utf8');
+    for (const text of [lines.join('\n'), agentsLog]) {
+      for (const forbidden of ['octocat', 'Hello-World', 'github.com', USER_A.id, USER_A.email, 'Failed to clone']) {
+        assert.ok(!text.includes(forbidden), `analytics log must not contain ${forbidden}`);
+      }
+    }
+    assert.match(lines[0], /clone completed/);
+    assert.match(lines[0], /outcome: 'failed'/);
+  });
+});

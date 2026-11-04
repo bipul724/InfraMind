@@ -94,7 +94,7 @@ export const RepoSelection = () => {
 
       toast({
         title: 'Success',
-        description: 'Repository analysis started! Redirecting to dashboard...',
+        description: 'Analysis finished. Redirecting to the dashboard...',
       });
 
       // Redirect to dashboard with session ID
@@ -147,7 +147,7 @@ export const RepoSelection = () => {
         <div className="border-b border-border pb-6">
           <h1 className="text-3xl font-semibold tracking-tight">Repository Selection</h1>
           <p className="mt-2 max-w-2xl text-muted-foreground">
-            Enter a GitHub repository URL to generate CI/CD configuration
+            Pick one of your GitHub repositories, or enter a public repository URL, to generate a Dockerfile, a GitHub Actions workflow and a .env.example
           </p>
         </div>
 
@@ -245,9 +245,9 @@ export const RepoSelection = () => {
             {/* Example Repositories */}
             <Card>
               <CardHeader className="pb-4">
-                <CardTitle className="text-base">Example Repositories</CardTitle>
+                <CardTitle className="text-base">Sample URLs</CardTitle>
                 <CardDescription>
-                  Try these example repositories to see the CI/CD generation in action
+                  Placeholder entries. Use This only fills in the Manual URL field; the repositories are not checked to exist.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -284,8 +284,8 @@ export const RepoSelection = () => {
                 <div>
                    <h3 className="text-sm font-semibold text-primary">Repository Access</h3>
                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Currently supporting public GitHub repositories. For private repositories, 
-                    you can still generate CI/CD configurations by entering the repository URL.
+                    Browse Repositories uses your connected GitHub account, so private repositories you can
+                    access work there. Manual URL sends no GitHub credentials and works for public repositories only.
                   </p>
                 </div>
               </div>

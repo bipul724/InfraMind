@@ -1,261 +1,168 @@
-# InfraMind - AI-Powered DevOps Automation Platform
+# InfraMind
 
-InfraMind is a comprehensive AI-powered platform that automates DevOps workflows by analyzing GitHub repositories and generating production-ready CI/CD configurations. The platform uses a multi-agent system to intelligently analyze codebases, detect tech stacks, and create deployment-ready files.
+InfraMind generates DevOps files for a GitHub repository. A signed-in user picks a repository; the server clones it, runs four agents in sequence (planner, analyzer, generator, verifier) and returns a Dockerfile, a GitHub Actions workflow and a `.env.example`. The files can be downloaded or saved to the user's account.
 
-## 🚀 Features
+## How it fits together
 
-- **Multi-Agent AI System**: Four specialized agents run in sequence, each handling one stage of the analysis
-- **GitHub Integration**: Connect your GitHub account and analyze any repository
-- **Tech Stack Detection**: Automatically detects programming languages and frameworks
-- **CI/CD Generation**: Creates Dockerfiles, GitHub Actions workflows, and environment files
-- **Real-time Progress**: Live updates during analysis with WebSocket integration
-- **Secure Authentication**: Powered by Supabase Auth with email/password, Google and GitHub sign-in
-- **Modern UI**: Beautiful, responsive interface built with React and Tailwind CSS
+```mermaid
+flowchart LR
+    Browser["Browser: React app"]
+    Server["Express + Socket.IO server"]
+    Supabase["Supabase: Auth, saved_files, github_connections"]
+    PG[("Postgres: analysis sessions, optional")]
+    GitHub["GitHub"]
+    AI["AI providers: gemini, groq, openrouter, novita"]
 
-## 🏗️ Architecture
-
-### Authentication & Database
-- **Supabase Auth**: Handles user sign-up and login (email/password, Google OAuth, GitHub OAuth). Sessions are managed in the browser by `@supabase/supabase-js`
-- **Supabase PostgreSQL**: The `public.saved_files` table stores generated files that users choose to save. Row Level Security (RLS) policies restrict each user to their own rows
-- **Browser-only access**: The React app talks to Supabase directly with the publishable (anon) key. The Express server does not connect to Supabase
-- **GitHub OAuth for repositories**: A separate GitHub OAuth App, handled by the Express server, grants repository access. It is not used for signing in
-
-> **Migration note:** InfraMind originally used Appwrite for authentication and storage. It moved to Supabase in October 2026, after the Appwrite project became inaccessible. Old `APPWRITE_*` and `VITE_APPWRITE_*` variables are no longer read anywhere and can be deleted.
-
-### Repository Operations
-- **GitHub API**: Used for repository discovery, access, and cloning operations
-- **Simple Git**: Handles repository cloning and file operations
-
-### AI & Intelligence
-- **Sequential Multi-Agent Pipeline** (`server/agents/index.js`): Four specialized agents run one after another, without LangGraph or any other orchestration library:
-  - **Planner Agent**: Analyzes repository structure and creates execution plans
-  - **Analyzer Agent**: Detects tech stack and dependencies
-  - **Generator Agent**: Creates CI/CD files (Dockerfile, GitHub Actions, .env.example)
-  - **Verifier Agent**: Validates and optimizes generated configurations
-- **Llama 3 70B**: Powers the AI agents via Novita.ai's OpenAI-compatible API (`LLAMA_API_KEY`)
-- **Tavily API**: Provides deployment documentation (legacy generator only; see below)
-- **Mem0**: Stores user interaction history (legacy generator only; see below)
-
-Tavily, Mem0 and Keywords AI are used only by the legacy generator in `server/index.js`. It runs only for `POST /api/devpilot` with `useAgents: false`, which the web client never sends.
-
-### Real-time Communication
-- **Socket.IO**: Enables real-time progress updates and agent communication
-- **WebSocket**: Live streaming of analysis progress to the frontend
-
-## 🛠️ Technology Stack
-
-### Frontend
-- React 18 + TypeScript
-- Tailwind CSS + shadcn/ui components
-- React Router for navigation
-- Socket.IO client for real-time updates
-- Supabase JS client (`@supabase/supabase-js`) for authentication and saved files
-
-### Backend
-- Node.js + Express
-- Socket.IO for real-time communication
-- GitHub API for repository operations
-- Plain async/await pipeline for multi-agent orchestration
-
-### AI & External Services
-- **Llama 3 70B** (via Novita.ai) - Core AI model
-- **Tavily API** - Real-time search and documentation (legacy generator only)
-- **Mem0** - User memory and preferences (legacy generator only)
-- **Supabase** - Authentication and PostgreSQL database (accessed from the browser)
-- **GitHub API** - Repository operations
-
-## 🔧 Environment Variables
-
-### Frontend (.env)
-```bash
-# API Configuration: the Express server's URL
-# (local: http://localhost:3001; if unset, most callers fall back to http://localhost:10000)
-VITE_API_URL=https://your-backend-url.com
-
-# Supabase Configuration (Project Settings → API Keys)
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
+    Browser -->|"sign-in, saved files"| Supabase
+    Browser -->|"API calls with Supabase access token, Socket.IO"| Server
+    Server -->|"verify tokens, store GitHub connections"| Supabase
+    Server -->|"SESSION_STORE=database"| PG
+    Server -->|"OAuth, repository API, git clone"| GitHub
+    Server -->|"planner, generator, verifier tasks"| AI
 ```
 
-Only the publishable (anon) key belongs here, because Vite bundles every `VITE_` variable into the browser code. Never use the secret (`service_role`) key in the frontend; InfraMind doesn't need it anywhere.
+Source: `server/server.js`, `server/utils/auth.js`, `server/utils/githubConnections.js`, `server/utils/sessionStore.js`, `server/github.js`, `server/utils/git.js`, `server/ai/providers.js`, `client/src/lib/supabase.ts`, `client/src/lib/api.ts`.
 
-`VITE_SERVER_URL` is read only by `client/src/lib/agentApi.ts`, which no page currently imports, so it has no effect today. See [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md) ("API URL Variables").
+Diagrams:
 
-### Backend (.env)
-```bash
-# Server Configuration
-PORT=3001
-NODE_ENV=production
-CLIENT_URL=https://your-frontend-url.com
+| Diagram | Where |
+|---|---|
+| System context | [ARCHITECTURE.md, section 1](ARCHITECTURE.md#1-system-context) |
+| Sign-in and API authentication | [ARCHITECTURE.md, section 2](ARCHITECTURE.md#2-sign-in-and-api-authentication) |
+| GitHub connection | [ARCHITECTURE.md, section 3](ARCHITECTURE.md#3-github-connection) |
+| Analysis flow (clone, analyze, download) | [ARCHITECTURE.md, section 4](ARCHITECTURE.md#4-analysis-flow) and [README-AI-AGENTS.md](README-AI-AGENTS.md#analysis-flow) |
+| Session status lifecycle | [ARCHITECTURE.md, section 5](ARCHITECTURE.md#5-session-lifecycle) |
+| Data model | [ARCHITECTURE.md, section 6](ARCHITECTURE.md#6-data-model) |
+| Agent pipeline | [README-AI-AGENTS.md](README-AI-AGENTS.md#agent-pipeline) |
+| AI provider fallback | [README-AI-AGENTS.md](README-AI-AGENTS.md#ai-provider-fallback) |
+| Deployment on Render | [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md#deployment-on-render) |
 
-# No Supabase variables: the server does not access Supabase
+## Features
 
-# GitHub Configuration (for repository operations)
-GITHUB_CLIENT_ID=your-github-client-id
-GITHUB_CLIENT_SECRET=your-github-client-secret
-GITHUB_REDIRECT_URI=https://your-backend-url.com/auth/github/callback
-JWT_SECRET=your-jwt-secret-for-github-sessions
+- **Sign-in with Supabase Auth:** email and password, GitHub or Google (`client/src/lib/supabase.ts`). The server checks the Supabase access token on its account API routes (every `/api` route except `/api/metrics` and `/api/analytics`) and on Socket.IO connections (`server/server.js`, `server/utils/auth.js`, `server/utils/realtime.js`).
+- **GitHub connection for repository access:** a separate GitHub OAuth App, run by the server, with scope `repo,user:email`. The token stays on the server, encrypted with AES-256-GCM (`server/github.js`, `server/utils/githubConnections.js`). Connected users can list their repositories and organizations and analyze private repositories they can access.
+- **Analysis:** a shallow `git clone`, then the four agents. Only the planner, generator and verifier call the AI layer; the analyzer reads the cloned files (`server/agents/index.js`).
+- **Configurable AI providers:** per-task provider chains with retries and fallback; no provider or model is built in as the default (`server/ai/`).
+- **Live progress:** Socket.IO `progress` events, delivered only to the session's owner (`server/utils/realtime.js`).
+- **Results:** download the generated files, or save them to the `saved_files` table in Supabase (`client/src/components/AgentProgress.tsx`, `client/src/lib/api.ts`).
+- **Session storage:** in process memory or in Postgres through Prisma (`SESSION_STORE`, `server/utils/sessionStore.js`). Sessions expire 24 hours after creation.
 
-# AI & External Services
-LLAMA_API_KEY=your-novita-ai-api-key            # required
-TAVILY_API_KEY=your-tavily-api-key              # optional: legacy generator only
-MEM0_API_KEY=your-mem0-api-key                  # optional: legacy generator only
-KEYWORDS_AI_API_KEY=your-keywords-ai-api-key    # optional: legacy generator only
-```
+## Technology
 
-## 🔐 Authentication Flow
+- **Client** (`client/`): React 18, TypeScript, Vite, Tailwind CSS with shadcn/ui components, React Router, `socket.io-client`, `@supabase/supabase-js` (`client/package.json`)
+- **Server** (`server/`): Node.js (`^20.19 || ^22.12 || >=24.0`), Express 4, Socket.IO 4, Prisma 7 with the `pg` driver adapter, zod, helmet, express-rate-limit (`server/package.json`). Clones run the `git` binary through `child_process.execFile` (`server/utils/git.js`); `git` must be installed on the server.
 
-1. **User Authentication**: Handled entirely by Supabase Auth, in the browser
-   - Email/password sign-up and login. If **Confirm email** is enabled, new users must confirm by email before signing in
-   - Google and GitHub OAuth: the app redirects to the provider, the provider returns to Supabase (`https://<project-ref>.supabase.co/auth/v1/callback`), and Supabase sends the user back to `<app origin>/dashboard`
-   - Sessions are stored and refreshed by the Supabase JS client. The name, avatar and GitHub username are read from the Supabase user profile
-
-2. **GitHub Repository Access**: Separate from authentication
-   - Uses GitHub API with personal access tokens
-   - Required for repository discovery and cloning
-   - Enables access to private repositories
-
-## 📋 Setup Instructions
-
-### 1. Supabase Setup
-1. Create a project at [supabase.com](https://supabase.com/dashboard)
-2. From **Project Settings → API Keys**, copy the Project URL and the publishable (anon) key into `client/.env` as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-3. In the **SQL Editor**, create the `saved_files` table and its RLS policies using the SQL in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md) (section "Supabase Configuration → Database Setup")
-4. Under **Authentication → URL Configuration**, set the Site URL to `http://localhost:5173` and add `http://localhost:5173/**` to Redirect URLs. Add your production URL when you deploy
-5. Under **Authentication → Sign In / Providers**, enable Google and GitHub. Both providers use the callback URL `https://<project-ref>.supabase.co/auth/v1/callback`. Step-by-step instructions are in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md)
-
-### 2. GitHub OAuth App (for repository access)
-This is separate from the GitHub sign-in provider configured in Supabase, and needs its own OAuth App.
-1. Go to GitHub Developer Settings
-2. Create a new OAuth App with:
-   - Homepage URL: `https://your-frontend-url.com`
-   - Authorization callback URL: `https://your-backend-url.com/auth/github/callback`
-3. Get Client ID and Client Secret
-
-### 3. External API Keys
-- **Novita.ai**: For Llama 3 70B model access
-- **Tavily**: For real-time search and documentation
-- **Mem0**: For user memory and preferences
-- **Keywords AI**: For observability (optional)
-
-### 4. Installation
+## Quick start (local)
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-repo/inframind.git
-cd inframind
+# From the repository root: installs root, client and server dependencies
+npm run install:all
 
-# Install backend dependencies
-cd server
-npm install
+# Server configuration
+cp server/.env.example server/.env
+# Fill in at least: SUPABASE_URL, SUPABASE_ANON_KEY, GITHUB_TOKEN_ENC_KEY
+# (openssl rand -base64 32), GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and for each
+# provider in AI_PROVIDERS its <NAME>_API_KEY and <NAME>_MODEL.
+# The example keeps SESSION_STORE=memory and GITHUB_TOKEN_STORE=memory.
 
-# Install frontend dependencies
-cd ../client
-npm install
+# Client configuration
+cp client/.env.example client/.env.local
+# Fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
-
-# Start the development servers
-# Backend
-cd server
-npm run dev
-
-# Frontend (in another terminal)
-cd client
+# Run client and server together
 npm run dev
 ```
 
-## 🚀 Deployment
+The client runs on `http://localhost:5173` (`client/vite.config.ts`). The server listens on `PORT`, or 10000 without it (`server/utils/port.js`); 10000 is also the client's fallback for `VITE_API_URL` (`client/src/lib/api.ts`), `server/.env.example` and `render.yaml`. If you set another `PORT`, set `VITE_API_URL` to match.
 
-### Frontend (Vercel)
-```bash
-# Deploy to Vercel
-npm run build
-vercel --prod
+Supabase setup (project, `saved_files` table, sign-in providers, redirect URLs), the GitHub OAuth App, database mode and production deployment are in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md).
+
+## Configuration summary
+
+The server refuses to start when a required setting is missing or invalid (`startServer` in `server/server.js`):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | yes | Used to verify user access tokens |
+| `GITHUB_TOKEN_STORE` | yes | `memory` or `supabase` |
+| `GITHUB_TOKEN_ENC_KEY` | yes | Standard base64 of exactly 32 bytes |
+| `SUPABASE_SERVICE_ROLE_KEY` | with `GITHUB_TOKEN_STORE=supabase` | Used only for `public.github_connections` |
+| `AI_PROVIDERS` | yes | Comma-separated: `gemini`, `groq`, `openrouter`, `novita` |
+| `<NAME>_API_KEY`, `<NAME>_MODEL` | for every provider in a route | No default model IDs |
+| `SESSION_STORE` | yes | `memory` or `database` |
+| `DATABASE_URL` | with `SESSION_STORE=database` | Postgres connection string |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` | for the GitHub connection | Not checked at startup |
+| `CLIENT_URL` | recommended | CORS origin and the target of GitHub OAuth redirects |
+| `METRICS_TOKEN` | optional | Enables `/api/metrics` and `/api/analytics` (32+ characters) |
+
+Every variable is listed with comments in `server/.env.example`. The client reads `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (`client/src/lib/api.ts`, `client/src/lib/supabase.ts`). Only the anon key belongs in the client: Vite bundles every `VITE_` variable into browser code.
+
+The LLM key variable `LLAMA_API_KEY` from older versions of this README is not read anywhere.
+
+## API
+
+Every route registered in `server/server.js`:
+
+| Method and path | Access | Purpose |
+|---|---|---|
+| `GET /health` | public | Liveness only: exactly `status: "ok"`, `timestamp`, `uptime`; queries no database or service |
+| `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions` |
+| `GET /api/analytics` | same as `/api/metrics` | Clone and analysis timings and outcomes of the last hour (at most 1,000 sessions) |
+| `POST /api/github/connect` | Bearer | Issues a one-time ticket (2 minutes) to start a GitHub connection |
+| `GET /auth/github` | public, needs a valid `ticket` | Sets the OAuth state cookie and redirects to GitHub |
+| `GET /auth/github/callback` | public, needs the state cookie | Exchanges the code, redirects to `CLIENT_URL/auth/success?complete=<id>` |
+| `POST /api/github/connect/complete` | Bearer | Claims the completion and stores the connection |
+| `POST /auth/github/discard` | public | Discards an unclaimed completion and revokes its token; always 204 |
+| `GET /api/github/status` | Bearer | Whether the user has a GitHub connection; no GitHub API call |
+| `DELETE /api/github/connection` | Bearer | Revokes the token at GitHub and deletes the connection |
+| `GET /api/github/repositories` | Bearer and a GitHub connection | The user's repositories and organizations (`page`, `per_page`, default 50) |
+| `GET /api/github/organizations/:org/repositories` | Bearer and a GitHub connection | An organization's repositories |
+| `POST /api/github/verify-repo` | Bearer and a GitHub connection | Checks access to `owner`/`repo` |
+| `POST /api/clone-repo` | Bearer, rate-limited: 10 per 10 minutes | Creates a session and clones `repositoryData` (connected repository) or `repoUrl` |
+| `POST /api/analyze` | Bearer, rate-limited: 5 per 5 minutes | Runs the agents on a `cloned` session; answers when they finish |
+| `GET /api/files/:sessionId` | Bearer, session owner | Generated files, tech stack, analysis, verification results |
+| `GET /api/files/:sessionId/:filename` | Bearer, session owner | One generated file as a download (`dockerfile`, `githubActions`, `envExample`) |
+| `GET /api/status/:sessionId` | Bearer, session owner | Status, timestamps and error of a session |
+
+"Bearer" means `Authorization: Bearer <Supabase access token>`: `app.use('/api', requireUser(verifier))` is registered after `/api/metrics` and `/api/analytics` and before every other `/api` route. Without a valid token these answer 401 `AUTH_REQUIRED`, or 503 `AUTH_UNAVAILABLE` when Supabase cannot be reached (`server/utils/auth.js`). A session that does not exist or belongs to someone else answers 404 "Session not found".
+
+There is no `POST /api/devpilot` route in `server/server.js`. Sign-up, sign-in and saved files go from the browser to Supabase directly, not through the server.
+
+Socket.IO: connect with `auth: { token }`, then emit `subscribe` with `{ sessionId }`; the server emits `progress` and, when the token expires, `auth_expired` (`server/utils/realtime.js`).
+
+## Repository layout
+
+```
+client/                 React app (pages in src/pages, routes in src/App.tsx)
+server/server.js        Express + Socket.IO server (npm start)
+server/agents/          The four agents
+server/ai/              AI provider layer
+server/utils/           Auth, GitHub connections, git, sessions, realtime, security, logging
+server/prisma/          Prisma schema and migration for the session tables
+supabase/migrations/    SQL for public.github_connections
+render.yaml             Render services
 ```
 
-Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_API_URL` in the hosting dashboard before building. Vite inlines them at build time, so redeploy after changing any of them. Add the production URL to Supabase's Redirect URLs and set it as the Site URL.
+`server/index.js`, `server/minimal.js`, `server/test-render.js` and `server/start.js` are not part of the running server; see [ARCHITECTURE.md, section 9](ARCHITECTURE.md#9-code-that-is-not-part-of-the-running-system).
 
-### Backend (Render)
+## Tests
+
 ```bash
-# Deploy to Render
-# Connect your GitHub repository to Render
-# Set environment variables in Render dashboard
+cd server && npm test      # node --test suite in server/test/
+cd client && npm run build # tsc and vite build
+cd client && npm run lint
 ```
 
-`render.yaml` starts the backend with `cd server && npm start` (the real Express server). See [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md) for the full Render setup.
+## License
 
-## 🤖 Multi-Agent System
+There is no license file in this repository. `server/package.json` declares `"license": "MIT"`.
 
-The platform uses a multi-agent pipeline (`createAgentWorkflow` in `server/agents/index.js`) that awaits each agent in turn:
+## Other documents
 
-### Agent Workflow
-1. **Planner Agent**: Analyzes repository structure and creates execution plan
-2. **Analyzer Agent**: Detects tech stack, dependencies, and patterns
-3. **Generator Agent**: Creates optimized CI/CD files
-4. **Verifier Agent**: Validates configurations and suggests improvements
-
-### Agent Communication
-- Agents share one `AgentState` object, which each agent receives, updates and passes to the next
-- Execution is strictly sequential; nothing runs in parallel
-- Progress is sent over Socket.IO at milestones: cloning (10%, 25%), analysis start (30%), the pipeline result with all agent messages, and completion (100%). Individual agents don't report progress
-- LLM calls retry up to 3 times, with a 1-second delay, on retryable errors
-
-## 📊 Key Integrations
-
-### GitHub Integration
-- **Purpose**: Repository discovery, access, and cloning
-- **Scope**: `repo`, `user:email`
-- **Usage**: After signing in with Supabase, users can connect GitHub for repo access
-
-### Supabase Integration
-- **Purpose**: User authentication and saved generated files
-- **Features**: Email/password auth, Google and GitHub OAuth, browser-managed sessions
-- **Database**: The `public.saved_files` table holds each saved file's name, type, repository URL and content. RLS lets users read, insert and delete only their own rows
-
-### AI Services Integration
-- **Llama 3 70B**: Core reasoning and code analysis
-- **Tavily**: Real-time documentation and best practices
-- **Mem0**: Personalized recommendations based on user history
-
-## 🔍 API Endpoints
-
-### Authentication
-The server has no user-authentication endpoints. Sign-up, login and logout go from the browser straight to Supabase Auth. Saved files are also read and written in the browser through the Supabase client, not through the server.
-
-### GitHub Operations
-- `GET /auth/github` - Initiate GitHub OAuth for repo access
-- `GET /auth/github/callback` - GitHub OAuth callback
-- `GET /api/github/repositories` - Get user repositories
-- `GET /api/github/organizations/:org/repositories` - Get org repositories
-
-### AI Analysis
-- `POST /api/clone-repo` - Clone repository for analysis
-- `POST /api/analyze` - Run multi-agent analysis
-- `GET /api/status/:sessionId` - Get session status (state, timestamps, error). Analysis results come back in the `POST /api/analyze` response
-- `GET /api/files/:sessionId/:filename` - Download generated files
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue on GitHub
-- Check the documentation
-- Review environment variable setup
-
----
-
-Built with ❤️ using Supabase, GitHub API, Llama 3 70B, and modern web technologies. 
+- [ARCHITECTURE.md](ARCHITECTURE.md): components, flows, data model
+- [README-AI-AGENTS.md](README-AI-AGENTS.md): agents and AI providers
+- [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md): Supabase, GitHub OAuth App, database, Render
+- [PRODUCTION-CHECKLIST.md](PRODUCTION-CHECKLIST.md): checks before going live
+- [server/OBSERVABILITY.md](server/OBSERVABILITY.md): logs, health, metrics, AI call records
+- [server/README.md](server/README.md): server scripts and layout
+- [IMPROVEMENTS.md](IMPROVEMENTS.md): historical record of an earlier round of changes

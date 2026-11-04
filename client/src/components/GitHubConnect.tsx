@@ -24,7 +24,7 @@ export const GitHubConnect = () => {
       console.error('Failed to connect GitHub:', error);
       toast({
         title: 'Error',
-        description: 'Failed to connect GitHub account. Please try again.',
+        description: 'GitHub sign-in could not be started. Please try again.',
         variant: 'destructive',
       });
     }
@@ -40,10 +40,10 @@ export const GitHubConnect = () => {
         </div>
         <div className="min-w-0 space-y-1">
           <CardTitle className="text-base">
-            GitHub Integration
+            GitHub Sign-in
           </CardTitle>
           <CardDescription>
-            Connect with GitHub to streamline your repository workflow
+            How you signed in to InfraMind. Repository access is a separate connection: use Connect GitHub on the dashboard.
           </CardDescription>
         </div>
       </CardHeader>
@@ -54,11 +54,11 @@ export const GitHubConnect = () => {
               <div className="flex flex-1 items-start gap-3">
                 <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-status-success" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-status-success">GitHub Connected</p>
+                  <p className="text-sm font-medium text-status-success">Signed in with GitHub</p>
                   {githubUsername ? (
-                    <p className="text-sm text-foreground/80">Connected as <span className="font-mono">@{githubUsername}</span></p>
+                    <p className="text-sm text-foreground/80">Signed in as <span className="font-mono">@{githubUsername}</span></p>
                   ) : (
-                    <p className="text-sm text-foreground/80">Successfully authenticated with GitHub</p>
+                    <p className="text-sm text-foreground/80">Signed in through GitHub</p>
                   )}
                 </div>
               </div>
@@ -69,14 +69,14 @@ export const GitHubConnect = () => {
                 className="w-full sm:w-auto"
               >
                 <ExternalLink className="h-4 w-4" />
-                View Profile
+                Open GitHub
               </Button>
             </div>
             
             <ul className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />You can access public repositories</li>
-              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />OAuth authentication active</li>
-              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />Ready to generate CI/CD configurations</li>
+              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />Sign-in only: no repository access</li>
+              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />Repositories: Connect GitHub on the dashboard</li>
+              <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-status-success" aria-hidden="true" />Public repositories also work by URL</li>
             </ul>
           </div>
         ) : (
@@ -85,22 +85,22 @@ export const GitHubConnect = () => {
               <div className="flex items-start gap-3 rounded-md border border-primary/20 bg-primary/[0.05] p-3">
                 <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-primary">Enhanced GitHub Integration Available</p>
+                  <p className="text-sm font-medium text-primary">You signed in without GitHub</p>
                   <p className="text-sm text-muted-foreground">
-                    Sign in with GitHub for the best experience
+                    You can also sign in with GitHub. That does not connect your repositories.
                   </p>
                 </div>
               </div>
 
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  While you can manually enter repository URLs, signing in with GitHub provides:
+                  Signing in with GitHub:
                 </p>
                 <ul className="grid gap-2 text-sm text-foreground/80 sm:grid-cols-2">
-                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Faster repository access</li>
-                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Automatic repository detection</li>
-                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Enhanced security with OAuth</li>
-                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Seamless workflow integration</li>
+                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Signs you in through Supabase</li>
+                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Shows your GitHub username in the header</li>
+                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Gives InfraMind no repository access</li>
+                  <li className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />For repositories, use Connect GitHub</li>
                 </ul>
               </div>
             </div>
@@ -122,7 +122,7 @@ export const GitHubConnect = () => {
               </div>
 
               <p className="text-center text-xs leading-5 text-muted-foreground">
-                Your current email login will remain active after connecting GitHub
+                This is separate from the GitHub repository connection on the dashboard
               </p>
             </div>
           </div>

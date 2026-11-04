@@ -141,7 +141,7 @@ const AuthSuccess: React.FC = () => {
             <Github className="h-6 w-6" />
           </div>
           <CardTitle className="flex items-center justify-center gap-2">
-            GitHub Authentication
+            GitHub Connection
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">

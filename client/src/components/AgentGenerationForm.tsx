@@ -1,23 +1,18 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from './ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiFetch } from '@/lib/apiClient';
-import { 
-  Bot, 
-  GitBranch, 
-  Sparkles, 
-  AlertTriangle, 
+import {
+  Bot,
+  GitBranch,
+  AlertTriangle,
   Info,
   Zap,
-  Settings,
-  Key,
   Play,
   AlertCircle,
   CheckCircle,
@@ -25,68 +20,90 @@ import {
   Loader2
 } from 'lucide-react';
 import { AgentProgress } from './AgentProgress';
+import type {
+  AgentMessage,
+  GenerationResult,
+  ProgressPayload,
+  SessionStatus,
+  TechStack
+} from '@/lib/session';
+import { isStatusRegression } from '@/lib/session';
 
 interface AgentGenerationFormProps {
   repoUrl?: string;
-  authToken?: string;
-  onComplete?: (result: any) => void;
+  onComplete?: (result: GenerationResult) => void;
   onError?: (error: string) => void;
   className?: string;
 }
 
-// Temporary AgentAPI service implementation
-class AgentAPIService {
-  initializeSocket(callback: (data: any) => void) {
-    // Mock implementation for now
-    console.log('Socket initialized');
-  }
-  
-  async cloneRepository(params: { repoUrl: string; authToken?: string }) {
-    // Mock implementation
-    const response = await apiFetch('/api/clone-repo', {
-      method: 'POST',
-      body: JSON.stringify(params)
-    });
-    return response.json();
-  }
-  
-  async runAnalysis(params: { sessionId: string }) {
-    // Mock implementation  
-    const response = await apiFetch('/api/analyze', {
-      method: 'POST',
-      body: JSON.stringify(params)
-    });
-    return response.json();
-  }
+// Response bodies of POST /api/clone-repo and POST /api/analyze (server/server.js)
+interface CloneResponse {
+  success?: boolean;
+  sessionId?: string;
+  error?: string;
+}
+
+interface AnalyzeResponse {
+  success?: boolean;
+  techStack?: TechStack | null;
+  generatedFiles?: string[];
+  messages?: AgentMessage[];
+  errors?: string[];
+  error?: string;
+}
+
+// The manual-URL path sends only the URL: no GitHub credential leaves the browser.
+// Private repositories go through the connected-GitHub path (/select-repo).
+async function cloneRepository(repoUrl: string): Promise<CloneResponse> {
+  const response = await apiFetch('/api/clone-repo', {
+    method: 'POST',
+    body: JSON.stringify({ repoUrl })
+  });
+  return response.json();
+}
+
+async function runAnalysis(sessionId: string): Promise<AnalyzeResponse> {
+  const response = await apiFetch('/api/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId })
+  });
+  return response.json();
 }
 
 const validateGitHubUrl = (url: string) => {
-  const githubUrlPattern = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+(?:\.git)?$/;
+  const githubUrlPattern = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/;
   return githubUrlPattern.test(url);
 };
 
 export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
   repoUrl: initialRepoUrl = '',
-  authToken,
   onComplete,
   onError,
   className
 }) => {
   // Form state
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl);
-  const [useAdvancedMode, setUseAdvancedMode] = useState(false);
-  
+  const [activeTab, setActiveTab] = useState('setup');
+
   // Agent workflow state
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [analyzedUrl, setAnalyzedUrl] = useState('');
   const [currentStep, setCurrentStep] = useState('Ready to analyze');
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<'cloning' | 'cloned' | 'analyzing' | 'completed' | 'failed'>('cloned');
-  const [messages, setMessages] = useState<any[]>([]);
+  const [status, setStatusState] = useState<SessionStatus>('cloned');
+  // Mirrors `status` synchronously, so a late progress event can be compared with it
+  const statusRef = useRef<SessionStatus>('cloned');
+  const setStatus = useCallback((next: SessionStatus) => {
+    statusRef.current = next;
+    setStatusState(next);
+  }, []);
+  // undefined until the pipeline's result event arrives (see AgentProgress)
+  const [messages, setMessages] = useState<AgentMessage[] | undefined>(undefined);
   const [errors, setErrors] = useState<string[]>([]);
-  const [techStack, setTechStack] = useState<any>(null);
+  const [techStack, setTechStack] = useState<TechStack | null>(null);
   const [generatedFiles, setGeneratedFiles] = useState<string[]>([]);
-  
+
   // Form validation
   const [urlError, setUrlError] = useState<string | null>(null);
   const isValidUrl = repoUrl && validateGitHubUrl(repoUrl);
@@ -94,7 +111,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;
     setRepoUrl(url);
-    
+
     if (url && !validateGitHubUrl(url)) {
       setUrlError('Please enter a valid GitHub repository URL (e.g., https://github.com/user/repo)');
     } else {
@@ -102,131 +119,98 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
     }
   };
 
+  // Stable, so the progress socket is not re-created on every render. Status, step and
+  // progress never move backwards; messages, errors and results are always taken.
+  const handleProgressUpdate = useCallback((data: ProgressPayload) => {
+    if (!data.status || !isStatusRegression(statusRef.current, data.status)) {
+      if (data.status) setStatus(data.status);
+      if (data.step) setCurrentStep(data.step);
+      if (typeof data.progress === 'number') setProgress(data.progress);
+    }
+    if (Array.isArray(data.messages)) setMessages(data.messages);
+    if (Array.isArray(data.errors)) setErrors(data.errors);
+    if (data.error) {
+      const message = data.error;
+      setErrors((previous) => (previous.includes(message) ? previous : [...previous, message]));
+    }
+    if (data.techStack) setTechStack(data.techStack);
+    if (Array.isArray(data.generatedFiles)) setGeneratedFiles(data.generatedFiles);
+  }, [setStatus]);
+
   const handleStartAnalysis = async () => {
     if (!isValidUrl) {
       setUrlError('Please enter a valid GitHub repository URL');
       return;
     }
 
+    const url = repoUrl;
     setIsRunning(true);
-    setCurrentStep('Initializing AI agents...');
-    setProgress(5);
-    setStatus('cloning');
-    setMessages([]);
-    setErrors([]);
+    setActiveTab('progress');
+    setAnalyzedUrl(url);
     setSessionId(null);
+    setCurrentStep('Cloning repository...');
+    setProgress(0);
+    setStatus('cloning');
+    setMessages(undefined);
+    setErrors([]);
+    setTechStack(null);
+    setGeneratedFiles([]);
 
     try {
-      const agentAPI = new AgentAPIService();
-      
-      // Initialize WebSocket connection for real-time updates
-      agentAPI.initializeSocket(handleProgressUpdate);
-      
       // Step 1: Clone repository
-      setCurrentStep('Cloning repository...');
-      setProgress(15);
-      
-      const cloneResult = await agentAPI.cloneRepository({
-        repoUrl,
-        authToken
-      });
-      
-      if (!cloneResult.success) {
+      const cloneResult = await cloneRepository(url);
+      if (!cloneResult.success || !cloneResult.sessionId) {
         throw new Error(cloneResult.error || 'Failed to clone repository');
       }
-      
+
+      // The progress panel subscribes to this session once the id is known
       setSessionId(cloneResult.sessionId);
       setCurrentStep('Repository cloned successfully');
       setProgress(25);
       setStatus('cloned');
-      
-      // Step 2: Start AI analysis
+
+      // Step 2: Run the agents. The server answers once the analysis has finished.
       setCurrentStep('Starting AI agent analysis...');
       setProgress(30);
       setStatus('analyzing');
-      
-      const analysisResult = await agentAPI.runAnalysis({
-        sessionId: cloneResult.sessionId
-      });
-      
+
+      const analysisResult = await runAnalysis(cloneResult.sessionId);
       if (!analysisResult.success) {
         throw new Error(analysisResult.error || 'Analysis failed');
       }
-      
-      // Analysis will continue via WebSocket updates
-      
+
+      setCurrentStep('Analysis complete!');
+      setProgress(100);
+      setStatus('completed');
+      setTechStack(analysisResult.techStack ?? null);
+      setGeneratedFiles(Array.isArray(analysisResult.generatedFiles) ? analysisResult.generatedFiles : []);
+      // The same per-agent results the progress events carry, for a client that missed them
+      if (Array.isArray(analysisResult.messages)) setMessages(analysisResult.messages);
+      if (Array.isArray(analysisResult.errors)) setErrors(analysisResult.errors);
     } catch (error) {
       console.error('Agent workflow error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error occurred';
       setStatus('failed');
-      setErrors([error instanceof Error ? error.message : 'Unknown error occurred']);
+      setErrors([message]);
       setCurrentStep('Analysis failed');
       setProgress(0);
-      
-      if (onError) {
-        onError(error instanceof Error ? error.message : 'Unknown error occurred');
-      }
+      onError?.(message);
     } finally {
       setIsRunning(false);
     }
   };
 
-  const handleProgressUpdate = (progressData: any) => {
-    console.log('Progress update:', progressData);
-    
-    if (progressData.sessionId && !sessionId) {
-      setSessionId(progressData.sessionId);
-    }
-    
-    if (progressData.step) {
-      setCurrentStep(progressData.step);
-    }
-    
-    if (progressData.progress !== undefined) {
-      setProgress(progressData.progress);
-    }
-    
-    if (progressData.status) {
-      setStatus(progressData.status);
-    }
-    
-    if (progressData.messages) {
-      setMessages(progressData.messages);
-    }
-    
-    if (progressData.errors) {
-      setErrors(progressData.errors);
-    }
-    
-    if (progressData.techStack) {
-      setTechStack(progressData.techStack);
-    }
-    
-    if (progressData.generatedFiles) {
-      setGeneratedFiles(progressData.generatedFiles);
-    }
-    
-    // Handle completion
-    if (progressData.status === 'completed' && onComplete) {
-      onComplete({
-        sessionId: progressData.sessionId,
-        techStack: progressData.techStack,
-        generatedFiles: progressData.generatedFiles,
-        messages: progressData.messages
-      });
-    }
-  };
-
-  const handleReset = () => {
-    setIsRunning(false);
-    setSessionId(null);
-    setCurrentStep('Ready to analyze');
-    setProgress(0);
-    setStatus('cloned');
-    setMessages([]);
-    setErrors([]);
-    setTechStack(null);
-    setGeneratedFiles([]);
-  };
+  // Report each completed session to the page exactly once
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  });
+  const reportedSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== 'completed' || !sessionId || reportedSessionRef.current === sessionId) return;
+    reportedSessionRef.current = sessionId;
+    onCompleteRef.current?.({ sessionId, repoUrl: analyzedUrl, techStack, generatedFiles });
+  }, [status, sessionId, analyzedUrl, techStack, generatedFiles]);
 
   return (
     <div className={`space-y-6 ${className}`}>
@@ -244,19 +228,19 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 </Badge>
               </CardTitle>
               <CardDescription>
-                Enter your GitHub repository URL to let our AI agents analyze and generate production-ready CI/CD configurations
+                Enter a public GitHub repository URL. The agents analyze it and generate a Dockerfile, a GitHub Actions workflow and a .env.example.
               </CardDescription>
             </div>
           </div>
         </CardHeader>
 
         <CardContent className="space-y-6 pt-5 sm:pt-6">
-          <Tabs defaultValue="setup" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:min-w-[22rem]">
               <TabsTrigger value="setup">Repository Setup</TabsTrigger>
               <TabsTrigger value="progress">Analysis Progress</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="setup" className="mt-6 space-y-4">
               <div className="space-y-6">
                 <div className="space-y-2">
@@ -297,71 +281,19 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                     <Alert className="mt-2 border-status-success/25 bg-status-success/[0.06]">
                        <CheckCircle className="h-4 w-4 text-status-success" />
                        <AlertDescription className="text-status-success">
-                        Valid GitHub repository URL detected
+                        The URL has the format of a GitHub repository
                       </AlertDescription>
                     </Alert>
                   )}
                 </div>
 
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setUseAdvancedMode(!useAdvancedMode)}
-                      disabled={isRunning}
-                      aria-expanded={useAdvancedMode}
-                    >
-                      <Settings className="h-4 w-4" />
-                      {useAdvancedMode ? 'Hide' : 'Show'} Advanced Options
-                    </Button>
-                    <Badge variant="secondary" className="font-normal">
-                      For Private Repos
-                    </Badge>
-                  </div>
-
-                  {useAdvancedMode && (
-                    <div
-                      className="animate-in fade-in-0 slide-in-from-top-1 space-y-4 rounded-md border border-border
-                        bg-muted/50 p-4 duration-200"
-                    >
-                      <div className="space-y-2">
-                        <Label htmlFor="auth-token" className="flex flex-wrap items-center gap-2">
-                          <Key className="h-4 w-4 text-muted-foreground" />
-                          <span>GitHub Personal Access Token</span>
-                          <Badge variant="outline" className="font-normal">
-                            Optional
-                          </Badge>
-                        </Label>
-                        <Input
-                          id="auth-token"
-                          type="password"
-                          placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                          value={authToken}
-                          onChange={(e) => {
-                            // Handle auth token change
-                          }}
-                          disabled={isRunning}
-                          className="font-mono text-[13px]"
-                        />
-                        <Alert className="mt-2 bg-card">
-                          <Info className="h-4 w-4 text-muted-foreground" />
-                          <AlertDescription className="text-sm text-muted-foreground">
-                            Required only for private repositories. Generate at{' '}
-                            <a
-                              href="https://github.com/settings/tokens"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="rounded-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            >
-                              GitHub Settings → Developer settings → Personal access tokens
-                            </a>
-                          </AlertDescription>
-                        </Alert>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <Alert className="bg-card">
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  <AlertDescription className="text-sm text-muted-foreground">
+                    A typed URL is cloned without GitHub credentials, so it works for public repositories.
+                    For a private repository, connect GitHub and choose it on the Repositories page linked in the header.
+                  </AlertDescription>
+                </Alert>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-4">
@@ -369,9 +301,9 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                       <Zap className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold">AI-Powered Analysis</h3>
+                      <h3 className="text-sm font-semibold">Four Agents</h3>
                       <p className="text-sm text-muted-foreground">
-                        Multi-agent system analyzes your repository
+                        Planner, analyzer, generator and verifier, in sequence
                       </p>
                     </div>
                   </div>
@@ -381,9 +313,9 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                       <Github className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold">Production Ready</h3>
+                      <h3 className="text-sm font-semibold">Three Files</h3>
                       <p className="text-sm text-muted-foreground">
-                        Generates optimized CI/CD configurations
+                        Dockerfile, GitHub Actions workflow, .env.example
                       </p>
                     </div>
                   </div>
@@ -417,11 +349,11 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 </div>
               </div>
             </TabsContent>
-            
+
             <TabsContent value="progress" className="mt-6 space-y-4">
               <AgentProgress
                 sessionId={sessionId}
-                repoUrl={repoUrl}
+                repoUrl={analyzedUrl}
                 currentStep={currentStep}
                 progress={progress}
                 status={status}
@@ -429,8 +361,6 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 errors={errors}
                 techStack={techStack}
                 generatedFiles={generatedFiles}
-                onComplete={onComplete}
-                onError={onError}
                 onProgressUpdate={handleProgressUpdate}
               />
             </TabsContent>

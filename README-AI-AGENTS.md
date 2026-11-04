@@ -1,231 +1,179 @@
-# 🤖 AI Agent-Based DevOps Automation System
+# InfraMind Agents and AI Layer
 
-A true AI agent-based DevOps automation system that uses a sequential multi-agent pipeline (no LangGraph) to analyze codebases and generate production-ready CI/CD configurations.
+This document describes the four-agent pipeline in `server/agents/index.js` and the AI provider layer in `server/ai/`, as implemented. For the whole system see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 🎯 Features
+## What the pipeline produces
 
-### ✨ Multi-Agent Architecture
-- **🤔 Planner Agent**: Analyzes repository structure and creates comprehensive analysis plan
-- **🔍 Analyzer Agent**: Detects tech stack, dependencies, and project patterns
-- **⚡ Generator Agent**: Creates optimized Dockerfile, GitHub Actions, and .env files
-- **✅ Verifier Agent**: Validates configurations for security and best practices
+For one cloned repository, the pipeline returns:
 
-### 🔄 Real-Time Processing
-- **📂 GitHub Repository Cloning**: Supports both public and private repositories
-- **📡 WebSocket Communication**: Progress updates at milestones (cloning, analysis start, pipeline result, completion)
-- **⏱️ Step-by-Step Progress**: Visual progress tracking, with agent logs delivered when the pipeline finishes
-- **🚨 Error Handling**: Comprehensive error reporting and recovery
+- `generatedFiles.dockerfile`, `generatedFiles.githubActions`, `generatedFiles.envExample`: text produced by the AI layer (one call each)
+- `techStack` and `codebaseAnalysis`: computed from the cloned files, without AI
+- `verificationResults`: the verifier's review text
+- `messages` (one per agent that finished) and `errors`
 
-### 📊 Intelligent Analysis
-- **🔬 Tech Stack Detection**: Automatic detection of frameworks, languages, and tools
-- **📋 Dependency Analysis**: Analysis of package files and dependencies
-- **🏗️ Project Structure**: Deep analysis of codebase organization
-- **📈 Best Practices**: Security and performance optimization recommendations
+The server stores these with the session (`saveResult` in `server/utils/sessionStore.js`) and serves them from `GET /api/files/:sessionId`.
 
-## 🚀 Quick Start
+## Agent pipeline
 
-### Prerequisites
+```mermaid
+flowchart TD
+    Start["runAgentPipeline(owner/repo, clone path, progressCallback, meta)"]
+    Planner["plannerAgent: AI task planner, 1 call. Sees only owner/repo. Writes analysisplan and a message"]
+    Analyzer["analyzerAgent: no AI call. Scans files, reads package.json. Writes projectStructure, techStack, codebaseAnalysis"]
+    Generator["generatorAgent: AI task generator, 3 independent calls. Each success writes its own generatedFiles key"]
+    Verifier["verifierAgent: AI task verifier, 1 call, or none when no file was generated. Writes verificationResults"]
+    Report["progressCallback once: final step, progress, messages, errors"]
+    AI["server/ai generateText"]
+    Files[("temp/session-id/repo")]
 
-1. **Node.js 18+**
-2. **Novita.ai API Key** (for Llama 3 70B, set as `LLAMA_API_KEY`)
-3. **Git** (for repository cloning)
+    Start --> Planner --> Analyzer --> Generator --> Verifier --> Report
+    Planner -.-> AI
+    Generator -.-> AI
+    Verifier -.-> AI
+    Analyzer -.-> Files
+```
 
-### 1. Server Setup
+Source: `server/agents/index.js` (`plannerAgent`, `analyzerAgent`, `generatorAgent`, `verifierAgent`, `scanProjectStructure`, `analyzeTechStack`, `performDetailedAnalysis`, `createAgentWorkflow`, `runAgentPipeline`).
+
+How each agent works:
+
+| Agent | `state.progress` | AI task | Input it uses | Writes to state |
+|---|---|---|---|---|
+| Planner | 20 | `planner`, 1 call | The `owner/repo` name only | `analysisplan`, one message |
+| Analyzer | 50 | none | The cloned files: a file list (skipping `.git`, `node_modules`, `.next`, `dist`, `build`, `__pycache__` and symlinks) and `package.json` | `projectStructure`, `techStack`, `codebaseAnalysis`, one message |
+| Generator | 80 | `generator`, 3 independent calls | `techStack`, `projectStructure`, `codebaseAnalysis` | One `generatedFiles` key per successful call (`dockerfile`, `githubActions`, `envExample`); one message "Generated N of 3 files" when N > 0 |
+| Verifier | 95; 100 when its call succeeds or it is skipped; stays 95 when its call fails | `verifier`, 1 call, or none when no file was generated | The first 500 characters of each generated file | `verificationResults` and one message, only when its call succeeds |
+
+Facts worth knowing:
+
+- The agents run strictly in sequence, in a fixed order, sharing one `AgentState` object. No orchestration library is used (`createAgentWorkflow`).
+- The planner's output (`analysisplan`) is not passed to any later agent and is not saved with the session (`server/agents/index.js`, `saveResult` in `server/utils/sessionStore.js`).
+- The individual agents do not emit progress. `runAgentPipeline` calls `progressCallback` once, after the verifier (`server/agents/index.js`).
+- Each agent catches its own errors. An AI failure adds `"<Agent> Agent Error: AI providers are unavailable"` to `errors`; any other error adds `"<Agent> Agent Error: Internal error"` and is logged server-side with secrets redacted. The next agent still runs (`publicErrorMessage` in `server/agents/index.js`, `AI_UNAVAILABLE_MESSAGE` in `server/ai/errors.js`).
+- The three generator calls are independent, in the order Dockerfile, GitHub Actions workflow, `.env.example`. A failed call adds one entry such as `"Generator Agent Error: Dockerfile: AI providers are unavailable"` and the other files are kept (`generatorAgent`).
+- With no generated file, the verifier makes no AI call, adds no message and leaves `verificationResults` unset; its step reads "Review skipped: no files were generated" (`verifierAgent`).
+- When its call succeeds, the verifier's message is "Review complete: see the review text"; the review itself is `verificationResults` (`verifierAgent`).
+- The analyzer reads repository files only through `readRepoFile`, which refuses paths outside the clone and anything that is not a regular file (`server/agents/index.js`).
+
+What the analyzer detects (`analyzeTechStack`):
+
+- Primary: `node` (`package.json`), `python` (`requirements.txt` or `pyproject.toml`), `go` (`go.mod`), `rust` (`Cargo.toml`), `java` (`pom.xml` or `build.gradle`), otherwise `unknown`
+- Frameworks: `react`, `nextjs`, `vue`, `express` from `package.json` dependencies; `django` (`manage.py`); `flask`, `fastapi` and `spring` when a file path contains that word
+- Databases: `mongodb` (`mongoose`) and `postgresql` (`pg`) from `package.json` dependencies
+- Tools: `docker` (a top-level `Dockerfile`); `docker-compose` (a top-level `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.yaml`); `kubernetes` when a directory named `k8s` or `kubernetes` exists at any depth (so any YAML file under one counts), or a file named `kustomization.yaml`, `kustomization.yml` or `Chart.yaml` exists at any depth. Only names are checked; other YAML files do not count. Skipped directories such as `node_modules` are never scanned (`hasKubernetesEvidence`, `COMPOSE_FILES`)
+
+### What reaches the AI providers
+
+- Planner: the repository's `owner/repo` name
+- Generator: the detected tech stack, the full file list and the `codebaseAnalysis` object, which includes the `dependencies` map from `package.json`
+- Verifier: the first 500 characters of each generated file (no call when there is none)
+
+Source file contents other than `package.json` fields are not sent. Session and user ids go only into the call records, never to a provider (`server/agents/index.js`, `AgentState.meta`).
+
+## Analysis flow
+
+The HTTP and Socket.IO sequence around the pipeline:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    participant St as Session store
+    participant P as Agent pipeline
+    participant AI as AI layer
+
+    B->>S: POST /api/analyze with sessionId (session must be cloned)
+    S->>St: status analyzing
+    S->>B: progress 30%, analyzing
+    S->>P: runAgentPipeline(owner/repo, clone path)
+    P->>AI: generateText: planner x1, generator x3, verifier x1 or x0
+    P-->>S: result
+    S->>B: progress 100% or 95%, analyzing, with messages and errors
+    S->>St: saveResult: status completed plus generated files
+    S->>B: progress 100%, completed, file names, messages, errors
+    S-->>B: 200 with techStack, codebaseAnalysis, file names, messages, errors
+    B->>S: GET /api/files/sessionId
+    S-->>B: files, techStack, codebaseAnalysis, verificationResults, messages, errors
+```
+
+Source: `server/server.js` (`/api/analyze`, `/api/files/:sessionId`), `server/agents/index.js`, `server/utils/sessionStore.js`, `server/utils/realtime.js`.
+
+The full sequence, including the clone step (10% and 25%), is diagram 4 in [ARCHITECTURE.md](ARCHITECTURE.md#4-analysis-flow).
+
+Progress events are named `progress` and carry `sessionId` plus any of `step`, `progress`, `status`, `messages`, `errors`, `error`, `techStack`, `generatedFiles` (`toProgressPayload` in `server/utils/sessionView.js`).
+
+The final `completed` event also carries `messages` and `errors`, passed through the same allow-list as `GET /api/files` (`toAgentMessages`, `toErrorList` in `server/utils/sessionView.js`). It is stored as the session's last progress snapshot, so a socket that subscribes after the run receives both.
+
+## AI provider fallback
+
+```mermaid
+flowchart TD
+    Call["generateText with a task"]
+    Chain["Route chain: AI_ROUTE_TASK, or AI_PROVIDERS"]
+    Open["Skip providers whose circuit is open, unless all are open"]
+    Next{"Another provider left?"}
+    Budget{"Time left in AI_CALL_BUDGET_MS?"}
+    Attempt["Attempt: POST baseUrl/chat/completions, timeout AI_TIMEOUT_MS"]
+    Record["Call record: stdout ai_call line and session store"]
+    Outcome{"Outcome"}
+    More{"Attempts below AI_MAX_ATTEMPTS_PER_PROVIDER?"}
+    Wait["Wait Retry-After, or backoff"]
+    Fail["Count a failed call for this provider"]
+    Ok["Return text"]
+    AllFailed["AiError all_providers_failed"]
+    Exhausted["AiError budget_exhausted"]
+
+    Call --> Chain --> Open --> Next
+    Next -- no --> AllFailed
+    Next -- yes --> Budget
+    Budget -- no --> Exhausted
+    Budget -- yes --> Attempt --> Record --> Outcome
+    Outcome -- ok --> Ok
+    Outcome -- "auth, bad_request" --> Fail
+    Outcome -- "rate_limited, server_error, timeout, network, invalid_response" --> More
+    More -- yes --> Wait --> Budget
+    More -- no --> Fail
+    Fail --> Next
+```
+
+Source: `server/ai/client.js` (`run`, `callProvider`, `attemptOnce`, `backoffMs`, `retryAfterMs`, circuit functions), `server/ai/config.js`, `server/ai/errors.js`, `server/server.js` (`setDefaultAiCallSink`), `server/utils/sessionStore.js` (`recordAiCall`).
+
+The rules, from `server/ai/client.js` and `server/ai/config.js`:
+
+- **Chain:** `AI_ROUTE_PLANNER`, `AI_ROUTE_GENERATOR` or `AI_ROUTE_VERIFIER` when set, otherwise `AI_PROVIDERS`. Names must be from `gemini`, `groq`, `openrouter`, `novita`, without duplicates.
+- **Attempts:** up to `AI_MAX_ATTEMPTS_PER_PROVIDER` (default 2) per provider per call. Each attempt's timeout is `AI_TIMEOUT_MS` (default 60000), shortened to what is left of the call budget.
+- **Retried on the same provider:** `rate_limited` (429), `server_error` (5xx), `timeout`, `network`, `invalid_response`. The wait is the `Retry-After` header for 429 and 503 (whole seconds, capped at 10 s), otherwise exponential backoff from 500 ms, capped at 8 s, with ±20% jitter.
+- **Not retried on the same provider:** `auth` (401, 403) and `bad_request` (other 4xx). The call moves to the next provider.
+- **Budget:** one call may take at most `AI_CALL_BUDGET_MS` (default 180000) across all attempts and providers. If a wait would pass the deadline, the call stops with `budget_exhausted`.
+- **Circuit breaker:** after 3 failed calls in a row a provider is skipped for 60 s; an `auth` failure skips it for 5 minutes at once. If every provider in the chain is skipped, all of them are tried anyway.
+- **Errors:** `AiError` always has the message "AI providers are unavailable" and a list of attempts holding provider, model, outcome and HTTP status only.
+- **Call records:** one per attempt, with task, provider, model, attempt, outcome, HTTP status, latency, token counts, session id and user id. The server prints each as an `ai_call ...` line (without the user id) and stores it through the session store: the `ai_calls` table with `SESSION_STORE=database`, process memory with `memory`. A failing record write never affects the call (`server/server.js`, `server/ai/client.js`).
+- **Structured output:** `generateObject` (zod schema, `<NAME>_JSON_MODE` of `json_object`, `json_schema` or `prompt`, one repair attempt on `schema_invalid`) exists in the AI layer, but the agents use only `generateText`. `npm run ai:smoke` calls both (`server/scripts/ai-smoke.js`).
+- **OpenRouter:** requests carry `provider.data_collection` from `OPENROUTER_DATA_COLLECTION` (default `deny`) and an `X-Title: InfraMind` header, plus `HTTP-Referer` when `CLIENT_URL` is set (`server/ai/providers.js`).
+
+At startup the server prints one line per task with provider names and models, never keys or URLs (`describeAiRoutes`).
+
+## Configuration
+
+Minimum for the AI layer, in `server/.env` (see `server/.env.example` for every variable):
 
 ```bash
-# Navigate to server directory
-cd server
-
-# Install dependencies
-npm install
-
-# Create environment file
-cp .env.example .env
-
-# Add your Novita.ai API key to .env
-LLAMA_API_KEY=your_novita_ai_api_key_here
-PORT=3001
-CLIENT_URL=http://localhost:5173
-
-# Start the AI agent server
-npm run dev
+AI_PROVIDERS=gemini,groq          # default chain; any of gemini, groq, openrouter, novita
+GEMINI_API_KEY=...
+GEMINI_MODEL=<a current Gemini model id>
+GROQ_API_KEY=...
+GROQ_MODEL=<a current Groq model id>
 ```
 
-### 2. Client Setup
+The server refuses to start when a provider in any route lacks its key or model (`loadAiConfig` in `server/ai/config.js`). Optional per provider: `<NAME>_BASE_URL` (https, or http for localhost) and `<NAME>_JSON_MODE`.
 
-```bash
-# Navigate to client directory
-cd client
+To check a configuration against the real providers: `RUN_LIVE_AI=1 npm run ai:smoke` in `server/` (`server/scripts/ai-smoke.js`).
 
-# Install dependencies
-npm install
+## Adding an agent
 
-# Add server URL to environment (also set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY; see README.md)
-echo "VITE_API_URL=http://localhost:3001" >> .env.local
-
-# Start the React client
-npm run dev
-```
-
-### 3. Access the Application
-
-Open your browser and navigate to `http://localhost:5173`
-
-## 🔧 API Endpoints
-
-### Repository Management
-- `POST /api/clone-repo` - Clone GitHub repository
-- `POST /api/analyze` - Trigger AI agent analysis
-- `GET /api/files/:sessionId` - Get generated files
-- `GET /api/status/:sessionId` - Get session status
-- `GET /api/sessions` - List active sessions
-
-### Enhanced Generation
-- `POST /api/devpilot` - Enhanced generation with agents
-- `GET /health` - Health check
-
-### WebSocket Events
-- `progress` - Real-time progress updates from agents
-
-## 🤖 Agent Workflow
-
-### 1. Repository Cloning (10-30s)
-```
-📂 Cloning repository from GitHub
-├── Validates repository URL
-├── Handles authentication (if needed)
-└── Downloads to temporary directory
-```
-
-### 2. Planning Phase (15-45s)
-```
-🤔 Planner Agent
-├── Analyzes project structure
-├── Identifies key files and directories
-├── Creates analysis strategy
-└── Plans optimization approach
-```
-
-### 3. Analysis Phase (30-60s)
-```
-🔍 Analyzer Agent
-├── Detects programming languages
-├── Identifies frameworks and libraries
-├── Analyzes dependencies
-├── Determines deployment patterns
-└── Assesses project complexity
-```
-
-### 4. Generation Phase (45-90s)
-```
-⚡ Generator Agent
-├── Creates optimized Dockerfile
-├── Generates GitHub Actions workflow
-├── Produces .env.example template
-├── Applies best practices
-└── Optimizes for performance
-```
-
-### 5. Verification Phase (15-30s)
-```
-✅ Verifier Agent
-├── Validates syntax correctness
-├── Checks security practices
-├── Reviews performance optimizations
-├── Ensures compliance standards
-└── Provides improvement recommendations
-```
-
-## 📁 Project Structure
-
-```
-├── server/
-│   ├── agents/
-│   │   └── index.js          # Multi-agent system (sequential pipeline)
-│   ├── server.js             # Express server with WebSocket
-│   ├── index.js              # Legacy function (fallback)
-│   ├── package.json          # Server dependencies
-│   └── .env.example          # Environment template
-├── client/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── AgentProgress.tsx      # Real-time progress UI
-│   │   │   └── AgentGenerationForm.tsx # Enhanced form
-│   │   ├── lib/
-│   │   │   └── agentApi.ts            # WebSocket API client (not currently imported; reads VITE_SERVER_URL)
-│   │   └── pages/
-│   │       └── EnhancedDashboard.tsx  # Updated dashboard
-│   └── package.json          # Client dependencies
-└── README-AI-AGENTS.md       # This documentation
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-```bash
-# Required
-LLAMA_API_KEY=your_novita_ai_api_key_here
-PORT=3001
-CLIENT_URL=http://localhost:5173
-
-# GitHub repository access (repo listing and private repos via GitHub OAuth)
-GITHUB_CLIENT_ID=your_github_oauth_app_client_id
-GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
-GITHUB_REDIRECT_URI=http://localhost:3001/auth/github/callback
-JWT_SECRET=your_jwt_secret
-
-# Optional (legacy useAgents:false generator only)
-MEM0_API_KEY=your_mem0_api_key_here
-KEYWORDS_AI_API_KEY=your_keywords_ai_api_key_here
-TAVILY_API_KEY=your_tavily_api_key_here
-```
-
-Private repositories are cloned with the signed-in user's GitHub OAuth token. There is no server-wide `GITHUB_TOKEN` variable.
-
-### Tech Stack Support
-
-The system automatically detects and supports:
-
-- **Frontend**: React, Vue.js, Angular, Next.js, Nuxt.js
-- **Backend**: Node.js, Python, Go, Java, .NET, PHP
-- **Databases**: PostgreSQL, MySQL, MongoDB, Redis
-- **Languages**: JavaScript, TypeScript, Python, Go, Java, C#, PHP, Rust
-- **Frameworks**: Express, FastAPI, Django, Spring, Laravel
-
-## 📊 Real-Time Features
-
-### Progress Tracking
-Socket.IO `progress` events are sent at these milestones (`server/server.js`):
-```
-📂 Cloning repository... (10%)
-📂 Repository cloned successfully (25%)
-🤖 Starting AI agent analysis... (30%)
-📋 Pipeline result: all agent messages, tech stack, errors
-✅ Analysis complete! (100%)
-```
-The individual agents do not emit progress; their messages arrive together once the pipeline finishes.
-
-### Agent Logs
-- Messages from each agent (delivered with the pipeline result)
-- Timestamped activity log
-- Error reporting and recovery
-- Tech stack detection results
-
-### Generated Outputs
-- **Dockerfile**: Multi-stage, optimized, secure
-- **GitHub Actions**: Complete CI/CD with testing
-- **.env.example**: Environment variable template
-- **Verification Report**: Security and best practices
-
-## 🛠️ Advanced Usage
-
-### Custom Agent Configuration
-
-`createAgentWorkflow()` takes no options. To add an agent, write an `async (state) => state` function in `server/agents/index.js` and add it to the sequence in `createAgentWorkflow`'s `invoke`:
+`createAgentWorkflow()` takes no options. Write an `async (state) => state` function in `server/agents/index.js` and add it to the sequence in `invoke`:
 
 ```javascript
-// server/agents/index.js
 state = await plannerAgent(state);
 state = await analyzerAgent(state);
 state = await generatorAgent(state);
@@ -233,68 +181,17 @@ state = await verifierAgent(state);
 // state = await yourNewAgent(state);
 ```
 
-### WebSocket Integration
+A new agent that calls the AI layer must use one of the tasks in `TASKS` (`planner`, `generator`, `verifier`) or add a task there and in `ROUTE_VARS` (`server/ai/config.js`).
 
-`AgentAPI` (`client/src/lib/agentApi.ts`) exists but no page imports it today, and it reads `VITE_SERVER_URL` rather than `VITE_API_URL`. The running UI connects through `AgentProgress.tsx` using `VITE_API_URL`.
+## Tests
 
-```javascript
-// Frontend WebSocket usage
-import { AgentAPI } from '@/lib/agentApi';
+`npm test` in `server/` runs the `node --test` suite in `server/test/` (`server/package.json`). It uses local fakes for GitHub, Supabase and the AI providers (`server/test/fakeGitHub.js`, `fakeSupabase.js`, `fakeLlm.js`).
 
-const socket = AgentAPI.initializeSocket((progress) => {
-  console.log(`Step: ${progress.step}, Progress: ${progress.progress}%`);
-});
+## Troubleshooting
 
-const result = await AgentAPI.runCompleteWorkflow(repoUrl);
-```
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-1. **LLM API Key Issues**
-   ```bash
-   Error: Llama API Error: 401 ... (agent calls fail)
-   Solution: Add a valid Novita.ai key as LLAMA_API_KEY in server/.env
-   ```
-
-2. **Repository Access Issues**
-   ```bash
-   Error: Repository not accessible
-   Solution: For private repos, connect GitHub in the app (GitHub OAuth) and check GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET and GITHUB_REDIRECT_URI
-   ```
-
-3. **WebSocket Connection Issues**
-   ```bash
-   Error: Cannot connect to server
-   Solution: Ensure the server is running and VITE_API_URL matches its URL and port (3001 locally)
-   ```
-
-### Performance Optimization
-
-- **Sequential Processing**: Agents run one at a time, in a fixed order
-- **Caching**: Repository analysis results are cached
-- **Cleanup**: Automatic cleanup of temporary files
-- **Error Recovery**: Graceful handling of agent failures
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/new-agent`
-3. Add your changes
-4. Test the agent system: `npm test`
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - see LICENSE file for details
-
-## 🆘 Support
-
-- **Documentation**: Check this README and inline comments
-- **Issues**: Create GitHub issues for bugs or feature requests
-- **Discussions**: Use GitHub Discussions for questions
-
----
-
-**Built with ❤️ using Llama 3 70B (Novita.ai), Socket.IO, and modern web technologies** 
+| Symptom | Cause in the code |
+|---|---|
+| The server exits at startup listing `AI_PROVIDERS` or a `<NAME>_API_KEY` / `<NAME>_MODEL` problem | `loadAiConfig` rejected the configuration (`server/ai/config.js`) |
+| `errors` contains "AI providers are unavailable" | Every provider in that task's chain failed, or the call budget ran out; the `ai_call` lines show each attempt's outcome |
+| The session completed but has no files | All three generator calls failed; `errors` has one `Generator Agent Error:` entry per file (`generatorAgent`) |
+| No progress events in the browser | The socket was refused (`AUTH_REQUIRED` / `AUTH_UNAVAILABLE`), or it is not subscribed to the session; check `VITE_API_URL` points at the server |

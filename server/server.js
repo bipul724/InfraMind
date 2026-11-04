@@ -33,7 +33,8 @@ import {
 import { cloneRepository, getCloneLimits, CloneError, CLONE_ERRORS } from './utils/git.js';
 import { createSupabaseVerifier, describeSupabaseConfigProblem, requireUser } from './utils/auth.js';
 import { attachRealtime } from './utils/realtime.js';
-import { toStatusResponse, toFilesResponse } from './utils/sessionView.js';
+import { toStatusResponse, toFilesResponse, toAgentMessages, toErrorList } from './utils/sessionView.js';
+import { resolvePort } from './utils/port.js';
 import {
   StoreUnavailableError,
   createConnectionStoreFromEnv,
@@ -56,7 +57,7 @@ const io = new Server(server, {
 });
 
 
-const PORT = process.env.PORT || 3001;
+const PORT = resolvePort(process.env);
 const TEMP_DIR = path.join(process.cwd(), 'temp');
 
 // One Supabase verifier shared by HTTP routes and Socket.IO.
@@ -131,19 +132,10 @@ const isSessionStoreDown = (error) => error instanceof SessionStoreUnavailableEr
 
 // API Routes
 
-// Health check
+// Liveness check (Render's healthCheckPath and the test helpers' startup wait).
+// Public, so it returns no process details, and it queries no database or service.
 app.get('/health', (req, res) => {
-  try {
-    const healthStatus = getHealthStatus();
-    res.json(healthStatus);
-  } catch (error) {
-    logger.error('Health check failed', error);
-    res.status(500).json({ 
-      status: 'unhealthy', 
-      error: 'Health check failed',
-      timestamp: new Date().toISOString() 
-    });
-  }
+  res.json(getHealthStatus());
 });
 
 // Operator-only endpoints: enabled only when METRICS_TOKEN (32+ characters) is set,
@@ -719,6 +711,7 @@ async function handleCloneRequest(req, res) {
   }
   const sessionId = session.id;
   const clonePath = resolveSessionClonePath(TEMP_DIR, sessionId);
+  const cloneStartedAt = Date.now();
 
   emitProgress(sessionId, {
     step: 'Cloning repository...',
@@ -735,6 +728,8 @@ async function handleCloneRequest(req, res) {
       maxSizeBytes
     });
   } catch (error) {
+    // Analytics get timing and outcome only: no user, repository, URL or error text
+    performanceMonitor.trackAgentSession(sessionId, 'clone', Date.now() - cloneStartedAt, { outcome: 'failed' });
     const cloneError = error instanceof CloneError ? error : new CloneError('CLONE_FAILED');
     const details = error instanceof CloneError ? error.details : error;
 
@@ -756,6 +751,7 @@ async function handleCloneRequest(req, res) {
     console.error(`Clone failed [${cloneError.code}] session=${sessionId} repo=${fullName}: ${redactSecrets(details, [token])}`);
     return sendCloneError(res, cloneError.code);
   }
+  performanceMonitor.trackAgentSession(sessionId, 'clone', Date.now() - cloneStartedAt, { outcome: 'ok' });
 
   try {
     await sessionStore.update(sessionId, { status: 'cloned', clonedAt: new Date() });
@@ -809,7 +805,15 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     return res.status(400).json({ error: 'Repository not ready for analysis' });
   }
 
+  let analysisStartedAt = null;
+  const trackAnalysis = (outcome, files) => {
+    if (analysisStartedAt === null) return;
+    performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - analysisStartedAt, { outcome, files });
+    analysisStartedAt = null;
+  };
+
   const markFailed = async () => {
+    trackAnalysis('failed', 0);
     try {
       await sessionStore.update(sessionId, { status: 'failed', error: 'Analysis failed' });
     } catch {
@@ -830,6 +834,7 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
       if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
       throw error;
     }
+    analysisStartedAt = Date.now();
     
     emitProgress(sessionId, {
       step: 'Starting AI agent analysis...',
@@ -842,8 +847,8 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
       emitProgress(sessionId, {
         step: data.step,
         progress: data.progress,
-        messages: data.messages,
-        errors: data.errors,
+        messages: toAgentMessages(data.messages),
+        errors: toErrorList(data.errors),
         status: 'analyzing'
       });
     };
@@ -865,12 +870,20 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
       return sendSessionStoreUnavailable(res);
     }
     
+    const generatedFileNames = Object.keys(result.generatedFiles);
+    trackAnalysis('ok', generatedFileNames.length);
+    // messages and errors ride on the final event too, so the stored snapshot that late
+    // subscribers receive carries them
+    const messages = toAgentMessages(result.messages);
+    const errors = toErrorList(result.errors);
     emitProgress(sessionId, {
       step: 'Analysis complete!',
       progress: 100,
       status: 'completed',
       techStack: result.techStack,
-      generatedFiles: Object.keys(result.generatedFiles)
+      generatedFiles: generatedFileNames,
+      messages,
+      errors
     });
     
     res.json({
@@ -878,8 +891,9 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
       sessionId,
       techStack: result.techStack,
       codebaseAnalysis: result.codebaseAnalysis,
-      generatedFiles: Object.keys(result.generatedFiles),
-      messages: result.messages
+      generatedFiles: generatedFileNames,
+      messages,
+      errors
     });
     
   } catch (error) {
@@ -1014,6 +1028,7 @@ async function removeSessionDirectories(deletedIds = []) {
 }
 
 async function cleanupExpiredSessions() {
+  performanceMonitor.cleanupSessions();
   const deletedIds = await sessionStore.deleteExpired(new Date());
   const removedDirectories = await removeSessionDirectories(deletedIds);
   return { deletedSessions: deletedIds.length, removedDirectories };

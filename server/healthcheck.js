@@ -1,4 +1,5 @@
 import http from 'http';
+import { resolvePort } from './utils/port.js';
 
 /**
  * Health check script for Docker containers
@@ -7,7 +8,7 @@ import http from 'http';
 
 const options = {
   hostname: 'localhost',
-  port: process.env.PORT || 3000,
+  port: resolvePort(process.env),
   path: '/health',
   method: 'GET',
   timeout: 2000

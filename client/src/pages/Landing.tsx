@@ -36,14 +36,14 @@ export const Landing = () => {
   const [currentAgentIndex, setCurrentAgentIndex] = useState(0);
   
   const agents = [
-    { name: "Planner Agent", description: "Analyzes codebase structure", icon: <Brain className="h-5 w-5" /> },
+    { name: "Planner Agent", description: "Asks the AI for an analysis plan", icon: <Brain className="h-5 w-5" /> },
     {
       name: "Analyzer Agent",
-      description: "Detects tech stack and dependencies",
+      description: "Scans files, detects the tech stack",
       icon: <Search className="h-5 w-5" />
     },
-    { name: "Generator Agent", description: "Creates CI/CD pipelines", icon: <Settings className="h-5 w-5" /> },
-    { name: "Verifier Agent", description: "Validates and optimizes output", icon: <CheckCircle className="h-5 w-5" /> }
+    { name: "Generator Agent", description: "Writes the three DevOps files", icon: <Settings className="h-5 w-5" /> },
+    { name: "Verifier Agent", description: "Asks the AI to review the files", icon: <CheckCircle className="h-5 w-5" /> }
   ];
 
   // Cycle through agents every 3 seconds
@@ -57,121 +57,121 @@ export const Landing = () => {
   const features = [
     {
       icon: <Bot className="h-6 w-6" />,
-      title: "Multi-Agent AI Orchestration",
-      description: "Four specialized AI agents work in harmony: Planner analyzes structure, Analyzer detects tech stack, Generator creates pipelines, and Verifier ensures quality.",
-      tech: "Sequential Agents + Llama 3 70B",
-      highlight: "NEW"
+      title: "Four Agents in Sequence",
+      description: "Planner, analyzer, generator and verifier run one after another on a shared state. The planner, generator and verifier call the AI layer; the analyzer works on the cloned files.",
+      tech: "Sequential pipeline · 5 AI calls per run",
+      highlight: "AGENTS"
     },
     {
       icon: <Search className="h-6 w-6" />,
-      title: "Code Analysis",
-      description: "Agents scan your repository's file structure and dependency manifests, then Llama 3 70B interprets its frameworks, dependencies and architectural patterns.",
-      tech: "Repository Scan + Novita.ai",
+      title: "Repository Scan",
+      description: "The analyzer lists the repository's files and reads package.json to detect the primary language, frameworks, databases and tools. This step makes no AI call.",
+      tech: "File list + package.json",
       highlight: "ANALYSIS"
     },
     {
-      icon: <Database className="h-6 w-6" />,
-      title: "Persistent Memory",
-      description: "Mem0 provides persistent memory across projects, enabling personalized DevOps recommendations that improve with every interaction.",
-      tech: "Mem0 + Vector DB",
-      highlight: "MEMORY"
+      icon: <Brain className="h-6 w-6" />,
+      title: "Configurable AI Providers",
+      description: "The operator picks the providers for each task. A failed call is retried, then passed to the next provider in that task's chain.",
+      tech: "gemini · groq · openrouter · novita",
+      highlight: "PROVIDERS"
     },
     {
-      icon: <Monitor className="h-6 w-6" />,
-      title: "Real-time Observability",
-      description: "Keywords AI powers comprehensive monitoring, logging, and analytics for complete visibility into your AI-driven DevOps pipeline performance.",
-      tech: "Keywords AI + Metrics",
-      highlight: "MONITORING"
+      icon: <Lock className="h-6 w-6" />,
+      title: "GitHub Connection",
+      description: "Connect GitHub to list your repositories and analyze private ones you can access. The token stays on the server, encrypted, and disconnecting revokes it.",
+      tech: "GitHub OAuth · AES-256-GCM",
+      highlight: "PRIVATE REPOS"
     },
     {
       icon: <Shield className="h-6 w-6" />,
-      title: "Supabase Backend Infrastructure",
-      description: "Secure, scalable backend powered by Supabase with built-in authentication, a Postgres database, and row-level security that keeps each user's files private.",
-      tech: "Supabase",
-      highlight: "SECURE"
+      title: "Supabase Sign-in",
+      description: "Sign in with email, GitHub or Google through Supabase Auth. The server checks your access token on account API routes and live-progress connections.",
+      tech: "Supabase Auth",
+      highlight: "AUTH"
     },
     {
       icon: <Workflow className="h-6 w-6" />,
-      title: "Automated CI/CD Generation",
-      description: "Generate production-ready Docker configurations, GitHub Actions workflows, and deployment scripts tailored to your specific technology stack.",
-      tech: "AI-Generated",
-      highlight: "AUTOMATED"
+      title: "Three Generated Files",
+      description: "A Dockerfile, a GitHub Actions workflow and a .env.example, generated from the detected tech stack and file list. Download them or save them to your account.",
+      tech: "AI-generated",
+      highlight: "OUTPUT"
     }
   ];
 
   const techStack = [
-    { 
-      name: "Llama 3 70B", 
-      description: "Advanced large language model via Novita.ai",
-      category: "AI Core",
-      features: ["Code Understanding", "Pattern Recognition", "Best Practices"],
-      provider: "Novita.ai"
+    {
+      name: "AI provider layer",
+      description: "OpenAI-format chat completions, chosen per task by configuration",
+      category: "AI",
+      features: ["Gemini, Groq, OpenRouter, Novita", "Per-task fallback chains", "Retries and time budget"],
+      provider: "InfraMind server"
     },
-    { 
-      name: "Agent Pipeline", 
-      description: "Custom sequential multi-agent workflow",
+    {
+      name: "Agent Pipeline",
+      description: "Four agents run in a fixed order on one shared state",
       category: "Agent System",
-      features: ["Agent Sequencing", "Shared State", "LLM Retry Handling"],
-      provider: "InfraMind"
+      features: ["Planner", "Analyzer", "Generator", "Verifier"],
+      provider: "InfraMind server"
     },
-    { 
-      name: "Tavily", 
-      description: "AI-powered search and research platform",
-      category: "Search & Analysis",
-      features: ["Code Search", "Documentation Lookup", "Best Practice Research"],
-      provider: "Tavily"
+    {
+      name: "Express + Socket.IO",
+      description: "API server with authenticated live-progress rooms",
+      category: "Backend",
+      features: ["Supabase token check on API routes", "Rate-limited clone and analyze", "Progress per session"],
+      provider: "Node.js"
     },
-    { 
-      name: "Mem0", 
-      description: "Persistent memory and context for AI",
-      category: "Memory & Context",
-      features: ["Project Memory", "User Preferences", "Historical Context"],
-      provider: "Mem0"
+    {
+      name: "GitHub",
+      description: "Repository access through a separate OAuth App",
+      category: "Repositories",
+      features: ["Repository and organization lists", "Shallow git clone", "Token revocation"],
+      provider: "GitHub"
     },
-    { 
-      name: "Supabase", 
-      description: "Open-source Postgres development platform",
-      category: "Backend Services",
-      features: ["Authentication", "Postgres Database", "Row-Level Security", "OAuth Providers"],
+    {
+      name: "Supabase",
+      description: "Authentication and Postgres tables",
+      category: "Auth & Data",
+      features: ["Email, GitHub and Google sign-in", "Saved files", "Encrypted GitHub connections (optional)"],
       provider: "Supabase"
     },
-    { 
-      name: "Keywords AI", 
-      description: "AI observability and monitoring",
-      category: "Observability",
-      features: ["Performance Tracking", "Usage Analytics", "Error Monitoring"],
-      provider: "Keywords AI"
+    {
+      name: "Prisma + Postgres",
+      description: "Optional storage for analysis sessions and AI call records",
+      category: "Sessions",
+      features: ["Completed sessions survive restarts", "24-hour expiry", "Metadata-only AI call log"],
+      provider: "SESSION_STORE=database"
     }
   ];
 
   const workflows = [
     {
       step: "1",
-      title: "Repository Analysis",
-      description: "Planner Agent analyzes codebase structure while Analyzer Agent detects tech stack",
+      title: "Pick a Repository",
+      description: "Choose one of your connected GitHub repositories, or enter a public repository URL",
       icon: <Search className="h-5 w-5" />,
-      details: "File-structure scan and dependency detection, interpreted by Llama 3 70B"
+      details: "Selected repositories use your stored GitHub connection"
     },
     {
-      step: "2", 
-      title: "AI Agent Coordination",
-      description: "The planner, analyzer, generator and verifier run in sequence, each building on the previous result",
+      step: "2",
+      title: "Shallow Clone",
+      description: "The server clones the repository with git --depth 1 into a directory for this session",
       icon: <Network className="h-5 w-5" />,
-      details: "Shared state between agents, with progress updates over Socket.IO"
+      details: "Size limit 200 MB and timeout 120 s by default"
     },
     {
       step: "3",
-      title: "Pipeline Generation",
-      description: "Generator Agent creates tailored CI/CD pipelines and infrastructure code",
+      title: "Four Agents",
+      description: "Planner, analyzer, generator and verifier run in sequence and produce three files",
       icon: <Cpu className="h-5 w-5" />,
-      details: "Production-ready Docker, GitHub Actions, and deployment configs"
+      details: "Progress milestones over Socket.IO, for your sessions only"
     },
     {
       step: "4",
-      title: "Verification & Learning",
-      description: "Verifier Agent validates output while Mem0 stores insights for future improvements",
+      title: "Download or Save",
+      description: "Download the Dockerfile, GitHub Actions workflow and .env.example, or save them to your account",
       icon: <RefreshCw className="h-5 w-5" />,
-      details: "Quality assurance + persistent memory for continuous learning"
+      details: "Sessions expire 24 hours after creation"
     }
   ];
 
@@ -186,7 +186,7 @@ export const Landing = () => {
               </div>
               <div className="flex flex-col leading-tight">
                 <span className="text-base font-semibold tracking-tight">InfraMind</span>
-                <span className="text-[11px] text-muted-foreground">Powered by Supabase</span>
+                <span className="text-[11px] text-muted-foreground">Repository to DevOps files</span>
               </div>
             </div>
             <div className="hidden items-center gap-1 md:flex">
@@ -203,7 +203,7 @@ export const Landing = () => {
                 Technology
               </a>
               <Button onClick={() => navigate('/auth')} className="ml-3">
-                Get Started Free
+                Get Started
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
@@ -234,7 +234,7 @@ export const Landing = () => {
                 Technology
               </a>
               <Button onClick={() => navigate('/auth')} className="mt-2 w-full">
-                Get Started Free
+                Get Started
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
@@ -255,17 +255,17 @@ export const Landing = () => {
                 <span className="text-primary"><span className="whitespace-nowrap">four-agent</span> pipeline</span>
               </h1>
               <p className="mt-6 max-w-lg text-lg leading-8 text-muted-foreground">
-                Four specialized AI agents collaborate to understand, analyze, and automate your entire DevOps pipeline.
-                <span className="font-medium text-foreground"> Powered by Llama 3 70B and Supabase.</span>
+                Four agents analyze a GitHub repository and write a Dockerfile, a GitHub Actions workflow and a .env.example.
+                <span className="font-medium text-foreground"> AI providers are chosen by the operator; sign-in runs on Supabase.</span>
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Button onClick={() => navigate('/auth')} size="lg">
-                  Start Free Trial
+                  Get Started
                   <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button variant="outline" onClick={() => navigate('/demo')} size="lg">
                   <Play className="h-4 w-4" />
-                  Watch AI Agents Demo
+                  Try the Scripted Demo
                 </Button>
               </div>
               <div className="mt-10 flex items-center gap-2.5 border-t border-border pt-6 font-mono text-xs text-muted-foreground">
@@ -282,7 +282,7 @@ export const Landing = () => {
                 </div>
                 <Badge variant="outline" className="shrink-0 gap-1.5 font-mono text-[11px]">
                   <span className="h-1.5 w-1.5 rounded-full bg-status-running" />
-                  live preview
+                  illustration
                 </Badge>
               </div>
               <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -337,10 +337,10 @@ export const Landing = () => {
           <div className="container mx-auto px-4 py-20 sm:px-6 lg:py-24">
             <div className="mb-12 max-w-2xl">
               <p className="eyebrow mb-3">What it does</p>
-              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Automated Pipeline Architecture</h2>
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">What the Pipeline Does</h2>
               <p className="mt-4 text-lg leading-8 text-muted-foreground">
-                Four specialized agents collaborate in an automated pipeline to produce
-                production-grade deployment configurations.
+                Four agents run in a fixed order to produce deployment configuration
+                for one repository.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -377,7 +377,7 @@ export const Landing = () => {
             <div className="mb-12 max-w-2xl">
               <p className="eyebrow mb-3">Under the hood</p>
               <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Technology stack</h2>
-              <p className="mt-4 text-lg leading-8 text-muted-foreground">Built on AI models and cloud-native infrastructure.</p>
+              <p className="mt-4 text-lg leading-8 text-muted-foreground">The parts the client and server are built from.</p>
             </div>
             <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
               <div
@@ -427,7 +427,7 @@ export const Landing = () => {
               <p className="eyebrow mb-3">Execution flow</p>
               <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">How the Multi-Agent Pipeline Works</h2>
               <p className="mt-4 text-lg leading-8 text-muted-foreground">
-                Deterministic sequence from repository ingestion to verified CI/CD artifact creation.
+                A fixed sequence from repository to generated files.
               </p>
             </div>
             <ol className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -460,10 +460,10 @@ export const Landing = () => {
             <div className="grid gap-8 rounded-xl bg-primary px-6 py-10 text-primary-foreground sm:px-10 md:grid-cols-[1fr_auto] md:items-center lg:px-12 lg:py-12">
               <div className="max-w-2xl">
                 <h2 className="text-2xl font-semibold tracking-tight text-primary-foreground sm:text-3xl">
-                  Ready to Automate Your DevOps Pipeline?
+                  Generate DevOps Files for a Repository
                 </h2>
                 <p className="mt-3 text-primary-foreground/80">
-                  Connect your repository and generate Docker and CI/CD pipelines in seconds.
+                  Sign in, pick a repository and get a Dockerfile, a GitHub Actions workflow and a .env.example.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
@@ -472,7 +472,7 @@ export const Landing = () => {
                   size="lg"
                   className="bg-card text-primary hover:bg-card/90 focus-visible:ring-card focus-visible:ring-offset-primary"
                 >
-                  Start Free Trial
+                  Get Started
                   <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button
@@ -482,7 +482,7 @@ export const Landing = () => {
                   className="border-primary-foreground/30 bg-transparent text-primary-foreground shadow-none hover:border-primary-foreground/50 hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:ring-card focus-visible:ring-offset-primary"
                 >
                   <Github className="h-4 w-4" />
-                  View on GitHub
+                  Open GitHub
                 </Button>
               </div>
             </div>
@@ -501,11 +501,11 @@ export const Landing = () => {
                 <span className="font-semibold tracking-tight">InfraMind</span>
               </div>
               <p className="max-w-sm text-sm leading-6 text-muted-foreground">
-                Multi-agent AI system for automated DevOps with authentication, Postgres data, and row-level security.
+                Four-agent pipeline that generates DevOps files for GitHub repositories.
               </p>
               <div className="font-mono text-[11px] leading-5 text-muted-foreground">
-                <div>AI Core: Llama 3 70B • Tavily • Mem0</div>
-                <div>Backend: Supabase Cloud Infrastructure</div>
+                <div>AI: configurable providers (gemini, groq, openrouter, novita)</div>
+                <div>Auth: Supabase • Server: Express + Socket.IO</div>
               </div>
             </div>
             <div>
@@ -525,14 +525,14 @@ export const Landing = () => {
               </h3>
               <div className="space-y-2 text-sm text-foreground/80">
                 <div>Sequential Agent Pipeline</div>
-                <div>Llama 3 70B Model</div>
-                <div>Supabase Backend</div>
+                <div>Configurable AI Providers</div>
+                <div>Supabase Auth</div>
                 <div>Docker & GitHub Actions</div>
               </div>
             </div>
           </div>
           <div className="mt-10 border-t border-border pt-6 text-xs text-muted-foreground">
-            <p>&copy; 2024 InfraMind. Built with Supabase and modern AI technologies.</p>
+            <p>&copy; InfraMind</p>
           </div>
         </div>
       </footer>

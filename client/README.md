@@ -1,23 +1,55 @@
-# InfraMind Frontend
+# InfraMind Client
 
-Modern React application built with TypeScript, Tailwind CSS, and Vite for the InfraMind AI-powered DevOps platform.
+React 18 + TypeScript app built with Vite and Tailwind CSS (`package.json`).
 
-## Getting Started
+## Getting started
 
 1. Install dependencies:
    ```bash
    npm install
    ```
 
-2. Start the development server:
+2. Configure the environment:
+   ```bash
+   cp .env.example .env.local
+   ```
+   The app reads three variables:
+
+   | Variable | Read in | Without it |
+   |---|---|---|
+   | `VITE_SUPABASE_URL` | `src/lib/supabase.ts` | Sign-in cannot work; an error is logged |
+   | `VITE_SUPABASE_ANON_KEY` | `src/lib/supabase.ts` | Same |
+   | `VITE_API_URL` | `src/lib/api.ts` | `http://localhost:10000` |
+
+   Vite inlines `VITE_*` variables at build time: restart the dev server or rebuild after changing them, and never put a secret key in one.
+
+3. Start the development server:
    ```bash
    npm run dev
    ```
 
-3. Open [http://localhost:8080](http://localhost:8080) to view it in the browser.
+4. Open [http://localhost:5173](http://localhost:5173) (`vite.config.ts`).
 
-## Available Scripts
+## Scripts
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
+- `npm run dev`: start the Vite development server
+- `npm run build`: `tsc && vite build`, output in `dist/`
+- `npm run lint`: ESLint with `--max-warnings 0`
+- `npm run preview`: serve the production build
+
+## Routes
+
+From `src/App.tsx`:
+
+| Path | Page | Access |
+|---|---|---|
+| `/` | `Landing` | public |
+| `/demo` | `Demo` (scripted sample, no server calls) | public |
+| `/auth`, `/sign-in/*`, `/sign-up/*` | `Auth` | public |
+| `/auth/success` | `AuthSuccess` (finishes a GitHub connection) | public |
+| `/dashboard` | `ModernDashboard`; `?session=<id>` opens one analysis | signed in |
+| `/select-repo` | `RepoSelection` | signed in |
+| `/auth/github/callback` | `GitHubCallback` (forwards to the server) | signed in |
+| `/profile`, `/login` | redirects | signed in |
+
+Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/lib/agentApi.ts`, `src/lib/mockData.ts`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runAgentPipeline, scanProjectStructure } from '../agents/index.js';
+import { analyzeTechStack, runAgentPipeline, scanProjectStructure } from '../agents/index.js';
 import { resetDefaultAiClient } from '../ai/index.js';
 
 let fixtureDir;
@@ -29,6 +29,15 @@ const AI_ENV = {
 };
 const savedEnv = {};
 let stubMode = 'ok';
+// Optional per-request failure: (requestBody) => true fails that request (SERVER-FIX)
+let failWhen = null;
+const PROMPTS = {
+  dockerfile: 'Generate an optimized Dockerfile for this project',
+  githubActions: 'Generate a complete GitHub Actions CI/CD workflow',
+  envExample: 'Generate a comprehensive .env.example file',
+  verifier: 'Verify and validate all generated files'
+};
+const countRequests = (bodies, prompt) => bodies.filter((body) => body.includes(prompt)).length;
 const ERROR_BODY_MARKER = 'SECRET_BODY_MARKER';
 
 before(async () => {
@@ -61,7 +70,7 @@ before(async () => {
   globalThis.fetch = async (url, options = {}) => {
     capturedBodies.push(String(options.body ?? ''));
     capturedRequests.push({ url: String(url), headers: { ...options.headers } });
-    if (stubMode === 'fail') {
+    if (stubMode === 'fail' || (failWhen && failWhen(String(options.body ?? '')))) {
       // A provider error body that echoes the key and a marker: neither may reach the result
       return new Response(JSON.stringify({ error: { message: `${ERROR_BODY_MARKER} invalid key ${STUB_KEY}` } }), { status: 500 });
     }
@@ -142,10 +151,13 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
       resetDefaultAiClient();
     }
 
+    // SERVER-FIX: one entry per failed generator call; with no files the verifier
+    // makes no call, so it reports no error
     assert.deepEqual(result.errors, [
       'Planner Agent Error: AI providers are unavailable',
-      'Generator Agent Error: AI providers are unavailable',
-      'Verifier Agent Error: AI providers are unavailable'
+      'Generator Agent Error: Dockerfile: AI providers are unavailable',
+      'Generator Agent Error: GitHub Actions workflow: AI providers are unavailable',
+      'Generator Agent Error: .env.example: AI providers are unavailable'
     ]);
     const serialised = JSON.stringify(result);
     assert.ok(!serialised.includes(ERROR_BODY_MARKER));
@@ -171,8 +183,9 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
     }
     assert.deepEqual(result.errors, [
       'Planner Agent Error: Internal error',
-      'Generator Agent Error: Internal error',
-      'Verifier Agent Error: Internal error'
+      'Generator Agent Error: Dockerfile: Internal error',
+      'Generator Agent Error: GitHub Actions workflow: Internal error',
+      'Generator Agent Error: .env.example: Internal error'
     ]);
     const serialised = JSON.stringify(result.errors);
     assert.ok(!serialised.includes('AI_PROVIDERS'));
@@ -191,5 +204,102 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
       assert.ok(!body.includes('SESSION_ID_MARKER'));
       assert.ok(!body.includes('USER_ID_MARKER'));
     }
+  });
+});
+
+describe('generator and verifier (SERVER-FIX)', () => {
+  const run = async (predicate) => {
+    resetDefaultAiClient();
+    failWhen = predicate;
+    const before = capturedBodies.length;
+    try {
+      const result = await runAgentPipeline('octocat/Hello-World', fixtureDir);
+      return { result, bodies: capturedBodies.slice(before) };
+    } finally {
+      failWhen = null;
+      resetDefaultAiClient();
+    }
+  };
+
+  test('one failed generator call keeps the other two files', { timeout: 60000 }, async () => {
+    const { result, bodies } = await run((body) => body.includes(PROMPTS.dockerfile));
+    assert.deepEqual(Object.keys(result.generatedFiles), ['githubActions', 'envExample']);
+    assert.deepEqual(result.errors, ['Generator Agent Error: Dockerfile: AI providers are unavailable']);
+    assert.equal(result.errors.filter((error) => error.startsWith('Generator Agent Error:')).length, 1);
+    const generator = result.messages.filter((m) => m.agent === 'generator');
+    assert.deepEqual(generator.map((m) => m.message), ['Generated 2 of 3 files']);
+    assert.equal(countRequests(bodies, PROMPTS.verifier), 1, 'the verifier still reviews the files that exist');
+    assert.ok(result.messages.some((m) => m.agent === 'verifier'));
+    assert.equal(result.progress, 100);
+  });
+
+  test('all three generator calls fail: no files, three errors, no verifier call or message', { timeout: 60000 }, async () => {
+    const generatorPrompts = [PROMPTS.dockerfile, PROMPTS.githubActions, PROMPTS.envExample];
+    const { result, bodies } = await run((body) => generatorPrompts.some((prompt) => body.includes(prompt)));
+    assert.deepEqual(result.generatedFiles, {});
+    assert.deepEqual(result.errors, [
+      'Generator Agent Error: Dockerfile: AI providers are unavailable',
+      'Generator Agent Error: GitHub Actions workflow: AI providers are unavailable',
+      'Generator Agent Error: .env.example: AI providers are unavailable'
+    ]);
+    assert.equal(countRequests(bodies, PROMPTS.verifier), 0, 'no verifier AI call');
+    assert.ok(!result.messages.some((m) => m.agent === 'verifier'), 'no verifier message');
+    assert.ok(!result.messages.some((m) => m.agent === 'generator'), 'no generator message without files');
+    assert.equal(result.verificationResults, undefined);
+    assert.equal(result.progress, 100);
+    assert.equal(result.currentStep, 'Review skipped: no files were generated');
+  });
+
+  test('a successful verifier reports a neutral message, never "production ready"', { timeout: 60000 }, async () => {
+    const { result } = await run(null);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.messages.find((m) => m.agent === 'verifier')?.message, 'Review complete: see the review text');
+    assert.deepEqual(result.messages.find((m) => m.agent === 'generator')?.message, 'Generated 3 of 3 files');
+    assert.equal(result.verificationResults, 'ok');
+    assert.ok(!JSON.stringify(result.messages).toLowerCase().includes('production ready'));
+  });
+});
+
+describe('analyzeTechStack: kubernetes and compose detection (SERVER-FIX)', () => {
+  // Builds a fixture repository from relative file paths, then runs the analyzer's own scan
+  const detect = async (files) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'inframind-detect-'));
+    try {
+      for (const file of files) {
+        await fs.mkdir(path.join(dir, path.dirname(file)), { recursive: true });
+        await fs.writeFile(path.join(dir, file), 'x: 1\n');
+      }
+      return (await analyzeTechStack(dir, await scanProjectStructure(dir))).tools;
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  const cases = [
+    { files: ['pnpm-lock.yaml'], kubernetes: false, compose: false },
+    { files: ['.pre-commit-config.yaml'], kubernetes: false, compose: false },
+    { files: ['.github/workflows/ci.yml', 'config/settings.yaml', 'helm/values.yaml'], kubernetes: false, compose: false },
+    { files: ['k8s/deployment.yaml'], kubernetes: true, compose: false },
+    { files: ['deploy/kubernetes/service.yml'], kubernetes: true, compose: false },
+    { files: ['charts/app/Chart.yaml'], kubernetes: true, compose: false },
+    { files: ['kustomization.yml'], kubernetes: true, compose: false },
+    { files: ['overlays/prod/kustomization.yaml'], kubernetes: true, compose: false },
+    { files: ['compose.yaml'], kubernetes: false, compose: true },
+    { files: ['compose.yml'], kubernetes: false, compose: true },
+    { files: ['docker-compose.yml'], kubernetes: false, compose: true },
+    { files: ['docker-compose.yaml'], kubernetes: false, compose: true },
+    { files: ['services/api/docker-compose.yml'], kubernetes: false, compose: false }
+  ];
+
+  for (const { files, kubernetes, compose } of cases) {
+    test(`${files.join(', ')}: kubernetes ${kubernetes}, docker-compose ${compose}`, async () => {
+      const tools = await detect(files);
+      assert.equal(tools.includes('kubernetes'), kubernetes, JSON.stringify(tools));
+      assert.equal(tools.includes('docker-compose'), compose, JSON.stringify(tools));
+    });
+  }
+
+  test('a Kubernetes directory found inside a skipped directory does not count', async () => {
+    assert.ok(!(await detect(['node_modules/pkg/k8s/deployment.yaml'])).includes('kubernetes'));
   });
 });

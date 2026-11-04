@@ -132,6 +132,9 @@ function contractSuite(label, setup, { skip = false } = {}) {
         techStack: RESULT.techStack,
         codebaseAnalysis: RESULT.codebaseAnalysis,
         verificationResults: 'looks fine',
+        // SERVER-FIX D.1: stored messages and errors are returned, through the sanitizers
+        messages: RESULT.messages,
+        errors: [],
         metadata: { repoUrl: FIELDS.displayUrl, repoName: 'Hello-World', completedAt: new Date(clock.t).toISOString() }
       }));
       assert.equal(JSON.stringify(toStatusResponse(id, session)), JSON.stringify({
@@ -146,7 +149,7 @@ function contractSuite(label, setup, { skip = false } = {}) {
       }));
     });
 
-    test('a failed analyzer (null tech stack, no verification) round-trips as before', async () => {
+    test('a failed analyzer (null tech stack, no verification) round-trips, with its error', async () => {
       const { id } = await store().create(FIELDS);
       await store().saveResult(id, { generatedFiles: {}, techStack: null, codebaseAnalysis: null, messages: [], errors: ['Analyzer Agent Error: Internal error'] });
       const session = await store().get(id);
@@ -154,6 +157,8 @@ function contractSuite(label, setup, { skip = false } = {}) {
         files: {},
         techStack: null,
         codebaseAnalysis: null,
+        messages: [],
+        errors: ['Analyzer Agent Error: Internal error'],
         metadata: { repoUrl: FIELDS.displayUrl, repoName: 'Hello-World', completedAt: session.completedAt.toISOString() }
       }));
     });
