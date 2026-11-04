@@ -349,6 +349,16 @@ export function createOneTimeTokenStore({ ttlMs, maxEntries = 1000, now = Date.n
 
     sweep,
 
+    // Removes every entry and returns the live ones as [{ userId, payload }]. Expired
+    // entries go through onExpire first, as in sweep(). Used at shutdown (server.js).
+    drain() {
+      sweep();
+      const live = [];
+      for (const entry of entries.values()) live.push({ userId: entry.userId, payload: entry.payload });
+      entries.clear();
+      return live;
+    },
+
     get size() {
       return entries.size;
     }

@@ -48,9 +48,12 @@ export async function startFakeGitHub() {
   const sockets = new Set();
   let revokeStatus = 204;
   let apiFailureStatus = null;
+  let apiFailureHeaders = {};
+  let apiFailureMessage = 'fake API failure';
+  let apiDelayMs = 0; // B1.4: delay before every API GET is answered (not OAuth, not revocation)
 
-  const send = (res, status, body) => {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
+  const send = (res, status, body, headers = {}) => {
+    res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
 
@@ -105,7 +108,15 @@ export async function startFakeGitHub() {
       }
 
       if (req.method !== 'GET') return send(res, 404, { message: 'Not Found' });
-      if (apiFailureStatus) return send(res, apiFailureStatus, { message: 'fake API failure' });
+      if (apiDelayMs > 0) return void setTimeout(() => answerApi(req, res, url), apiDelayMs).unref();
+      return answerApi(req, res, url);
+    });
+  });
+
+  function answerApi(req, res, url) {
+    {
+      if (res.destroyed) return;
+      if (apiFailureStatus) return send(res, apiFailureStatus, { message: apiFailureMessage }, apiFailureHeaders);
 
       const user = userForRequest(req);
       if (!user) return send(res, 401, { message: 'Bad credentials' });
@@ -128,8 +139,8 @@ export async function startFakeGitHub() {
         return send(res, 200, repoFor(decodeURIComponent(repo[1]), decodeURIComponent(repo[2])));
       }
       return send(res, 404, { message: 'Not Found' });
-    });
-  });
+    }
+  }
   server.on('connection', (socket) => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
@@ -167,9 +178,16 @@ export async function startFakeGitHub() {
     setRevokeStatus(status) {
       revokeStatus = status;
     },
-    // Every API GET answers this status (null restores normal behaviour)
-    failApiWith(status) {
+    // Every API GET answers this status (null restores normal behaviour), optionally with
+    // response headers and a message (B1.4: GitHub's rate-limit responses)
+    failApiWith(status, { headers = {}, message = 'fake API failure' } = {}) {
       apiFailureStatus = status;
+      apiFailureHeaders = status ? headers : {};
+      apiFailureMessage = message;
+    },
+    // B1.4: every API GET waits this long before answering (0 restores normal behaviour)
+    setApiDelay(ms) {
+      apiDelayMs = ms;
     },
     requestsSince(index) {
       return requests.slice(index);

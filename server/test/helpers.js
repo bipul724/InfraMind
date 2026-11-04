@@ -153,7 +153,7 @@ export async function startServer({ envOverrides = {}, cwd } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   let exited = null;
-  child.on('exit', (code, signal) => { exited = { code, signal }; });
+  const exitPromise = new Promise((resolve) => child.on('exit', (code, signal) => { exited = { code, signal }; resolve(exited); }));
 
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
@@ -179,6 +179,15 @@ export async function startServer({ envOverrides = {}, cwd } = {}) {
     env,
     output,
     logs: () => `${output.stdout}\n${output.stderr}`,
+    // B1.4: send a signal, and wait for the exit ({ code, signal }) with a timeout
+    signal: (name) => child.kill(name),
+    waitForExit: (timeoutMs = 10000) => Promise.race([
+      exitPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('server did not exit in time')), timeoutMs).unref())
+    ]),
+    get exited() {
+      return exited;
+    },
     async stop() {
       if (exited) return;
       const done = new Promise((resolve) => child.once('exit', resolve));

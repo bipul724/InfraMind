@@ -308,7 +308,13 @@ describe('6. startup refuses an invalid or unusable session store', { skip: DB_S
 });
 
 test('SESSION_STORE=memory in production starts with a warning (no database needed)', async () => {
-  const server = await startServer({ envOverrides: { SESSION_STORE: 'memory', NODE_ENV: 'production' } });
+  // B1.4: production requires https CLIENT_URL and GITHUB_REDIRECT_URI
+  const server = await startServer({ envOverrides: {
+    SESSION_STORE: 'memory',
+    NODE_ENV: 'production',
+    CLIENT_URL: 'https://app.example.test',
+    GITHUB_REDIRECT_URI: 'https://api.example.test/auth/github/callback'
+  } });
   spawned.push(server);
   assert.ok(server.logs().includes('SESSION_STORE=memory: analysis sessions and results are lost on every restart'));
 });

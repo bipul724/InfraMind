@@ -16,6 +16,7 @@ export class PerformanceMonitor {
       requests: 0,
       totalResponseTime: 0,
       errors: 0,
+      unhandledRejections: 0, // process-level, counted by server.js (B1.4)
       sessions: new Map(), // sessionId -> { id, startTime, phases, totalDuration }, oldest first
       systemStats: {
         uptime: process.uptime(),
@@ -122,10 +123,16 @@ export class PerformanceMonitor {
         }
       },
       cpu: process.cpuUsage(),
+      // Promise rejections nobody handled; the process keeps serving (B1.4)
+      unhandledRejections: this.metrics.unhandledRejections,
       // Sessions in the analytics map (the last hour, at most 1,000), not active sessions
       trackedSessions: this.metrics.sessions.size,
       timestamp: now
     };
+  }
+
+  recordUnhandledRejection() {
+    this.metrics.unhandledRejections++;
   }
 
   // Session analytics (/api/analytics, token-gated)

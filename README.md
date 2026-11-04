@@ -80,7 +80,7 @@ Supabase setup (project, `saved_files` table, sign-in providers, redirect URLs),
 
 ## Configuration summary
 
-The server refuses to start when a required setting is missing or invalid (`startServer` in `server/server.js`):
+The server refuses to start when a required setting is missing or invalid, and lists every problem at once, naming variables but never printing values (`startServer` in `server/server.js`, `server/utils/config.js`):
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -92,9 +92,15 @@ The server refuses to start when a required setting is missing or invalid (`star
 | `<NAME>_API_KEY`, `<NAME>_MODEL` | for every provider in a route | No default model IDs |
 | `SESSION_STORE` | yes | `memory` or `database` |
 | `DATABASE_URL` | with `SESSION_STORE=database` | Postgres connection string |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` | for the GitHub connection | Not checked at startup |
-| `CLIENT_URL` | recommended | CORS origin and the target of GitHub OAuth redirects |
-| `METRICS_TOKEN` | optional | Enables `/api/metrics` and `/api/analytics` (32+ characters) |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | yes | The repository-access OAuth App; the `.env.example` placeholders are refused |
+| `GITHUB_REDIRECT_URI` | yes | Absolute http(s) URL ending in `/auth/github/callback`; https in production |
+| `CLIENT_URL` | yes | The frontend origin (`scheme://host[:port]`, no path): always an allowed CORS origin, and the target of GitHub OAuth redirects; https in production |
+| `PORT` | optional | 1-65535; default 10000 |
+| `CORS_ALLOWED_ORIGINS` | optional | More allowed origins, comma-separated, each exactly `scheme://host[:port]` |
+| `TRUST_PROXY` | optional | Number of reverse proxies in front of the server, 0-3; default 0 |
+| `RATE_LIMIT_<NAME>_MAX` | optional | Count of one rate limit, 1-100,000 (see [API](#api)) |
+| `GITHUB_TIMEOUT_MS` | optional | Timeout of GitHub API calls, 1000-60000; default 10000 |
+| `METRICS_TOKEN` | optional | Enables `/api/metrics` and `/api/analytics`; 32+ characters, a shorter value is a startup error |
 
 Every variable is listed with comments in `server/.env.example`. The client reads `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (`client/src/lib/api.ts`, `client/src/lib/supabase.ts`). Only the anon key belongs in the client: Vite bundles every `VITE_` variable into browser code.
 
@@ -110,26 +116,42 @@ Every route registered in `server/server.js`:
 | `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions` |
 | `GET /api/analytics` | same as `/api/metrics` | Clone and analysis timings and outcomes of the last hour (at most 1,000 sessions) |
 | `POST /api/github/connect` | Bearer | Issues a one-time ticket (2 minutes) to start a GitHub connection |
-| `GET /auth/github` | public, needs a valid `ticket` | Sets the OAuth state cookie and redirects to GitHub |
-| `GET /auth/github/callback` | public, needs the state cookie | Exchanges the code, redirects to `CLIENT_URL/auth/success?complete=<id>` |
+| `GET /auth/github` | public, needs a valid `ticket`; `oauth` limit | Sets the OAuth state cookie and redirects to GitHub |
+| `GET /auth/github/callback` | public, needs the state cookie; `oauth` limit | Exchanges the code, redirects to `CLIENT_URL/auth/success?complete=<id>` |
 | `POST /api/github/connect/complete` | Bearer | Claims the completion and stores the connection |
-| `POST /auth/github/discard` | public | Discards an unclaimed completion and revokes its token; always 204 |
+| `POST /auth/github/discard` | public; `oauth` limit | Discards an unclaimed completion and revokes its token; 204 |
 | `GET /api/github/status` | Bearer | Whether the user has a GitHub connection; no GitHub API call |
 | `DELETE /api/github/connection` | Bearer | Revokes the token at GitHub and deletes the connection |
-| `GET /api/github/repositories` | Bearer and a GitHub connection | The user's repositories and organizations (`page`, `per_page`, default 50) |
-| `GET /api/github/organizations/:org/repositories` | Bearer and a GitHub connection | An organization's repositories |
-| `POST /api/github/verify-repo` | Bearer and a GitHub connection | Checks access to `owner`/`repo` |
-| `POST /api/clone-repo` | Bearer, rate-limited: 10 per 10 minutes | Creates a session and clones `repositoryData` (connected repository) or `repoUrl` |
-| `POST /api/analyze` | Bearer, rate-limited: 5 per 5 minutes | Runs the agents on a `cloned` session; answers when they finish |
+| `GET /api/github/repositories` | Bearer and a GitHub connection; `githubProxy` limit | The user's repositories and organizations (`page`, `per_page`, default 50) |
+| `GET /api/github/organizations/:org/repositories` | Bearer and a GitHub connection; `githubProxy` limit | An organization's repositories |
+| `POST /api/github/verify-repo` | Bearer and a GitHub connection; `githubProxy` limit | Checks access to `owner`/`repo` |
+| `POST /api/clone-repo` | Bearer; `clone` limit | Creates a session and clones `repositoryData` (connected repository) or `repoUrl` |
+| `POST /api/analyze` | Bearer; `analysis` limit | Runs the agents on a `cloned` session; answers when they finish |
 | `GET /api/files/:sessionId` | Bearer, session owner | Generated files, tech stack, analysis, verification results |
 | `GET /api/files/:sessionId/:filename` | Bearer, session owner | One generated file as a download (`dockerfile`, `githubActions`, `envExample`) |
 | `GET /api/status/:sessionId` | Bearer, session owner | Status, timestamps and error of a session |
 
 "Bearer" means `Authorization: Bearer <Supabase access token>`: `app.use('/api', requireUser(verifier))` is registered after `/api/metrics` and `/api/analytics` and before every other `/api` route. Without a valid token these answer 401 `AUTH_REQUIRED`, or 503 `AUTH_UNAVAILABLE` when Supabase cannot be reached (`server/utils/auth.js`). A session that does not exist or belongs to someone else answers 404 "Session not found".
 
+Rate limits (`server/utils/config.js` `RATE_LIMITS`, `server/utils/security.js`, `server/server.js`):
+
+| Name | Applies to | Counted per | Default |
+|---|---|---|---|
+| `preAuth` | every `/api` request, before the token is checked (including `/api/metrics` and `/api/analytics`) | client IP | 300 per 5 minutes |
+| `user` | every `/api` request after the token check | user | 120 per minute |
+| `githubProxy` | the repositories, organization repositories and verify-repo routes | user | 60 per minute |
+| `clone` | `POST /api/clone-repo` | user | 10 per 10 minutes |
+| `analysis` | `POST /api/analyze` | user | 5 per 5 minutes |
+| `oauth` | `GET /auth/github`, `GET /auth/github/callback` and `POST /auth/github/discard`, one shared count | client IP | 30 per 10 minutes |
+| `socketHandshake` | Socket.IO connections, before the token is checked | client IP | 60 per minute |
+
+A limited request answers 429 `{ error, code: "RATE_LIMITED" }` with `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` and `Retry-After` headers; a limited Socket.IO connection gets `connect_error` `RATE_LIMITED`. `RATE_LIMIT_<NAME>_MAX` (for example `RATE_LIMIT_PREAUTH_MAX`) changes a count; the windows are fixed, and no setting switches limiting off. The client IP is the socket address, or with `TRUST_PROXY=n` the address `n` proxies back in `X-Forwarded-For`. IPv6 clients are counted per /56 prefix, so rotating addresses inside one network does not reset a limit; IPv4 (and IPv4-mapped IPv6) addresses are counted one by one, and an address that cannot be parsed falls into one shared bucket (`rateLimitKeyForIp` in `server/utils/security.js`). The counters live in the server process's memory: each instance counts on its own, and a restart resets them.
+
+GitHub-backed routes (repositories, organization repositories, verify-repo, and the access check of `POST /api/clone-repo` with `repositoryData`) answer 503 `{ error: "GitHub rate limit reached. Please try again later.", code: "GITHUB_RATE_LIMITED" }` with `Retry-After` when GitHub rate-limits the user, and 504 `{ error: "GitHub did not respond. Please try again.", code: "GITHUB_UNAVAILABLE" }` when GitHub does not answer within `GITHUB_TIMEOUT_MS` or cannot be reached. A rate limit is never reported as "no access", and the clone request creates no session (`server/github.js`, `server/server.js`).
+
 There is no `POST /api/devpilot` route in `server/server.js`. Sign-up, sign-in and saved files go from the browser to Supabase directly, not through the server.
 
-Socket.IO: connect with `auth: { token }`, then emit `subscribe` with `{ sessionId }`; the server emits `progress` and, when the token expires, `auth_expired` (`server/utils/realtime.js`).
+Socket.IO: connect with `auth: { token }`, then emit `subscribe` with `{ sessionId }`; the server emits `progress` and, when the token expires, `auth_expired` (`server/utils/realtime.js`). A handshake from a browser origin that is not allowed is refused, and handshakes are counted per IP before the token is checked (`server/server.js`).
 
 ## Repository layout
 

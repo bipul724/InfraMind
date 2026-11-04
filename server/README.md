@@ -6,7 +6,7 @@ The Express + Socket.IO server in `server.js`. It verifies Supabase access token
 
 - Node.js `^20.19 || ^22.12 || >=24.0` (`package.json` `engines`)
 - `git` on the PATH: `utils/git.js` runs it with `child_process.execFile`
-- The configuration in `.env.example`; the server exits at startup when a required setting is missing (`startServer` in `server.js`)
+- The configuration in `.env.example`; at startup the server lists every missing or invalid setting and exits (`startServer` in `server.js`, `utils/config.js`)
 
 ## Setup
 
@@ -61,12 +61,13 @@ utils/repository.js     Repository URL parsing, clone paths, secret redaction
 utils/sessionStore.js   Session store: memory or database
 utils/sessionView.js    Allow-list serializers for responses and progress events
 utils/realtime.js       Authenticated Socket.IO rooms
-utils/security.js       helmet headers, the clone and analysis rate limiters, request logger
+utils/config.js         TRUST_PROXY, allowed origins, rate limits, GITHUB_TIMEOUT_MS and the startup checks of the required settings
+utils/security.js       helmet headers, the rate limiters (HTTP and Socket.IO handshakes), request logger
 utils/logger.js         Console and logs/ files
 utils/performance.js    Request metrics, session analytics, /health data
 utils/port.js           Default port (10000) for server.js, healthcheck.js and test-system.js
 scripts/                ai-smoke.js, assert-local-db.js
-test/                   node --test suite and fakes
+test/                   node --test suite and fakes; test/faultInjection.js is loaded only with TEST_FAULT_INJECTION, which the server refuses unless NODE_ENV=test
 ```
 
 ## Legacy and mock entry points

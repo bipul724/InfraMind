@@ -10,6 +10,8 @@
 > - The agents now call the AI layer in `server/ai/`, which handles retries and provider fallback; see [README-AI-AGENTS.md](README-AI-AGENTS.md).
 >
 > **Update (2026-11-04, later the same day).** Three points in the note above changed again: the unused `general` and `auth` rate limiters and the request-validation, session-validation and IP-whitelist middleware were deleted, and `joi` was removed from `server/package.json`; `trackAgentSession` is now called for every clone and analysis, so `agents.log` is written and `/api/analytics` reports real data; public `GET /health` now returns only `status`, `timestamp` and `uptime`, and the default port is 10000, not 3001 (`server/utils/security.js`, `server/utils/performance.js`, `server/utils/port.js`).
+>
+> **Update (B1.4).** Rate limits now cover every `/api` request (per IP before the token check, then per user), the GitHub repository routes, the OAuth routes and Socket.IO handshakes, not only clone and analysis; see the rate-limit table in [README.md](README.md#api) (`server/utils/config.js`, `server/utils/security.js`).
 
 ## 🎯 Overview
 This document outlines the comprehensive improvements made to the InfraMind system, focusing on enhanced UI/UX, backend performance, security, and monitoring capabilities.

@@ -11,7 +11,7 @@ How to configure and deploy InfraMind as it is implemented in this repository. F
 - **At least one AI provider account:** `gemini`, `groq`, `openrouter` or `novita` (`server/ai/providers.js`)
 - **Postgres for sessions** if you use `SESSION_STORE=database`. `server/.env.example` describes the Supabase session pooler for this
 
-The server refuses to start without the Supabase, GitHub token store, AI and session store settings; see [Startup checks](#startup-checks).
+The server refuses to start without the Supabase, GitHub token store, AI, session store, `CLIENT_URL` and GitHub OAuth App settings, and lists every problem at once; see [Startup checks](#startup-checks).
 
 ---
 
@@ -159,7 +159,7 @@ npm run dev                               # client and server together (concurre
 | Client dev server | `http://localhost:5173` (`client/vite.config.ts`) |
 | Server port | `PORT`; without it 10000 (`server/utils/port.js`), the same value as `server/.env.example` and `render.yaml` |
 | Client → server URL | `VITE_API_URL`; without it the client uses `http://localhost:10000` (`client/src/lib/api.ts`) |
-| CORS origins | `CLIENT_URL`, `http://localhost:5173`, `https://dev-pilot.vercel.app` (`server/server.js`) |
+| CORS and Socket.IO origins | `CLIENT_URL`'s origin, `CORS_ALLOWED_ORIGINS`, and `http://localhost:5173` when `NODE_ENV` is not `production` (`server/utils/config.js`) |
 
 Set `VITE_API_URL` to the server's actual URL whenever the port is not 10000. The client reads `VITE_*` variables at build time (Vite), so restart the dev server or rebuild after changing them.
 
@@ -173,7 +173,7 @@ Set `VITE_API_URL` to the server's actual URL whenever the port is not 10000. Th
 flowchart TB
     Repo["Git repository with render.yaml"]
     YamlEnv["Set in render.yaml: NODE_VERSION 24, NODE_ENV production, PORT 10000"]
-    BackEnv["Set in the Render dashboard: SUPABASE_*, GITHUB_*, AI settings, SESSION_STORE, DATABASE_URL, CLIENT_URL, METRICS_TOKEN"]
+    BackEnv["Set in the Render dashboard: SUPABASE_*, GITHUB_*, AI settings, SESSION_STORE, DATABASE_URL, CLIENT_URL, optional CORS_ALLOWED_ORIGINS, TRUST_PROXY, METRICS_TOKEN"]
     FrontEnv["Set in the Render dashboard: VITE_API_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY"]
     subgraph Render
         Backend["inframind-backend, web, node. Build: cd server && npm ci --include=dev && npm run db:generate. Start: cd server && npm start. Health check: /health"]
@@ -200,8 +200,10 @@ Notes:
 - The backend build installs dev dependencies (`--include=dev`) so the Prisma CLI is available for `npm run db:generate`. The build never runs migrations: `render.yaml` says the owner runs `npm run db:deploy` deliberately before deploying.
 - `npm start` runs `node server.js`. Render's health check calls `/health`, a liveness check that returns `{ status: "ok", timestamp, uptime }`; it does not check the database, Supabase or the AI providers (`server/utils/performance.js`).
 - `render.yaml` sets no `VITE_*` variables for the frontend. Set them in the dashboard before the build, and rebuild after changing them.
-- Set `CLIENT_URL` on the backend to the frontend's URL. It is a CORS origin and the target of the GitHub OAuth redirect (`server/server.js`).
+- Set `CLIENT_URL` on the backend to the frontend's origin, `https://<frontend host>` with no path or trailing slash. It is always an allowed CORS and Socket.IO origin and the target of the GitHub OAuth redirect; with `NODE_ENV=production` it must use https (`server/utils/config.js`, `server/server.js`).
+- Add any other frontend origin (a custom domain, a preview host) to `CORS_ALLOWED_ORIGINS`, comma-separated, each exactly `https://host[:port]`. `http://localhost:5173` is not allowed in production.
 - Set `GITHUB_REDIRECT_URI` to `https://<backend URL>/auth/github/callback` and use the same URL as the OAuth App's callback.
+- `TRUST_PROXY` is not set in `render.yaml`. Render's documentation does not state how many proxies sit in front of a web service, so the default 0 stays: until you set it, every visitor shares one IP for the per-IP limits (`preAuth`, `oauth`, `socketHandshake`), which can make busy periods hit 429 for everyone. After deploying, check which address the server sees (see [Checking the client IP](#checking-the-client-ip)) and set `TRUST_PROXY` to the smallest number that gives each visitor their own address. Never set it higher than the real number of proxies: entries further left in `X-Forwarded-For` come from the client and can be forged.
 
 Backend variables to set in the dashboard, at minimum:
 
@@ -221,19 +223,25 @@ AI_PROVIDERS=...
 SESSION_STORE=database
 DATABASE_URL=...
 METRICS_TOKEN=...                      # optional, 32+ characters
+CORS_ALLOWED_ORIGINS=...               # optional, more frontend origins
+TRUST_PROXY=...                        # optional, after checking the client IP (below)
 ```
+
+### Checking the client IP
+
+With `TRUST_PROXY` unset, make a request to the backend and read its access-log line in Render's logs: `requestLogger` logs the `ip` of every request (`server/utils/security.js`). If it is a Render-internal address that does not change between your devices, try `TRUST_PROXY=1`, redeploy, and compare again with a second device or network: the logged `ip` should then be each device's public address (for example the one `curl https://ifconfig.me` shows). If it still is not, try 2, then 3. The value is a startup error outside 0-3, and `true` is never accepted.
 
 In production the server warns at startup when `GITHUB_TOKEN_STORE=memory` or `SESSION_STORE=memory`, because both lose their data on every restart (`server/server.js`).
 
 ### Other frontend hosts
 
-The client is a static build (`cd client && npm run build`, output `client/dist`). Any static host works if it serves `index.html` for every path, as the Render rewrite does, and has the three `VITE_*` variables at build time. The server's CORS list contains `CLIENT_URL`, `http://localhost:5173` and `https://dev-pilot.vercel.app` only.
+The client is a static build (`cd client && npm run build`, output `client/dist`). Any static host works if it serves `index.html` for every path, as the Render rewrite does, and has the three `VITE_*` variables at build time. The server allows `CLIENT_URL`'s origin and the origins in `CORS_ALLOWED_ORIGINS` (plus `http://localhost:5173` outside production), for both CORS and Socket.IO.
 
 ---
 
 ## Startup checks
 
-`startServer()` in `server/server.js` exits with one of these messages when the configuration is unusable. Messages name variables, never values.
+`startServer()` in `server/server.js` first collects every configuration problem and prints them as one list, `Configuration problems (N):` followed by one `❌` line each, then exits 1. Only when the list is empty does it check the database connection, then the schema. Messages name variables, never values.
 
 | Message (start) | Fix |
 |---|---|
@@ -244,6 +252,15 @@ The client is a static build (`cd client && npm run build`, output `client/dist`
 | `AI_PROVIDERS is not set ...`, `<NAME>_API_KEY is not set ...`, `<NAME>_MODEL is not set ...` | Fix the AI settings |
 | `SESSION_STORE is not set (use "memory" or "database")` | Set `SESSION_STORE` |
 | `DATABASE_URL ...` | Set a `postgres://` or `postgresql://` URL |
+| `PORT must be an integer from 1 to 65535` | Fix or unset `PORT` |
+| `CLIENT_URL is not set` / `must use https when NODE_ENV=production` / `must be an origin only` | Set the frontend origin, for example `https://app.example.com` |
+| `GITHUB_CLIENT_ID is not set` / `is still the placeholder from .env.example` (same for `GITHUB_CLIENT_SECRET`) | Copy both from the OAuth App |
+| `GITHUB_REDIRECT_URI ...` | An absolute URL ending in `/auth/github/callback`, https in production |
+| `TRUST_PROXY must be an integer from 0 to 3` | Set the number of proxies, or unset it |
+| `CORS_ALLOWED_ORIGINS entry N ...` | Each entry exactly `scheme://host[:port]`, http or https |
+| `RATE_LIMIT_<NAME>_MAX must be an integer from 1 to 100000` / `is not a known rate limit` | Fix the value or the variable name |
+| `GITHUB_TIMEOUT_MS must be an integer from 1000 to 60000` | Fix or unset it |
+| `METRICS_TOKEN must be at least 32 characters` | Use 32+ random characters, or leave it empty |
 | `Prisma client not generated: run npm run db:generate` | Run it in `server/` |
 | `Database unreachable (DATABASE_URL)` | Check the URL, network and TLS settings |
 | `Database schema missing: run npm run db:deploy` | Apply the migration |
@@ -257,6 +274,10 @@ The client is a static build (`cd client && npm run build`, output `client/dist`
 | "Connect GitHub" ends on `/auth/success` with an error | `invalid_state` (cookie missing or expired), `connect_expired` (ticket older than 2 minutes), `access_denied`, or `github_auth_failed`; check `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` and `CLIENT_URL` (`server/server.js`) |
 | 503 `GITHUB_STORE_UNAVAILABLE` | The `github_connections` table or the service-role key is not reachable (`server/utils/githubConnections.js`) |
 | 503 `SESSION_STORE_UNAVAILABLE` | The session database is not reachable (`server/server.js`) |
+| 429 `RATE_LIMITED` for many users at once | Behind Render without `TRUST_PROXY`, every visitor shares one IP bucket; see [Checking the client IP](#checking-the-client-ip) |
+| 503 `GITHUB_RATE_LIMITED` | GitHub rate-limited this user's token; `Retry-After` says when to retry (`server/github.js`) |
+| 504 `GITHUB_UNAVAILABLE` | GitHub did not answer within `GITHUB_TIMEOUT_MS` (default 10 s) or could not be reached |
+| The browser gets no CORS headers, or the socket does not connect | The page's origin is not `CLIENT_URL`'s origin or in `CORS_ALLOWED_ORIGINS`; the startup line `🌐 Allowed origins:` shows the list |
 | Clone fails with 404 "Repository not found or access denied" | The repository is private and was entered as a URL without a token, or the GitHub connection cannot see it (`server/utils/git.js`, `server/server.js`) |
 | Saved files list is empty or an insert fails | The `saved_files` table or its policies are missing, or the user has no session |
 | `errors` shows "AI providers are unavailable" | See the `ai_call` log lines ([server/OBSERVABILITY.md](server/OBSERVABILITY.md)) |

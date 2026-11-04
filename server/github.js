@@ -28,6 +28,7 @@
 
 import axios from 'axios';
 import { describeServiceUrlProblem } from './utils/auth.js';
+import { readGitHubTimeoutMs } from './utils/config.js';
 
 // Axios errors carry the request config (client secret, auth code, access token),
 // so log only the message and HTTP status
@@ -65,6 +66,70 @@ function unauthorizedError() {
 
 const isUnauthorized = (error) => error?.response?.status === 401;
 
+// B1.4: GitHub rate limits and outages are told apart from "no access"
+export const RETRY_AFTER_CAP_SECONDS = 3600;
+
+export class GitHubRateLimitedError extends Error {
+  constructor(retryAfterSeconds = null) {
+    super('GitHub rate limit reached');
+    this.name = 'GitHubRateLimitedError';
+    this.code = 'GITHUB_RATE_LIMITED';
+    this.retryAfterSeconds = retryAfterSeconds; // whole seconds, 0 to 3600 (null only if built without one)
+  }
+}
+
+export class GitHubUnavailableError extends Error {
+  constructor(reason) {
+    super(`GitHub did not respond (${reason})`);
+    this.name = 'GitHubUnavailableError';
+    this.code = 'GITHUB_UNAVAILABLE';
+  }
+}
+
+const header = (error, name) => {
+  const value = error?.response?.headers?.[name];
+  return typeof value === 'string' ? value.trim() : value === undefined || value === null ? null : String(value);
+};
+
+// Seconds to wait, following GitHub's REST API guidance ("Handle rate limit errors
+// appropriately"): retry-after when present; else, when x-ratelimit-remaining is 0, until
+// x-ratelimit-reset (epoch seconds); otherwise at least one minute. Capped at 3600.
+export const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60;
+export function retryAfterSeconds(error, now = Date.now()) {
+  const retryAfter = header(error, 'retry-after');
+  if (retryAfter !== null && /^\d+$/.test(retryAfter)) {
+    return Math.min(Number(retryAfter), RETRY_AFTER_CAP_SECONDS);
+  }
+  const reset = header(error, 'x-ratelimit-reset');
+  if (header(error, 'x-ratelimit-remaining') === '0' && reset !== null && /^\d+$/.test(reset)) {
+    return Math.min(Math.max(Number(reset) - Math.floor(now / 1000), 0), RETRY_AFTER_CAP_SECONDS);
+  }
+  return DEFAULT_RATE_LIMIT_WAIT_SECONDS;
+}
+
+// A 403 is a rate limit when GitHub says so (primary: x-ratelimit-remaining: 0;
+// secondary: retry-after or a "rate limit" message). A 429 always is.
+export function isRateLimitResponse(error) {
+  const status = error?.response?.status;
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  if (header(error, 'x-ratelimit-remaining') === '0') return true;
+  if (header(error, 'retry-after') !== null) return true;
+  const message = error.response.data?.message;
+  return typeof message === 'string' && /rate limit/i.test(message);
+}
+
+// The typed error for a rate limit or an outage (timeout, network error), else null
+export function toTypedGitHubError(error) {
+  if (error instanceof GitHubRateLimitedError || error instanceof GitHubUnavailableError) return error;
+  if (isRateLimitResponse(error)) return new GitHubRateLimitedError(retryAfterSeconds(error));
+  if (axios.isAxiosError(error) && !error.response) {
+    const timedOut = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+    return new GitHubUnavailableError(timedOut ? 'timeout' : 'network error');
+  }
+  return null;
+}
+
 class GitHubService {
   // Configuration is read lazily so it always reflects the loaded environment,
   // regardless of module evaluation order
@@ -86,6 +151,12 @@ class GitHubService {
 
   get apiBaseUrl() {
     return resolveBaseUrl('GITHUB_API_BASE_URL', DEFAULT_GITHUB_API_BASE_URL);
+  }
+
+  // Timeout of every GitHub call below except revocation (GITHUB_TIMEOUT_MS, default
+  // 10000; startServer refuses an invalid value)
+  get timeoutMs() {
+    return readGitHubTimeoutMs(process.env).value;
   }
 
   // Generate GitHub OAuth URL
@@ -112,7 +183,8 @@ class GitHubService {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: this.timeoutMs
       });
 
       // GitHub answers an invalid or expired code with HTTP 200 and an error field
@@ -126,7 +198,7 @@ class GitHubService {
       };
     } catch (error) {
       console.error('Error exchanging code for token:', describeError(error));
-      throw new Error('Failed to authenticate with GitHub');
+      throw toTypedGitHubError(error) || new Error('Failed to authenticate with GitHub');
     }
   }
 
@@ -137,13 +209,14 @@ class GitHubService {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
-        }
+        },
+        timeout: this.timeoutMs
       });
 
       return response.data;
     } catch (error) {
       console.error('Error fetching user info:', describeError(error));
-      throw new Error('Failed to fetch user information');
+      throw toTypedGitHubError(error) || new Error('Failed to fetch user information');
     }
   }
 
@@ -160,7 +233,8 @@ class GitHubService {
           per_page: perPage,
           sort: 'updated',
           type: 'all'
-        }
+        },
+        timeout: this.timeoutMs
       });
 
       return response.data.map(repo => ({
@@ -185,7 +259,7 @@ class GitHubService {
     } catch (error) {
       if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching repositories:', describeError(error));
-      throw new Error('Failed to fetch repositories');
+      throw toTypedGitHubError(error) || new Error('Failed to fetch repositories');
     }
   }
 
@@ -202,7 +276,8 @@ class GitHubService {
           per_page: perPage,
           sort: 'updated',
           type: 'all'
-        }
+        },
+        timeout: this.timeoutMs
       });
 
       return response.data.map(repo => ({
@@ -227,7 +302,7 @@ class GitHubService {
     } catch (error) {
       if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching org repositories:', describeError(error));
-      throw new Error('Failed to fetch organization repositories');
+      throw toTypedGitHubError(error) || new Error('Failed to fetch organization repositories');
     }
   }
 
@@ -238,7 +313,8 @@ class GitHubService {
         headers: {
           'Authorization': `token ${accessToken}`,
           'Accept': 'application/vnd.github.v3+json'
-        }
+        },
+        timeout: this.timeoutMs
       });
 
       return response.data.map(org => ({
@@ -251,13 +327,14 @@ class GitHubService {
     } catch (error) {
       if (isUnauthorized(error)) throw unauthorizedError();
       console.error('Error fetching organizations:', describeError(error));
-      throw new Error('Failed to fetch organizations');
+      throw toTypedGitHubError(error) || new Error('Failed to fetch organizations');
     }
   }
 
   // Check if user has access to repository.
   // 403/404 resolve to { hasAccess: false }; a 401 (revoked or expired token)
-  // throws an error with code GITHUB_UNAUTHORIZED.
+  // throws an error with code GITHUB_UNAUTHORIZED. A rate-limited 403 or a 429 throws
+  // GITHUB_RATE_LIMITED, and a timeout or network error GITHUB_UNAVAILABLE: never "no access".
   async checkRepoAccess(accessToken, owner, repo) {
     try {
       const response = await axios.get(
@@ -266,7 +343,8 @@ class GitHubService {
           headers: {
             'Authorization': `token ${accessToken}`,
             'Accept': 'application/vnd.github.v3+json'
-          }
+          },
+          timeout: this.timeoutMs
         }
       );
 
@@ -284,6 +362,8 @@ class GitHubService {
         }
       };
     } catch (error) {
+      const typed = toTypedGitHubError(error);
+      if (typed) throw typed;
       const status = error.response?.status;
       if (status === 404 || status === 403) {
         return { hasAccess: false, error: 'Repository not found or no access' };

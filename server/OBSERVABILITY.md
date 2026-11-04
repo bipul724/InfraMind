@@ -40,7 +40,7 @@ Other AI log lines: the startup route summary (`🤖 AI route planner: ...`, pro
 
 | File | Written by |
 |---|---|
-| `logs/app.log` | `logger.info` and `logger.warn`: one line per HTTP request (method, redacted URL, status, duration, IP, user agent), rate-limit hits, slow requests (over 1 s) |
+| `logs/app.log` | `logger.info` and `logger.warn`: one line per HTTP request (method, redacted URL, status, duration, IP, user agent), rate-limit hits (`Rate limit <name> exceeded for IP <ip>` or `... for user <user id>`, with the request path only: no query string, token or body; the line shows the full address, although IPv6 clients are counted per /56 prefix), slow requests (over 1 s) |
 | `logs/error.log` | `logger.error`, for example a failed `/api/metrics` or `/api/analytics` |
 | `logs/performance.log` | One line per HTTP request with its duration |
 | `logs/debug.log` | `logger.debug`, only when `NODE_ENV=development` |
@@ -56,7 +56,7 @@ Most other server messages, including clone failures, session cleanup and progre
 | Endpoint | Access | Returns |
 |---|---|---|
 | `GET /health` | public | Exactly `{ status: "ok", timestamp, uptime }`, always 200 while the process serves requests. A liveness check: it queries no database or service |
-| `GET /api/metrics` | `X-Metrics-Token` equal to `METRICS_TOKEN` (32+ characters), otherwise 404 | Uptime, Node `version`, `environment`, request totals, error count, success rate, average response time, memory, CPU usage, `trackedSessions` (entries in the analytics map, not active sessions) |
+| `GET /api/metrics` | `X-Metrics-Token` equal to `METRICS_TOKEN` (32+ characters), otherwise 404 | Uptime, Node `version`, `environment`, request totals, error count, success rate, average response time, memory, CPU usage, `unhandledRejections` (promise rejections nobody handled since the start; the process keeps serving), `trackedSessions` (entries in the analytics map, not active sessions) |
 | `GET /api/analytics` | same as `/api/metrics` | `total` sessions, `avgDuration`, and per phase (`clone`, `analysis`) `count`, `totalDuration`, `avgDuration` and `outcomes` (`ok` / `failed` counts), plus the last 10 sessions |
 
 Source: `server/server.js`, `server/utils/performance.js`.
@@ -79,6 +79,16 @@ curl -s -H "X-Metrics-Token: $METRICS_TOKEN" http://localhost:<port>/api/metrics
 Session state is the main record of what happened to an analysis: `status`, `error`, timestamps and the last progress snapshot (`analysis_sessions` with `SESSION_STORE=database`). The owner can read it from `GET /api/status/:sessionId` (`server/server.js`, `server/utils/sessionView.js`).
 
 Startup prints how many interrupted sessions were marked failed and how many expired sessions and temp directories were removed (`🧹 ...` lines in `server/server.js`).
+
+## Startup, process errors and shutdown
+
+All console lines from `server/server.js`:
+
+- A configuration problem stops the server: `❌ Configuration problems (N):` and one `❌ <problem>` line each, naming variables, never values.
+- On a clean start: `🌐 Allowed origins: ...`, `🌐 Trust proxy: <0-3>` and `🚦 Rate limits: preAuth 300 per 5 min, ...` (names and numbers only).
+- `❌ Unhandled rejection: <class>: <message>` and `❌ Uncaught exception: <class>: <message>`, each one line, passed through `redactSecrets`; never the promise object or a stack.
+- `🛑 Shutting down: <SIGTERM | SIGINT | uncaught exception>`, then `🛑 Pending GitHub connect tokens: <n> revoked, <m> failed`. No token is ever logged.
+- `GitHub rate limit reached: <route>` and `GitHub did not respond: <route>` when a GitHub-backed route answers 503 `GITHUB_RATE_LIMITED` or 504 `GITHUB_UNAVAILABLE`.
 
 ## Legacy: Keywords AI tracking
 

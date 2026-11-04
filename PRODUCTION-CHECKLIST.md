@@ -4,7 +4,7 @@ A checklist for an operator preparing a deployment. Nothing here is pre-ticked: 
 
 ## Configuration the server requires
 
-The server exits at startup without these (`startServer` in `server/server.js`):
+The server exits at startup without these, listing every problem at once (`startServer` in `server/server.js`, `server/utils/config.js`):
 
 - [ ] `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the same Supabase project as the client
 - [ ] `GITHUB_TOKEN_STORE=supabase` (with `memory`, every GitHub connection is lost on restart and the server warns in production)
@@ -13,12 +13,16 @@ The server exits at startup without these (`startServer` in `server/server.js`):
 - [ ] `AI_PROVIDERS`, and `<NAME>_API_KEY` plus `<NAME>_MODEL` for every provider in any chain
 - [ ] `SESSION_STORE=database` (with `memory`, every session and result is lost on restart and the server warns in production)
 - [ ] `DATABASE_URL`, and the migration applied with `npm run db:deploy` (`server/package.json`)
+- [ ] `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` of the repository-access OAuth App (the `.env.example` placeholders are refused), and `GITHUB_REDIRECT_URI`: `https://<backend URL>/auth/github/callback`
+- [ ] `CLIENT_URL` set to the frontend origin, `https://<frontend host>` with no path: an allowed CORS and Socket.IO origin and the GitHub OAuth redirect target
 
-## Configuration the server reads but does not check at startup
+## Optional configuration (checked at startup when set)
 
-- [ ] `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` for the repository-access OAuth App (`server/github.js`)
-- [ ] `CLIENT_URL` set to the frontend URL: CORS origin and GitHub OAuth redirect target (`server/server.js`)
-- [ ] `METRICS_TOKEN` (32+ characters) if you want `/api/metrics` and `/api/analytics`; without it both answer 404 (`server/server.js`)
+- [ ] `CORS_ALLOWED_ORIGINS` lists every other frontend origin that must call the API; `http://localhost:5173` is not allowed in production (`server/utils/config.js`)
+- [ ] `TRUST_PROXY` set to the number of proxies in front of the server, after checking the logged client IP ([DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md#checking-the-client-ip)); with the default 0 behind Render, every visitor shares one IP for the per-IP rate limits
+- [ ] The default rate limits suit your traffic, or `RATE_LIMIT_<NAME>_MAX` is set ([README.md](README.md#api))
+- [ ] `METRICS_TOKEN` (32+ characters) if you want `/api/metrics` and `/api/analytics`; without it both answer 404, and a shorter value stops the server from starting (`server/utils/config.js`)
+- [ ] `GITHUB_TIMEOUT_MS` (default 10000) if GitHub calls need a different timeout (`server/github.js`)
 - [ ] Optional limits: `CLONE_TIMEOUT_MS` (default 120000), `MAX_REPO_SIZE_MB` (default 200) (`server/utils/git.js`); `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` (`server/ai/config.js`); `DATABASE_POOL_MAX` (`server/db/config.js`)
 
 ## Client build
@@ -67,7 +71,8 @@ Each item is a fact about the code today, for deciding what to fix before launch
 - The **Projects** tab lists only results from the current page visit; nothing is stored (`client/src/pages/ModernDashboard.tsx`).
 - The agents report progress only after all four have run. Until then the step cards show one shared "In sequence" state; after the result event they show Done, Failed or Not run for each agent (`server/agents/index.js`, `client/src/components/AgentProgress.tsx`).
 - Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
-- Only `/api/clone-repo` and `/api/analyze` are rate-limited (`server/utils/security.js`, `server/server.js`).
+- Rate-limit counters are kept in memory by each server process: a second instance counts separately, and a restart resets every count (`server/utils/security.js`).
+- `TRUST_PROXY` defaults to 0 and is not set in `render.yaml`: behind Render's proxy, every visitor shares one bucket for the per-IP limits until it is set (`server/utils/config.js`).
 - File validation checks format and the workflow policy only. It does not build the image, run the workflow, or check that the `.env.example` variables are complete (`server/agents/files.js`).
 - The generated workflow triggers on `main`, with a comment to change it: the analyzer does not know the repository's default branch (`server/agents/prompts.js`).
 - Java `spring` detection still uses a file-path substring; Python frameworks come from the dependency names (`server/agents/index.js` `analyzeTechStack`).

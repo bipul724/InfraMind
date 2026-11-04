@@ -2,17 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import githubService from './github.js';
+import { readAllowedOrigins } from './utils/config.js';
 
 // Create express app
 const app = express();
 
-// Enable CORS
+// Enable CORS: the same origin list as server.js (CLIENT_URL, CORS_ALLOWED_ORIGINS,
+// and http://localhost:5173 outside production)
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL,         // deployed frontend URL
-    "http://localhost:5173",        // local development
-    "https://dev-pilot.vercel.app"  // production frontend URL
-  ],
+  origin: readAllowedOrigins(process.env).origins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization']

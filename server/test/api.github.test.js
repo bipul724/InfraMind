@@ -29,6 +29,7 @@ import { FAKE_SERVICE_KEY } from './fakePostgrest.js';
 import { buildCloneArgs } from '../utils/git.js';
 
 const CLIENT = 'http://localhost:5173';
+const PRODUCTION_URLS = { CLIENT_URL: 'https://app.example.test', GITHUB_REDIRECT_URI: 'https://api.example.test/auth/github/callback' };
 // B1.3b: the callback delivers only a one-time completion id, claimed by the client
 const COMPLETE_LOCATION = /^http:\/\/localhost:5173\/auth\/success\?complete=[0-9a-f]{64}$/;
 const errorLocation = (code) => `${CLIENT}/auth/success?error=${code}`;
@@ -45,8 +46,11 @@ const remember = (...values) => { for (const value of values) if (value) secrets
 before(async () => { fakes = await getFakes(); });
 after(async () => { await closeFakes(); });
 
-async function launch(options) {
-  const server = await startServer(options);
+// B1.4: this file runs dozens of OAuth flows from one IP against one server, more than
+// the default oauth limit (30 per 10 min) allows, so it raises that limit (it cannot be
+// switched off). The oauth limiter itself is tested in api.limits.test.js.
+async function launch(options = {}) {
+  const server = await startServer({ ...options, envOverrides: { RATE_LIMIT_OAUTH_MAX: '1000', ...options.envOverrides } });
   servers.push(server);
   remember(server.env.GITHUB_TOKEN_ENC_KEY, server.env.GITHUB_CLIENT_SECRET, server.env.SUPABASE_SERVICE_ROLE_KEY);
   return server;
@@ -906,7 +910,8 @@ describe('12. startup refuses an invalid GitHub token store configuration', () =
   });
 
   test('memory in production starts with a warning', async () => {
-    const server = await launch({ envOverrides: { NODE_ENV: 'production' } });
+    // B1.4: production requires https CLIENT_URL and GITHUB_REDIRECT_URI
+    const server = await launch({ envOverrides: { NODE_ENV: 'production', ...PRODUCTION_URLS } });
     assert.ok(server.logs().includes('GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart'));
   });
 

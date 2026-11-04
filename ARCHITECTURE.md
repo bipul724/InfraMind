@@ -61,7 +61,7 @@ Who talks to what:
 | Server | GitHub | OAuth code exchange, user/repository/organization API calls, token revocation (`server/github.js`); `git clone` over HTTPS (`server/utils/git.js`) |
 | Server | AI providers | OpenAI-format `POST {baseUrl}/chat/completions` (`server/ai/client.js`) |
 
-CORS (HTTP and Socket.IO) allows `CLIENT_URL`, `http://localhost:5173` and `https://dev-pilot.vercel.app` (`server/server.js`).
+CORS and Socket.IO use one origin list: `CLIENT_URL`'s origin, the entries of `CORS_ALLOWED_ORIGINS`, and `http://localhost:5173` when `NODE_ENV` is not `production` (`readAllowedOrigins` in `server/utils/config.js`). A request from another origin gets no `Access-Control-Allow-Origin` header and is otherwise handled normally; a Socket.IO handshake from another browser origin is refused (`server/server.js`).
 
 ## 2. Sign-in and API authentication
 
@@ -93,6 +93,8 @@ Source: `client/src/lib/supabase.ts`, `client/src/contexts/AuthContext.tsx`, `cl
 
 Details:
 
+- Middleware order for HTTP (`server/server.js`): `trust proxy` (`TRUST_PROXY`, 0-3, never `true`), CORS, security headers, request logging, metrics, then the per-IP `preAuth` limit on `/api`, then body parsing, the routes `/api/metrics` and `/api/analytics`, `requireUser`, the per-user `user` limit, and the routes; `githubProxy`, `clone`, `analysis` and `oauth` limits sit on their routes. So a flood of fake tokens is throttled before any Supabase lookup.
+- Socket.IO order: the origin check (`allowRequest`), the per-IP `socketHandshake` limit, then the token check. The handshake IP comes from Express's own `req.ip` logic, so `TRUST_PROXY` applies the same way (`socketIpOf` in `server/server.js`).
 - The verifier caches a positive result for at most 60 s (never past the token's `exp`), holds at most 5,000 entries and runs at most 20 Supabase lookups at once; above that it answers `AUTH_UNAVAILABLE` (`server/utils/auth.js`).
 - Raw tokens are not cached or logged; the cache key is the token's SHA-256 hash (`server/utils/auth.js`).
 - Socket.IO: a socket joins a room `session:<id>` only with `subscribe` for a session its user owns, and at most 20 rooms per socket. A late subscriber receives the last stored progress snapshot (`server/utils/realtime.js`).
@@ -328,16 +330,23 @@ A run makes 4 to 8 AI calls: planner 1, generator 3 to 6 (one per file, plus one
 
 ## 8. Startup checks and configuration
 
-`startServer()` exits with an error, naming variables but never printing values, when any of these is missing or invalid (`server/server.js`):
+`startServer()` collects every problem with these settings, prints them as one list (naming variables, never printing values) and exits 1 (`server/server.js`):
 
 1. `SUPABASE_URL` (https, or http for localhost only) and `SUPABASE_ANON_KEY` (`server/utils/auth.js`)
 2. `GITHUB_TOKEN_STORE` (`memory` or `supabase`), `GITHUB_TOKEN_ENC_KEY` (standard base64 of exactly 32 bytes) and, for `supabase`, `SUPABASE_SERVICE_ROLE_KEY` (`server/utils/githubConnections.js`)
 3. The AI configuration: `AI_PROVIDERS`, routes, and a key and model for every provider in a route (`server/ai/config.js`)
-4. `SESSION_STORE` (`memory` or `database`); for `database` also `DATABASE_URL`, a reachable database and the Prisma schema (`server/utils/sessionStore.js`, `server/db/config.js`)
+4. `SESSION_STORE` (`memory` or `database`); for `database` also `DATABASE_URL` (`server/utils/sessionStore.js`, `server/db/config.js`)
+5. `PORT` (1-65535), `CLIENT_URL` (an origin; https in production), `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` (set, not the `.env.example` placeholders), `GITHUB_REDIRECT_URI` (ends in `/auth/github/callback`; https in production), and when set `TRUST_PROXY`, `CORS_ALLOWED_ORIGINS`, `RATE_LIMIT_<NAME>_MAX`, `GITHUB_TIMEOUT_MS` and `METRICS_TOKEN` (32+ characters) (`server/utils/config.js`)
 
-Then it marks interrupted sessions failed, deletes expired sessions and orphaned temp directories, schedules the hourly cleanup and listens on `PORT` (default 10000, `server/utils/port.js`) (`server/server.js`).
+Only with a clean list does it check the database connection and then the schema (with `SESSION_STORE=database`), print the allowed origins, the trust-proxy value and the rate limits, mark interrupted sessions failed, deletes expired sessions and orphaned temp directories, schedules the hourly cleanup and listens on `PORT` (default 10000, `server/utils/port.js`) (`server/server.js`).
 
 Database TLS: for a non-local host the server always uses TLS with certificate verification, whatever `sslmode` says. `DATABASE_SSL_CA_FILE` adds a CA; `DATABASE_SSL_INSECURE_SKIP_VERIFY=true` turns verification off and logs a warning. Pool size `DATABASE_POOL_MAX` defaults to 5 (1-20); connect and query timeouts are 5 s (`server/db/config.js`).
+
+Process errors and shutdown (`server/server.js`):
+
+- An unhandled promise rejection is logged as one redacted line (`❌ Unhandled rejection: <class>: <message>`) and counted as `unhandledRejections` in `/api/metrics`; the server keeps serving.
+- An uncaught exception is logged the same way, then the shutdown sequence runs and the process exits 1.
+- SIGTERM and SIGINT run the same shutdown sequence, once, and exit 0: stop accepting connections, revoke every GitHub token still parked in an unclaimed connect completion (in parallel, at most 2 s), disconnect the database, exit. A 3 s hard cap covers the whole sequence.
 
 The full variable list with comments is in `server/.env.example`.
 

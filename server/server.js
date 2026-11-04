@@ -17,9 +17,16 @@ import {
   describeSessionStoreConfigProblem
 } from './utils/sessionStore.js';
 import { DATABASE_TIMEOUT_MS, describeDatabaseConfigProblem, describeDatabaseTlsWarning } from './db/config.js';
-import GitHubService from './github.js';
+import GitHubService, { GitHubRateLimitedError, GitHubUnavailableError } from './github.js';
 import { logger } from './utils/logger.js';
-import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
+import { createRateLimiters, createSocketHandshakeLimiter, securityHeaders, requestLogger } from './utils/security.js';
+import {
+  describeRateLimits,
+  describeServerConfigProblems,
+  readAllowedOrigins,
+  readRateLimits,
+  readTrustProxy
+} from './utils/config.js';
 import { performanceMonitor, getHealthStatus } from './utils/performance.js';
 import {
   parseGitHubRepoUrl,
@@ -42,19 +49,45 @@ import {
   describeConnectionStoreConfigProblem
 } from './utils/githubConnections.js';
 
+// Settings read once at startup. The readers fall back to defaults on invalid values so
+// the app can be built; startServer() then lists every problem and refuses to start.
+const TRUST_PROXY = readTrustProxy(process.env).value;
+const ALLOWED_ORIGINS = readAllowedOrigins(process.env).origins;
+const RATE_LIMITS = readRateLimits(process.env).limits;
+const limiters = createRateLimiters(RATE_LIMITS);
+
 const app = express();
+// The number of proxies in front of the server (TRUST_PROXY, 0-3). Never `true`, which
+// would trust any X-Forwarded-For and let a client choose its own IP.
+app.set('trust proxy', TRUST_PROXY);
+
+// One origin list for Express CORS and Socket.IO: CLIENT_URL's origin,
+// CORS_ALLOWED_ORIGINS, and http://localhost:5173 outside production (utils/config.js)
+const isAllowedOrigin = (origin) => ALLOWED_ORIGINS.includes(origin);
+
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: [
-      process.env.CLIENT_URL,           // deployed frontend URL (e.g., https://yourapp.web.app)
-      "http://localhost:5173",          // local development
-      "https://dev-pilot.vercel.app"    // production frontend URL
-    ],
+    origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ['Content-Type', 'Authorization']
+  },
+  // CORS headers alone do not stop a WebSocket: refuse a handshake from an unlisted
+  // browser origin. Clients that send no Origin (not a browser) still need a valid token.
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    callback(null, origin === undefined || isAllowedOrigin(origin));
   }
 });
+
+// The client IP of a Socket.IO handshake, derived by Express's own req.ip getter, so
+// TRUST_PROXY applies exactly as it does to HTTP requests
+const socketIpOf = (socket) => Object.create(app.request, {
+  app: { value: app },
+  headers: { value: socket.request.headers },
+  socket: { value: socket.request.socket },
+  connection: { value: socket.request.socket }
+}).ip;
 
 
 const PORT = resolvePort(process.env);
@@ -68,12 +101,9 @@ const verifier = createSupabaseVerifier({
 });
 
 // Middleware
+// An unlisted origin gets no Access-Control-Allow-Origin header and is otherwise handled normally
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL,           // deployed frontend URL
-    "http://localhost:5173",          // local development
-    "https://dev-pilot.vercel.app"    // production frontend URL
-  ],
+  origin: ALLOWED_ORIGINS,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -87,6 +117,10 @@ app.use(requestLogger);
 
 // Performance monitoring
 app.use(performanceMonitor.trackRequest.bind(performanceMonitor));
+
+// Per-IP limit on every /api request, before the body is parsed and before any token is
+// checked, so a flood of fake tokens never reaches Supabase (includes /api/metrics and /api/analytics)
+app.use('/api', limiters.preAuth);
 
 // Body parsing
 // The largest legitimate body is repositoryData (about 2 kB)
@@ -110,7 +144,8 @@ async function initializeTempDir() {
   }
 }
 
-// Socket.io: authenticated handshake, private per-session rooms
+// Socket.io: handshakes are counted per IP first, then authenticated; private per-session rooms
+io.use(createSocketHandshakeLimiter(RATE_LIMITS.socketHandshake, socketIpOf));
 const { emitProgress } = attachRealtime(io, {
   verifier,
   getOwnedSession: (sessionId, userId) => sessionStore.getOwned(sessionId, userId),
@@ -177,8 +212,9 @@ app.get('/api/analytics', (req, res) => {
   }
 });
 
-// Every other /api/* route requires a verified Supabase access token
+// Every other /api/* route requires a verified Supabase access token, then a per-user limit
 app.use('/api', requireUser(verifier));
+app.use('/api', limiters.user);
 
 // GitHub connections
 //
@@ -254,6 +290,27 @@ const GITHUB_CONNECT_MISMATCH_BODY = {
 };
 
 const sendStoreUnavailable = (res) => res.status(503).json(GITHUB_STORE_UNAVAILABLE_BODY);
+
+// GitHub rate limits and outages (B1.4). Never mapped to "no access" or "not found".
+const GITHUB_RATE_LIMITED_BODY = { error: 'GitHub rate limit reached. Please try again later.', code: 'GITHUB_RATE_LIMITED' };
+const GITHUB_UNAVAILABLE_BODY = { error: 'GitHub did not respond. Please try again.', code: 'GITHUB_UNAVAILABLE' };
+
+// Sends 503 GITHUB_RATE_LIMITED (with Retry-After when known) or 504 GITHUB_UNAVAILABLE
+// and returns true, or returns false for any other error
+function sendGitHubFailure(res, error, route) {
+  if (error instanceof GitHubRateLimitedError) {
+    console.warn(`GitHub rate limit reached: ${route}`);
+    if (Number.isInteger(error.retryAfterSeconds)) res.set('Retry-After', String(error.retryAfterSeconds));
+    res.status(503).json(GITHUB_RATE_LIMITED_BODY);
+    return true;
+  }
+  if (error instanceof GitHubUnavailableError) {
+    console.warn(`GitHub did not respond: ${route}`);
+    res.status(504).json(GITHUB_UNAVAILABLE_BODY);
+    return true;
+  }
+  return false;
+}
 
 // Returns the decrypted connection of the signed-in user, or null after sending
 // 401 GITHUB_AUTH_REQUIRED (no connection) or 503 (store unavailable).
@@ -334,7 +391,7 @@ app.post('/api/github/connect', (req, res) => {
 // Step 2: initiate GitHub OAuth. The browser navigates here (top-level), so the state
 // cookie is first-party and survives browsers that block third-party cookies.
 // Only a valid, unexpired ticket can start a flow; it is consumed on every outcome.
-app.get('/auth/github', (req, res) => {
+app.get('/auth/github', limiters.oauth, (req, res) => {
   try {
     const userId = connectTickets.consume(req.query.ticket);
     if (!userId) {
@@ -360,7 +417,7 @@ app.get('/auth/github', (req, res) => {
 // Step 3: GitHub OAuth callback. Stores nothing: the browser finishing the flow may not
 // belong to the user who obtained the ticket (linking CSRF). The result is parked under
 // a one-time completion id that only the ticket owner can claim (step 4).
-app.get('/auth/github/callback', async (req, res) => {
+app.get('/auth/github/callback', limiters.oauth, async (req, res) => {
   const { code, state, error: oauthError } = req.query;
   const storedState = req.cookies?.[OAUTH_STATE_COOKIE];
   
@@ -462,7 +519,7 @@ app.post('/api/github/connect/complete', async (req, res) => {
 
 // Public: lets the page burn a completion when nobody is signed in. Always 204, and the
 // revocation runs in the background, so the response never reveals whether the id existed.
-app.post('/auth/github/discard', (req, res) => {
+app.post('/auth/github/discard', limiters.oauth, (req, res) => {
   const completion = readCompletion(req);
   if (completion) {
     const entry = pendingCompletions.consumeEntry(completion);
@@ -507,7 +564,7 @@ app.delete('/api/github/connection', async (req, res) => {
 });
 
 // Get user repositories
-app.get('/api/github/repositories', async (req, res) => {
+app.get('/api/github/repositories', limiters.githubProxy, async (req, res) => {
   let connection;
   try {
     connection = await getGitHubConnection(req, res);
@@ -543,13 +600,14 @@ app.get('/api/github/repositories', async (req, res) => {
     if (error.code === 'GITHUB_UNAUTHORIZED') {
       return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    if (sendGitHubFailure(res, error, 'repositories')) return;
     console.error(`Get repositories error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to fetch repositories' });
   }
 });
 
 // Get organization repositories
-app.get('/api/github/organizations/:org/repositories', async (req, res) => {
+app.get('/api/github/organizations/:org/repositories', limiters.githubProxy, async (req, res) => {
   let connection;
   try {
     connection = await getGitHubConnection(req, res);
@@ -578,13 +636,14 @@ app.get('/api/github/organizations/:org/repositories', async (req, res) => {
     if (error.code === 'GITHUB_UNAUTHORIZED') {
       return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    if (sendGitHubFailure(res, error, 'organization repositories')) return;
     console.error(`Get org repositories error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to fetch organization repositories' });
   }
 });
 
 // Verify user access to repository
-app.post('/api/github/verify-repo', async (req, res) => {
+app.post('/api/github/verify-repo', limiters.githubProxy, async (req, res) => {
   let connection;
   try {
     connection = await getGitHubConnection(req, res);
@@ -603,6 +662,7 @@ app.post('/api/github/verify-repo', async (req, res) => {
     if (error.code === 'GITHUB_UNAUTHORIZED') {
       return sendGitHubAuthInvalid(req, res, connection?.accessToken);
     }
+    if (sendGitHubFailure(res, error, 'verify-repo')) return;
     console.error(`Verify repo access error: ${redactSecrets(error, [connection?.accessToken])}`);
     res.status(500).json({ error: 'Failed to verify repository access' });
   }
@@ -663,6 +723,8 @@ async function handleCloneRequest(req, res) {
       if (error.code === 'GITHUB_UNAUTHORIZED') {
         return sendGitHubAuthInvalid(req, res, accessToken);
       }
+      // No session is created: the request ends here
+      if (sendGitHubFailure(res, error, 'clone access check')) return;
       console.error(`Clone access check failed: ${redactSecrets(error.message, [accessToken])}`);
       return sendCloneError(res, 'CLONE_FAILED');
     }
@@ -775,7 +837,7 @@ async function handleCloneRequest(req, res) {
   });
 }
 
-app.post('/api/clone-repo', rateLimiters.clone, async (req, res) => {
+app.post('/api/clone-repo', limiters.clone, async (req, res) => {
   try {
     await handleCloneRequest(req, res);
   } catch (error) {
@@ -787,7 +849,7 @@ app.post('/api/clone-repo', rateLimiters.clone, async (req, res) => {
 });
 
 // Analyze repository endpoint
-app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
+app.post('/api/analyze', limiters.analysis, async (req, res) => {
   const { sessionId } = req.body || {};
   let session = null;
   try {
@@ -1049,61 +1111,119 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Add global error handlers
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-  process.exit(1);
+// Process error policy (B1.4). One redacted line each: the error class and message,
+// never the promise or a stack. An unhandled rejection is counted and the server keeps
+// serving; an uncaught exception leaves the process in an unknown state, so it shuts
+// down (revoking pending GitHub connect tokens) and exits 1.
+const describeFault = (value) =>
+  (value instanceof Error ? `${value.name}: ${value.message}` : `a non-Error value (${typeof value})`);
+
+process.on('unhandledRejection', (reason) => {
+  performanceMonitor.recordUnhandledRejection();
+  console.error(`❌ Unhandled rejection: ${redactSecrets(describeFault(reason))}`);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
+process.on('uncaughtException', (error) => {
+  console.error(`❌ Uncaught exception: ${redactSecrets(describeFault(error))}`);
+  void shutdown(1, 'uncaught exception');
 });
+
+// Shutdown sequence (B1.4), at most once: stop accepting connections, revoke the GitHub
+// tokens still parked in pending connect completions (at most 2 s), disconnect the
+// database, exit. A 3 s hard cap covers everything.
+const SHUTDOWN_HARD_CAP_MS = 3000;
+const SHUTDOWN_REVOKE_CAP_MS = 2000;
+let shutdownStarted = false;
+
+async function shutdown(exitCode, reason) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  setTimeout(() => process.exit(exitCode), SHUTDOWN_HARD_CAP_MS).unref();
+  console.log(`🛑 Shutting down: ${reason}`);
+
+  server.close(() => {});
+
+  const tokens = pendingCompletions.drain()
+    .map((entry) => entry.payload?.record?.accessToken)
+    .filter((token) => typeof token === 'string' && token !== '');
+  const outcomes = tokens.map(() => false);
+  if (tokens.length > 0) {
+    await Promise.race([
+      Promise.all(tokens.map((token, index) =>
+        GitHubService.revokeToken(token).then((result) => { outcomes[index] = result.ok; }))),
+      new Promise((resolve) => setTimeout(resolve, SHUTDOWN_REVOKE_CAP_MS).unref())
+    ]);
+  }
+  const revoked = outcomes.filter(Boolean).length;
+  console.log(`🛑 Pending GitHub connect tokens: ${revoked} revoked, ${tokens.length - revoked} failed`);
+
+  await disconnectDatabase?.().catch(() => {});
+  process.exit(exitCode);
+}
 
 // Start server
 async function startServer() {
-  // Refuse to start without a usable Supabase configuration: every /api route depends on it
+  // 1. Configuration. Every problem is collected and printed as one list (names and
+  // reasons, never values); the server starts only when the list is empty.
+  const problems = [];
+
+  // Supabase: every /api route depends on it
   const supabaseProblem = describeSupabaseConfigProblem(process.env);
   if (supabaseProblem) {
-    console.error(`❌ ${supabaseProblem}. Set SUPABASE_URL (https://<project>.supabase.co) and SUPABASE_ANON_KEY.`);
-    process.exit(1);
+    problems.push(`${supabaseProblem}. Set SUPABASE_URL (https://<project>.supabase.co) and SUPABASE_ANON_KEY.`);
   }
 
-  // Refuse to start without an explicit, valid GitHub token store and encryption key
+  // An explicit, valid GitHub token store and encryption key
   const storeProblem = describeConnectionStoreConfigProblem(process.env);
-  if (storeProblem) {
-    console.error(`❌ ${storeProblem}.`);
-    process.exit(1);
-  }
-  connectionStore = createConnectionStoreFromEnv(process.env);
-  if (connectionStore.kind === 'memory' && isProduction) {
-    console.warn('⚠️ GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart. Use "supabase" in production.');
-  }
+  if (storeProblem) problems.push(`${storeProblem}.`);
 
-  // Refuse to start without a valid AI provider configuration. Problems name variables only.
-  let aiConfig;
+  // AI providers. Problems name variables only.
+  let aiConfig = null;
   try {
     aiConfig = loadAiConfig(process.env);
   } catch (error) {
     if (!(error instanceof AiConfigError)) throw error;
-    for (const problem of error.problems) console.error(`❌ ${problem}`);
+    problems.push(...error.problems);
+  }
+
+  // Session store, and the database settings when it is the database
+  const sessionStoreProblem = describeSessionStoreConfigProblem(process.env);
+  const useDatabase = !sessionStoreProblem && process.env.SESSION_STORE.trim() === 'database';
+  if (sessionStoreProblem) problems.push(`${sessionStoreProblem}.`);
+  if (useDatabase) {
+    const databaseProblem = describeDatabaseConfigProblem(process.env);
+    if (databaseProblem) problems.push(`${databaseProblem}.`);
+  }
+
+  // B1.4: PORT, CLIENT_URL, GitHub OAuth App, TRUST_PROXY, CORS_ALLOWED_ORIGINS,
+  // RATE_LIMIT_*_MAX, GITHUB_TIMEOUT_MS, METRICS_TOKEN, TEST_FAULT_INJECTION
+  problems.push(...describeServerConfigProblems(process.env));
+
+  if (problems.length > 0) {
+    // One write, so the whole list reaches a piped stderr before the exit
+    console.error([`❌ Configuration problems (${problems.length}):`, ...problems.map((problem) => `❌ ${problem}`)].join('\n'));
     process.exit(1);
+  }
+
+  connectionStore = createConnectionStoreFromEnv(process.env);
+  if (connectionStore.kind === 'memory' && isProduction) {
+    console.warn('⚠️ GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart. Use "supabase" in production.');
   }
   // Provider names and model IDs only; keys and URLs are never printed
   for (const line of describeAiRoutes(aiConfig)) console.log(`🤖 ${line}`);
+  console.log(`🌐 Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`🌐 Trust proxy: ${TRUST_PROXY}`);
+  console.log(`🚦 Rate limits: ${describeRateLimits(RATE_LIMITS)}`);
 
-  // 1. Session store configuration. Names variables, never values.
-  const sessionStoreProblem = describeSessionStoreConfigProblem(process.env);
-  if (sessionStoreProblem) {
-    console.error(`❌ ${sessionStoreProblem}.`);
-    process.exit(1);
+  // Test-only fault injection (test/faultInjection.js); the configuration check above
+  // refuses TEST_FAULT_INJECTION unless NODE_ENV=test
+  if (process.env.TEST_FAULT_INJECTION) {
+    const { installFaultInjection } = await import('./test/faultInjection.js');
+    installFaultInjection(process.env.TEST_FAULT_INJECTION);
   }
-  if (process.env.SESSION_STORE.trim() === 'database') {
-    const databaseProblem = describeDatabaseConfigProblem(process.env);
-    if (databaseProblem) {
-      console.error(`❌ ${databaseProblem}.`);
-      process.exit(1);
-    }
+
+  // 2. Connectivity, in the existing order: database connection, schema, store reachability
+  if (useDatabase) {
     const tlsWarning = describeDatabaseTlsWarning(process.env);
     if (tlsWarning) console.warn(`⚠️ ${tlsWarning}`);
 
@@ -1121,7 +1241,7 @@ async function startServer() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DATABASE_TIMEOUT_MS).unref())
     ]);
 
-    // 2. Connectivity, then the schema. Never print the URL, host or password.
+    // Connectivity, then the schema. Never print the URL, host or password.
     try {
       await withTimeout(prisma.$queryRaw`select 1`);
     } catch {
@@ -1141,7 +1261,7 @@ async function startServer() {
     sessionStore = createSessionStore({ kind: 'database', prisma, jsonNull: db.Prisma.JsonNull });
   } else {
     sessionStore = createSessionStore({ kind: 'memory' });
-    // 5. A memory store loses every session on restart
+    // A memory store loses every session on restart
     if (isProduction) {
       console.warn('⚠️ SESSION_STORE=memory: analysis sessions and results are lost on every restart. Use "database" in production.');
     }
@@ -1180,23 +1300,11 @@ async function startServer() {
     console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`📍 PORT: ${PORT}`);
     
-    // Check critical environment variables (non-blocking)
-    const envChecks = {
-      'CLIENT_URL': process.env.CLIENT_URL || 'Not set (using defaults)',
-      'NODE_ENV': process.env.NODE_ENV || 'development',
-      'PORT': PORT
-    };
-    
-    console.log('🔧 Environment variables:');
-    Object.entries(envChecks).forEach(([key, value]) => {
-      console.log(`   ${key}: ${value}`);
-    });
-    
     // Start the server
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 DevOps AI Agent Server running on port ${PORT}`);
       console.log(`📁 Temp directory: ${TEMP_DIR}`);
-      console.log(`🔗 Client URL: ${process.env.CLIENT_URL || "http://localhost:5173"}`);
+      console.log(`🔗 Client URL: ${process.env.CLIENT_URL}`);
       console.log('🤖 Multi-agent system: 4 sequential agents; AI providers per task as listed in the AI route lines');
       console.log('✅ Server startup complete!');
     });
@@ -1217,16 +1325,9 @@ async function startServer() {
   }
 }
 
-// Close the database pool before exiting on SIGTERM / SIGINT
-let shuttingDown = false;
+// SIGTERM / SIGINT run the shutdown sequence once; a second signal is ignored
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.on(signal, async () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    setTimeout(() => process.exit(0), 3000).unref();
-    await disconnectDatabase?.().catch(() => {});
-    process.exit(0);
-  });
+  process.on(signal, () => void shutdown(0, signal));
 }
 
 // Start the server

@@ -319,15 +319,15 @@ describe('metrics and analytics', () => {
     }
   });
 
+  // B1.4: a short METRICS_TOKEN used to leave the endpoints silently disabled (404);
+  // it is now a startup error that names the variable, never the value
   describe('with a short METRICS_TOKEN', () => {
-    let server;
-    const shortToken = randomAlphanumeric(16);
-    before(async () => { server = await startServer({ envOverrides: { METRICS_TOKEN: shortToken } }); });
-    after(async () => { await server?.stop(); });
-
-    test('the endpoints stay disabled', async () => {
-      const response = await request(server.baseUrl, 'GET', '/api/metrics', { headers: { 'X-Metrics-Token': shortToken } });
-      assert.equal(response.status, 404);
+    test('the server refuses to start', async () => {
+      const shortToken = randomAlphanumeric(16);
+      const result = await runServerExpectingExit({ envOverrides: { METRICS_TOKEN: shortToken }, timeoutMs: 10000 });
+      assert.equal(result.code, 1);
+      assert.ok(result.stderr.includes('METRICS_TOKEN must be at least 32 characters'), result.stderr);
+      assert.ok(!result.stderr.includes(shortToken) && !result.stdout.includes(shortToken));
     });
   });
 
