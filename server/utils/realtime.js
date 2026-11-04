@@ -6,6 +6,10 @@
  * can join only for sessions its user owns. Nothing is broadcast to everyone.
  * A socket whose access token has expired receives `auth_expired` and is
  * disconnected, either on its next `subscribe` or by a timer at the expiry time.
+ *
+ * Sessions live in the session store (async): `getOwnedSession(id, userId)` returns the
+ * session only for its owner, and `saveProgress(id, payload)` persists the latest
+ * progress snapshot. Progress is emitted at once and persisted afterwards, in order.
  */
 
 import { AuthError } from './auth.js';
@@ -16,7 +20,9 @@ export const MAX_ROOMS_PER_SOCKET = 20;
 export const MAX_EXPIRY_TIMER_MS = 24 * 60 * 60 * 1000;
 const roomFor = (sessionId) => `session:${sessionId}`;
 
-export function attachRealtime(io, { verifier, getSession, now = Date.now }) {
+export function attachRealtime(io, { verifier, getOwnedSession, saveProgress, now = Date.now }) {
+  // sessionId -> tail of that session's persistence chain, so writes land in order
+  const persistChains = new Map();
   io.use(async (socket, next) => {
     const token = socket.handshake?.auth?.token;
     try {
@@ -54,16 +60,26 @@ export function attachRealtime(io, { verifier, getSession, now = Date.now }) {
     };
     scheduleExpiry();
 
-    socket.on('subscribe', (payload, ack) => {
+    socket.on('subscribe', async (payload, ack) => {
       const reply = typeof ack === 'function' ? ack : () => {};
       if (isExpired()) {
         reply({ ok: false, error: 'Authentication expired' });
         return expire();
       }
       const sessionId = payload?.sessionId;
-      const session = isUuidV4(sessionId) ? getSession(sessionId) : null;
 
-      if (!session || session.userId !== socket.data.userId) {
+      // Ownership first: nothing (room, snapshot) happens before the owned lookup resolves
+      let session = null;
+      if (isUuidV4(sessionId)) {
+        try {
+          session = await getOwnedSession(sessionId, socket.data.userId);
+        } catch {
+          return reply({ ok: false, error: 'Session service unavailable' });
+        }
+      }
+      if (!socket.connected) return;
+
+      if (!session) {
         return reply({ ok: false, error: 'Session not found' });
       }
       if (!subscriptions.has(sessionId) && subscriptions.size >= MAX_ROOMS_PER_SOCKET) {
@@ -96,14 +112,23 @@ export function attachRealtime(io, { verifier, getSession, now = Date.now }) {
     });
   });
 
+  // Emits to the session's room at once; persists the snapshot afterwards. Writes for
+  // one session are chained so they cannot land out of order; a failed write is logged
+  // and never thrown. Returns the persistence promise (tests await it).
   function emitProgress(sessionId, data) {
     const payload = toProgressPayload(sessionId, data);
-    const session = getSession(sessionId);
-    if (session) {
-      session.lastProgress = payload;
-    }
     io.to(roomFor(sessionId)).emit('progress', payload);
     console.log(`Progress update for ${sessionId}: ${payload.status || ''} ${payload.step || ''}`.trim());
+
+    const previous = persistChains.get(sessionId) || Promise.resolve();
+    const next = previous
+      .then(() => saveProgress(sessionId, payload))
+      .catch(() => console.warn(`progress persist failed session=${sessionId}`));
+    persistChains.set(sessionId, next);
+    next.finally(() => {
+      if (persistChains.get(sessionId) === next) persistChains.delete(sessionId);
+    });
+    return next;
   }
 
   return { emitProgress };

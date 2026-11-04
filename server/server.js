@@ -9,9 +9,14 @@ import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { runAgentPipeline } from './agents/index.js';
-import { AiConfigError, describeAiRoutes, loadAiConfig } from './ai/index.js';
+import { AiConfigError, describeAiRoutes, loadAiConfig, logCallRecord, setDefaultAiCallSink } from './ai/index.js';
+import {
+  SessionStoreUnavailableError,
+  createSessionStore,
+  describeSessionStoreConfigProblem
+} from './utils/sessionStore.js';
+import { DATABASE_TIMEOUT_MS, describeDatabaseConfigProblem, describeDatabaseTlsWarning } from './db/config.js';
 import GitHubService from './github.js';
 import { logger } from './utils/logger.js';
 import { rateLimiters, securityHeaders, requestLogger } from './utils/security.js';
@@ -88,8 +93,10 @@ app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
-// Store active sessions
-const activeSessions = new Map();
+// Analysis sessions live in the session store (SESSION_STORE=memory | database).
+// startServer() validates the configuration and creates it before accepting requests.
+let sessionStore = null;
+let disconnectDatabase = null;
 
 // Initialize temp directory
 async function initializeTempDir() {
@@ -105,19 +112,22 @@ async function initializeTempDir() {
 // Socket.io: authenticated handshake, private per-session rooms
 const { emitProgress } = attachRealtime(io, {
   verifier,
-  getSession: (sessionId) => activeSessions.get(sessionId)
+  getOwnedSession: (sessionId, userId) => sessionStore.getOwned(sessionId, userId),
+  saveProgress: (sessionId, payload) => sessionStore.setLastProgress(sessionId, payload)
 });
 
-// Returns the session only if it exists and belongs to the authenticated user.
-// Unknown and foreign sessions are indistinguishable to the caller.
-function getOwnedSession(req, sessionId) {
-  if (!isUuidV4(sessionId)) return null;
-  const session = activeSessions.get(sessionId);
-  if (!session || session.userId !== req.user?.id) return null;
-  return session;
+// Returns the session only if it exists and belongs to the authenticated user; the owner
+// check is part of the store query. Unknown and foreign sessions are indistinguishable.
+// Throws SessionStoreUnavailableError when the store cannot answer: never "not found".
+async function getOwnedSession(req, sessionId) {
+  if (!isUuidV4(sessionId) || !req.user?.id) return null;
+  return sessionStore.getOwned(sessionId, req.user.id);
 }
 
 const sendSessionNotFound = (res) => res.status(404).json({ error: 'Session not found' });
+const SESSION_STORE_UNAVAILABLE_BODY = { error: 'Session service unavailable', code: 'SESSION_STORE_UNAVAILABLE' };
+const sendSessionStoreUnavailable = (res) => res.status(503).json(SESSION_STORE_UNAVAILABLE_BODY);
+const isSessionStoreDown = (error) => error instanceof SessionStoreUnavailableError;
 
 // API Routes
 
@@ -690,23 +700,25 @@ async function handleCloneRequest(req, res) {
     return res.status(400).json({ error: 'Repository URL or repository data is required' });
   }
 
-  const sessionId = uuidv4();
-  const clonePath = resolveSessionClonePath(TEMP_DIR, sessionId);
   const fullName = `${identity.owner}/${identity.repo}`;
 
-  // Create session (no credentials, no client-supplied URLs)
-  const session = {
-    userId: req.user.id,
-    owner: identity.owner,
-    repo: identity.repo,
-    fullName,
-    repoName: identity.repo,
-    displayUrl: buildDisplayUrl(identity),
-    clonePath,
-    status: 'cloning',
-    createdAt: new Date()
-  };
-  activeSessions.set(sessionId, session);
+  // Create the session (no credentials, no client-supplied URLs, no filesystem path)
+  let session;
+  try {
+    session = await sessionStore.create({
+      userId: req.user.id,
+      owner: identity.owner,
+      repo: identity.repo,
+      fullName,
+      repoName: identity.repo,
+      displayUrl: buildDisplayUrl(identity)
+    });
+  } catch (error) {
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
+    throw error;
+  }
+  const sessionId = session.id;
+  const clonePath = resolveSessionClonePath(TEMP_DIR, sessionId);
 
   emitProgress(sessionId, {
     step: 'Cloning repository...',
@@ -726,9 +738,13 @@ async function handleCloneRequest(req, res) {
     const cloneError = error instanceof CloneError ? error : new CloneError('CLONE_FAILED');
     const details = error instanceof CloneError ? error.details : error;
 
-    session.status = 'failed';
-    session.error = cloneError.publicMessage;
     await fs.remove(path.dirname(clonePath)).catch(() => {});
+    try {
+      await sessionStore.update(sessionId, { status: 'failed', error: cloneError.publicMessage });
+    } catch (storeError) {
+      if (!isSessionStoreDown(storeError)) throw storeError;
+      console.error(`Clone failed and the session could not be updated: session=${sessionId}`);
+    }
 
     emitProgress(sessionId, {
       step: 'Clone failed',
@@ -741,8 +757,13 @@ async function handleCloneRequest(req, res) {
     return sendCloneError(res, cloneError.code);
   }
 
-  session.status = 'cloned';
-  session.clonedAt = new Date();
+  try {
+    await sessionStore.update(sessionId, { status: 'cloned', clonedAt: new Date() });
+  } catch (error) {
+    if (!isSessionStoreDown(error)) throw error;
+    await fs.remove(path.dirname(clonePath)).catch(() => {});
+    return sendSessionStoreUnavailable(res);
+  }
 
   emitProgress(sessionId, {
     step: 'Repository cloned successfully',
@@ -771,22 +792,44 @@ app.post('/api/clone-repo', rateLimiters.clone, async (req, res) => {
 
 // Analyze repository endpoint
 app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
+  const { sessionId } = req.body || {};
+  let session = null;
   try {
-    const { sessionId } = req.body;
-    
     // Ownership first, so a non-owner never learns the session's status
-    const session = getOwnedSession(req, sessionId);
-    if (!session) {
-      return sendSessionNotFound(res);
+    session = await getOwnedSession(req, sessionId);
+  } catch (error) {
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
+    console.error(`Analysis error: ${redactSecrets(error)}`);
+    return res.status(500).json({ error: 'Analysis failed' });
+  }
+  if (!session) {
+    return sendSessionNotFound(res);
+  }
+  if (session.status !== 'cloned') {
+    return res.status(400).json({ error: 'Repository not ready for analysis' });
+  }
+
+  const markFailed = async () => {
+    try {
+      await sessionStore.update(sessionId, { status: 'failed', error: 'Analysis failed' });
+    } catch {
+      console.error(`Could not mark the session failed: session=${sessionId}`);
     }
-    
-    if (session.status !== 'cloned') {
-      return res.status(400).json({ error: 'Repository not ready for analysis' });
+    emitProgress(sessionId, {
+      step: 'Analysis failed',
+      progress: 0,
+      status: 'failed',
+      error: 'Analysis failed'
+    });
+  };
+
+  try {
+    try {
+      await sessionStore.update(sessionId, { status: 'analyzing', analysisStartedAt: new Date() });
+    } catch (error) {
+      if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
+      throw error;
     }
-    
-    // Update session status
-    session.status = 'analyzing';
-    session.analysisStartedAt = new Date();
     
     emitProgress(sessionId, {
       step: 'Starting AI agent analysis...',
@@ -807,15 +850,20 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     
     const result = await runAgentPipeline(
       session.fullName,
-      session.clonePath,
+      resolveSessionClonePath(TEMP_DIR, sessionId),
       progressCallback,
       { sessionId, userId: req.user.id }
     );
     
-    // Store analysis results
-    session.analysisResult = result;
-    session.status = 'completed';
-    session.completedAt = new Date();
+    // Store analysis results: the session and its files, in one transaction
+    try {
+      await sessionStore.saveResult(sessionId, result);
+    } catch (error) {
+      if (!isSessionStoreDown(error)) throw error;
+      console.error(`Analysis results could not be saved: session=${sessionId}`);
+      await markFailed();
+      return sendSessionStoreUnavailable(res);
+    }
     
     emitProgress(sessionId, {
       step: 'Analysis complete!',
@@ -836,21 +884,7 @@ app.post('/api/analyze', rateLimiters.analysis, async (req, res) => {
     
   } catch (error) {
     console.error(`Analysis error: ${redactSecrets(error)}`);
-    
-    const failedSessionId = req.body?.sessionId;
-    const session = getOwnedSession(req, failedSessionId);
-    if (session) {
-      session.status = 'failed';
-      session.error = 'Analysis failed';
-      
-      emitProgress(failedSessionId, {
-        step: 'Analysis failed',
-        progress: 0,
-        status: 'failed',
-        error: 'Analysis failed'
-      });
-    }
-    
+    await markFailed();
     res.status(500).json({ error: 'Analysis failed' });
   }
 });
@@ -860,7 +894,7 @@ app.get('/api/files/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     
-    const session = getOwnedSession(req, sessionId);
+    const session = await getOwnedSession(req, sessionId);
     if (!session) {
       return sendSessionNotFound(res);
     }
@@ -872,6 +906,7 @@ app.get('/api/files/:sessionId', async (req, res) => {
     res.json(toFilesResponse(session));
     
   } catch (error) {
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
     console.error(`Files retrieval error: ${redactSecrets(error)}`);
     res.status(500).json({ error: 'Failed to retrieve files' });
   }
@@ -882,7 +917,7 @@ app.get('/api/files/:sessionId/:filename', async (req, res) => {
   try {
     const { sessionId, filename } = req.params;
     
-    const session = getOwnedSession(req, sessionId);
+    const session = await getOwnedSession(req, sessionId);
     if (!session) {
       return sendSessionNotFound(res);
     }
@@ -905,6 +940,7 @@ app.get('/api/files/:sessionId/:filename', async (req, res) => {
     res.send(fileContent);
     
   } catch (error) {
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
     console.error(`File download error: ${redactSecrets(error)}`);
     res.status(500).json({ error: 'Failed to download file' });
   }
@@ -929,11 +965,11 @@ function getContentType(filename) {
 }
 
 // Get session status endpoint
-app.get('/api/status/:sessionId', (req, res) => {
+app.get('/api/status/:sessionId', async (req, res) => {
   try {
     const { sessionId } = req.params;
     
-    const session = getOwnedSession(req, sessionId);
+    const session = await getOwnedSession(req, sessionId);
     if (!session) {
       return sendSessionNotFound(res);
     }
@@ -941,34 +977,47 @@ app.get('/api/status/:sessionId', (req, res) => {
     res.json(toStatusResponse(sessionId, session));
     
   } catch (error) {
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
     console.error(`Status retrieval error: ${redactSecrets(error)}`);
     res.status(500).json({ error: 'Failed to retrieve status' });
   }
 });
 
-// Cleanup old sessions (runs every hour)
-setInterval(async () => {
-  const now = new Date();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-  
-  for (const [sessionId, session] of activeSessions.entries()) {
-    if (now - session.createdAt > maxAge) {
+// Removes temp/<id> directories of deleted sessions and orphans (no session row, e.g.
+// left by a crash). Only directories directly under TEMP_DIR whose names are UUID v4
+// are considered; symlinks and anything else are never touched. A directory whose
+// session cannot be looked up (store unavailable) is kept.
+async function removeSessionDirectories(deletedIds = []) {
+  let entries;
+  try {
+    entries = await fs.readdir(TEMP_DIR, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  const deleted = new Set(deletedIds);
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isUuidV4(entry.name)) continue;
+    let remove = deleted.has(entry.name);
+    if (!remove) {
       try {
-        // Remove cloned files
-        const sessionDir = path.join(TEMP_DIR, sessionId);
-        if (await fs.pathExists(sessionDir)) {
-          await fs.remove(sessionDir);
-        }
-        
-        // Remove from active sessions
-        activeSessions.delete(sessionId);
-        console.log(`Cleaned up session: ${sessionId}`);
-      } catch (error) {
-        console.error(`Failed to cleanup session ${sessionId}:`, error);
+        remove = !(await sessionStore.get(entry.name));
+      } catch {
+        continue;
       }
     }
+    if (remove) {
+      await fs.remove(path.join(TEMP_DIR, entry.name)).then(() => { removed++; }, () => {});
+    }
   }
-}, 60 * 60 * 1000); // Run every hour
+  return removed;
+}
+
+async function cleanupExpiredSessions() {
+  const deletedIds = await sessionStore.deleteExpired(new Date());
+  const removedDirectories = await removeSessionDirectories(deletedIds);
+  return { deletedSessions: deletedIds.length, removedDirectories };
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -1028,6 +1077,88 @@ async function startServer() {
   // Provider names and model IDs only; keys and URLs are never printed
   for (const line of describeAiRoutes(aiConfig)) console.log(`🤖 ${line}`);
 
+  // 1. Session store configuration. Names variables, never values.
+  const sessionStoreProblem = describeSessionStoreConfigProblem(process.env);
+  if (sessionStoreProblem) {
+    console.error(`❌ ${sessionStoreProblem}.`);
+    process.exit(1);
+  }
+  if (process.env.SESSION_STORE.trim() === 'database') {
+    const databaseProblem = describeDatabaseConfigProblem(process.env);
+    if (databaseProblem) {
+      console.error(`❌ ${databaseProblem}.`);
+      process.exit(1);
+    }
+    const tlsWarning = describeDatabaseTlsWarning(process.env);
+    if (tlsWarning) console.warn(`⚠️ ${tlsWarning}`);
+
+    let db;
+    try {
+      db = await import('./db/client.js');
+    } catch {
+      console.error('❌ Prisma client not generated: run npm run db:generate');
+      process.exit(1);
+    }
+    disconnectDatabase = db.disconnectPrisma;
+    const prisma = db.getPrisma();
+    const withTimeout = (promise) => Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DATABASE_TIMEOUT_MS).unref())
+    ]);
+
+    // 2. Connectivity, then the schema. Never print the URL, host or password.
+    try {
+      await withTimeout(prisma.$queryRaw`select 1`);
+    } catch {
+      console.error('❌ Database unreachable (DATABASE_URL)');
+      await disconnectDatabase();
+      process.exit(1);
+    }
+    try {
+      await withTimeout(prisma.analysisSession.findFirst({ select: { id: true } }));
+    } catch (error) {
+      console.error(error?.code === 'P2021'
+        ? '❌ Database schema missing: run npm run db:deploy'
+        : '❌ Database unreachable (DATABASE_URL)');
+      await disconnectDatabase();
+      process.exit(1);
+    }
+    sessionStore = createSessionStore({ kind: 'database', prisma, jsonNull: db.Prisma.JsonNull });
+  } else {
+    sessionStore = createSessionStore({ kind: 'memory' });
+    // 5. A memory store loses every session on restart
+    if (isProduction) {
+      console.warn('⚠️ SESSION_STORE=memory: analysis sessions and results are lost on every restart. Use "database" in production.');
+    }
+  }
+
+  // AI call records go to the store as well as stdout; a failing insert never affects a call
+  setDefaultAiCallSink((record) => {
+    logCallRecord(record);
+    return sessionStore.recordAiCall(record);
+  });
+
+  try {
+    // 3. Sessions that were in flight when the server stopped can never finish
+    const failed = await sessionStore.markInFlightFailed('The server restarted before this analysis finished. Please run it again.');
+    console.log(`🧹 Interrupted sessions marked failed: ${failed}`);
+
+    // 4. Expired sessions, their temp directories and orphaned temp directories
+    await initializeTempDir();
+    const cleaned = await cleanupExpiredSessions();
+    console.log(`🧹 Expired sessions removed: ${cleaned.deletedSessions}; temp directories removed: ${cleaned.removedDirectories}`);
+  } catch (error) {
+    if (!isSessionStoreDown(error)) throw error;
+    console.error('❌ Database unreachable (DATABASE_URL)');
+    await disconnectDatabase?.();
+    process.exit(1);
+  }
+
+  // Hourly cleanup; never keeps the process alive on its own
+  setInterval(() => {
+    cleanupExpiredSessions().catch(() => console.warn('session cleanup skipped: session store unavailable'));
+  }, 60 * 60 * 1000).unref();
+
   try {
     console.log('🚀 Starting InfraMind Server...');
     console.log(`📍 Node.js version: ${process.version}`);
@@ -1045,9 +1176,6 @@ async function startServer() {
     Object.entries(envChecks).forEach(([key, value]) => {
       console.log(`   ${key}: ${value}`);
     });
-    
-    // Initialize temp directory
-    await initializeTempDir();
     
     // Start the server
     server.listen(PORT, '0.0.0.0', () => {
@@ -1072,6 +1200,18 @@ async function startServer() {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
+}
+
+// Close the database pool before exiting on SIGTERM / SIGINT
+let shuttingDown = false;
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    setTimeout(() => process.exit(0), 3000).unref();
+    await disconnectDatabase?.().catch(() => {});
+    process.exit(0);
+  });
 }
 
 // Start the server

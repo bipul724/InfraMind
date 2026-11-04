@@ -2,7 +2,7 @@
 // This file imports the AI layer before any AI variable exists, then sets them.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateText, resetDefaultAiClient } from '../ai/index.js';
+import { generateText, resetDefaultAiClient, setDefaultAiCallSink } from '../ai/index.js';
 
 const AI_VARS = ['AI_PROVIDERS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_BASE_URL', 'AI_TIMEOUT_MS', 'AI_CALL_BUDGET_MS'];
 const saved = Object.fromEntries(AI_VARS.map((key) => [key, process.env[key]]));
@@ -38,4 +38,32 @@ test('the key set after the import is the one sent, through the fetch stubbed at
   assert.equal(requests[0].url, 'http://127.0.0.1:9/groq/chat/completions');
   assert.equal(requests[0].headers.Authorization, 'Bearer key-set-after-import-LAZY_MARKER');
   assert.equal(requests[0].body.model, 'lazy-model');
+});
+
+test('setDefaultAiCallSink applies to the next default client and is cleared by resetDefaultAiClient', async () => {
+  resetDefaultAiClient();
+  const records = [];
+  setDefaultAiCallSink((record) => records.push(record));
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'sink ok' } }] }), { status: 200 });
+
+  await generateText({ task: 'verifier', system: 's', prompt: 'p', meta: { sessionId: 'S', userId: 'U' } });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].task, 'verifier');
+  assert.equal(records[0].outcome, 'ok');
+  assert.equal(records[0].userId, 'U');
+
+  assert.throws(() => setDefaultAiCallSink('not a function'), TypeError);
+
+  // After a reset the default stdout sink is back: the custom one sees nothing more
+  resetDefaultAiClient();
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    await generateText({ task: 'planner', system: 's', prompt: 'p' });
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(records.length, 1);
+  assert.ok(lines.some((line) => line.startsWith('ai_call task=planner')));
 });

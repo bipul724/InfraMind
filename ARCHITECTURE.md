@@ -61,6 +61,19 @@ Indexed on `(user_id, created_at desc)`.
 ### Row Level Security
 RLS is enabled. Policies allow a signed-in user to `select`, `insert` and `delete` only rows where `user_id = auth.uid()`. There is no `update` policy. The browser queries the table directly with the publishable (anon) key plus the user's session, and the policies keep users separated. Code: `SavedFilesAPI` in `client/src/lib/api.ts`.
 
+### Server-owned tables (Prisma)
+With `SESSION_STORE=database` the server keeps analysis state in Postgres, reached through Prisma (`server/db/`, `server/utils/sessionStore.js`). Restarts and redeploys lose no completed result.
+
+| Table | Contents |
+|-------|----------|
+| `analysis_sessions` | One row per analysis: owner `user_id`, repository identity (`owner`, `repo`, `full_name`, `repo_name`, `display_url`), `status` (`cloning`, `cloned`, `analyzing`, `completed`, `failed`), public `error`, tech stack, codebase analysis, messages, errors, last progress snapshot, verification results, timestamps and `expires_at` (24 h). The clone path is never stored; it is derived from the session id |
+| `generated_files` | `(session_id, kind)` primary key (`dockerfile`, `githubActions`, `envExample`); `content` up to 200,000 characters; cascades with its session |
+| `ai_calls` | One metadata row per AI attempt: task, provider, model, attempt, outcome, HTTP status, latency, token counts, `session_id`, `user_id`. No prompt, response or error text. Purged after 30 days |
+
+These tables, and Prisma's `_prisma_migrations`, have RLS enabled with **no policies** and no privileges for `anon` or `authenticated`, so Supabase's Data API exposes nothing. The server connects as the table owner, which bypasses RLS, so every per-user read filters by `user_id` in the query itself.
+
+**Ownership:** Prisma migrations (`server/prisma/migrations`, applied with `npm run db:deploy`) own `analysis_sessions`, `generated_files` and `ai_calls`. Supabase SQL migrations (`supabase/migrations`) own `saved_files` and `github_connections`.
+
 ## 🐙 GitHub Integration Layer
 
 ### Purpose

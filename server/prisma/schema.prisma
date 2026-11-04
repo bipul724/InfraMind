@@ -1,0 +1,79 @@
+// Server-owned tables. Prisma owns analysis_sessions, generated_files and ai_calls;
+// saved_files and github_connections belong to the Supabase SQL migrations (decision D-8).
+// Migrations: npm run db:migrate:dev (local databases only), npm run db:deploy (Supabase).
+
+generator client {
+  // prisma-client-js emits plain JavaScript, so `node server.js` loads it with no
+  // build step or TypeScript support (the newer prisma-client generator emits .ts)
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model AnalysisSession {
+  id                  String          @id @db.Uuid
+  userId              String          @map("user_id") @db.Uuid
+  owner               String
+  repo                String
+  fullName            String          @map("full_name")
+  repoName            String          @map("repo_name")
+  displayUrl          String          @map("display_url")
+  // check (status in ('cloning','cloned','analyzing','completed','failed')): added in the migration SQL
+  status              String
+  error               String?
+  techStack           Json?           @map("tech_stack")
+  codebaseAnalysis    Json?           @map("codebase_analysis")
+  messages            Json?
+  errors              Json?
+  lastProgress        Json?           @map("last_progress")
+  verificationResults String?         @map("verification_results")
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  clonedAt            DateTime?       @map("cloned_at") @db.Timestamptz(6)
+  analysisStartedAt   DateTime?       @map("analysis_started_at") @db.Timestamptz(6)
+  completedAt         DateTime?       @map("completed_at") @db.Timestamptz(6)
+  expiresAt           DateTime        @map("expires_at") @db.Timestamptz(6)
+  files               GeneratedFile[]
+  aiCalls             AiCall[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@index([status])
+  @@map("analysis_sessions")
+}
+
+model GeneratedFile {
+  sessionId String          @map("session_id") @db.Uuid
+  kind      String
+  // check (length(content) <= 200000): added in the migration SQL
+  content   String
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  session   AnalysisSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, kind])
+  @@map("generated_files")
+}
+
+// Metadata only: there is deliberately no column for prompt, response or error text
+model AiCall {
+  id           BigInt           @id @default(autoincrement())
+  sessionId    String?          @map("session_id") @db.Uuid
+  userId       String?          @map("user_id") @db.Uuid
+  task         String
+  provider     String
+  model        String
+  outcome      String
+  attempt      Int
+  httpStatus   Int?             @map("http_status")
+  latencyMs    Int              @map("latency_ms")
+  inputTokens  Int?             @map("input_tokens")
+  outputTokens Int?             @map("output_tokens")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  session      AnalysisSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("ai_calls")
+}

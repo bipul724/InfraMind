@@ -54,7 +54,7 @@ let failed = false;
 for (const name of providers) {
   const provider = config.providers[name];
   const text = await probe(name, (client) =>
-    client.generateText({ task: 'planner', system: 'You are a health check.', prompt: 'Reply with the single word: pong', maxTokens: 64 })
+    client.generateText({ task: 'planner', system: 'You are a health check.', prompt: 'Reply with the single word: pong', maxTokens: 1024 })
   );
   const json = await probe(name, (client) =>
     client.generateObject({
@@ -63,7 +63,8 @@ for (const name of providers) {
       prompt: 'Return {"ok": true}.',
       schema: okSchema,
       schemaName: 'health_check',
-      maxTokens: 256
+      // Reasoning models spend output tokens on reasoning first; small caps leave no content
+      maxTokens: 1024
     })
   );
   if (!text.ok || !json.ok) failed = true;
