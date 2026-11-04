@@ -46,7 +46,7 @@ export const PROVIDERS = Object.freeze({
     },
     // Ask OpenRouter to route only to upstreams that don't store or train on prompts,
     // unless OPENROUTER_DATA_COLLECTION=allow (validated in config.js)
-    extraBody: (env) => ({ provider: { data_collection: env.OPENROUTER_DATA_COLLECTION || 'deny' } })
+    extraBody: (env) => ({ provider: { data_collection: String(env.OPENROUTER_DATA_COLLECTION || '').trim() || 'deny' } })
   }),
   novita: Object.freeze({
     name: 'novita',

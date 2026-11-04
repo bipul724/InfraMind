@@ -107,6 +107,7 @@ export function buildEnv(cwd, port, overrides = {}) {
     GITHUB_OAUTH_BASE_URL: fakes?.github.url,
     GITHUB_API_BASE_URL: fakes?.github.url,
     GITHUB_TOKEN_STORE: 'memory',
+    SESSION_STORE: 'memory',
     GITHUB_TOKEN_ENC_KEY: randomEncryptionKey(),
     SUPABASE_URL: fakes?.supabase.url,
     SUPABASE_ANON_KEY: fakes?.supabase.anonKey,

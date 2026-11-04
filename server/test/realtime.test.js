@@ -21,6 +21,10 @@ const extraSessionsOfA = Array.from({ length: MAX_ROOMS_PER_SOCKET + 1 }, () => 
 const openClients = new Set();
 // Added to the realtime module's clock (not the verifier's) to simulate token expiry
 let clockOffsetMs = 0;
+// Fake session store switches
+let storeDown = false;
+let persistFails = false;
+const persistDelays = [];
 
 before(async () => {
   fake = await startFakeSupabase();
@@ -31,7 +35,23 @@ before(async () => {
   httpServer = http.createServer();
   ioServer = new Server(httpServer);
   const verifier = createSupabaseVerifier({ supabaseUrl: fake.url, anonKey: fake.anonKey });
-  realtime = attachRealtime(ioServer, { verifier, getSession: (id) => sessions.get(id), now: () => Date.now() + clockOffsetMs });
+  // The session store is async (B2.0b): owned lookups and progress persistence
+  realtime = attachRealtime(ioServer, {
+    verifier,
+    getOwnedSession: async (id, userId) => {
+      if (storeDown) throw new Error('store down');
+      const session = sessions.get(id);
+      return session && session.userId === userId ? session : null;
+    },
+    saveProgress: async (id, payload) => {
+      const delay = persistDelays.shift() ?? 0;
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      if (persistFails) throw new Error('write failed');
+      const session = sessions.get(id);
+      if (session) session.lastProgress = payload;
+    },
+    now: () => Date.now() + clockOffsetMs
+  });
   await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
   url = `http://127.0.0.1:${httpServer.address().port}`;
 });
@@ -204,7 +224,7 @@ describe('subscriptions and private rooms', () => {
 
 describe('T-118: refused subscriptions and token expiry', () => {
   test('a refused subscribe never delivers the snapshot of a session that has one', async () => {
-    realtime.emitProgress(S1, { step: 'snapshot for the owner only', progress: 50, status: 'analyzing' });
+    await realtime.emitProgress(S1, { step: 'snapshot for the owner only', progress: 50, status: 'analyzing' });
     assert.ok(sessions.get(S1).lastProgress, 'S1 has a snapshot');
 
     const b = await connect({ token: fake.issueToken(USER_B) });
@@ -284,5 +304,62 @@ describe('T-118: refused subscriptions and token expiry', () => {
       globalThis.setTimeout = realSetTimeout;
       globalThis.clearTimeout = realClearTimeout;
     }
+  });
+});
+
+describe('B2.0b: async session store', () => {
+  test('a refused subscriber never joins the room: later progress for that session does not reach it', async () => {
+    const b = await connect({ token: fake.issueToken(USER_B) });
+    const bEvents = record(b);
+    assert.deepEqual(await subscribe(b, S1), { ok: false, error: 'Session not found' });
+    await realtime.emitProgress(S1, { step: 'after the refusal', progress: 60, status: 'analyzing' });
+    await settle(300);
+    assert.equal(bEvents.length, 0);
+    b.close();
+  });
+
+  test('a store failure during subscribe replies "Session service unavailable" and joins nothing', async () => {
+    const a = await connect({ token: fake.issueToken(USER_A) });
+    const events = record(a);
+    storeDown = true;
+    try {
+      assert.deepEqual(await subscribe(a, S1), { ok: false, error: 'Session service unavailable' });
+    } finally {
+      storeDown = false;
+    }
+    await realtime.emitProgress(S1, { step: 'while not subscribed', status: 'analyzing' });
+    await settle(200);
+    assert.equal(events.length, 0, 'no snapshot and no room membership');
+    a.close();
+  });
+
+  test('progress is emitted at once and persisted in order, even when writes finish out of order', async () => {
+    const a = await connect({ token: fake.issueToken(USER_A) });
+    const events = record(a);
+    const target = extraSessionsOfA[0]; // owned by A
+    assert.deepEqual(await subscribe(a, target), { ok: true });
+    persistDelays.push(150, 0, 0); // the first write is the slowest
+    const first = realtime.emitProgress(target, { step: 'one', status: 'analyzing' });
+    realtime.emitProgress(target, { step: 'two', status: 'analyzing' });
+    const last = realtime.emitProgress(target, { step: 'three', status: 'analyzing' });
+    await waitFor(() => events.filter((e) => e.sessionId === target).length >= 3, 1000);
+    assert.equal(sessions.get(target).lastProgress?.step === 'three', false, 'emitting does not wait for persistence');
+    await Promise.all([first, last]);
+    assert.equal(sessions.get(target).lastProgress.step, 'three', 'the last emitted payload is the one stored');
+    a.close();
+  });
+
+  test('a failed progress write is logged and never thrown', async () => {
+    const warnings = [];
+    const original = console.warn;
+    console.warn = (...args) => warnings.push(args.join(' '));
+    persistFails = true;
+    try {
+      await realtime.emitProgress(S1, { step: 'unsaved', status: 'analyzing' });
+    } finally {
+      persistFails = false;
+      console.warn = original;
+    }
+    assert.deepEqual(warnings, [`progress persist failed session=${S1}`]);
   });
 });

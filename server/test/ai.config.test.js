@@ -84,6 +84,13 @@ describe('valid configurations', () => {
     assert.deepEqual(config.providers.openrouter.headers, { 'X-Title': 'InfraMind' });
   });
 
+  test('OPENROUTER_DATA_COLLECTION is sent trimmed, as it is validated (T-255)', () => {
+    const config = loadAiConfig({ AI_PROVIDERS: 'openrouter', OPENROUTER_API_KEY: 'k', OPENROUTER_MODEL: 'm', OPENROUTER_DATA_COLLECTION: ' allow ' });
+    assert.deepEqual(config.providers.openrouter.body, { provider: { data_collection: 'allow' } });
+    const blank = loadAiConfig({ AI_PROVIDERS: 'openrouter', OPENROUTER_API_KEY: 'k', OPENROUTER_MODEL: 'm', OPENROUTER_DATA_COLLECTION: '   ' });
+    assert.deepEqual(blank.providers.openrouter.body, { provider: { data_collection: 'deny' } });
+  });
+
   test('a key or model missing for a provider outside every chain is fine', () => {
     assert.doesNotThrow(() => loadAiConfig({ ...base(), OPENROUTER_MODEL: '', NOVITA_API_KEY: '' }));
   });

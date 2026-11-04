@@ -12,6 +12,10 @@
     "test:system": "node test-system.js",
     "test:render": "node test-render.js",
     "ai:smoke": "node scripts/ai-smoke.js",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "node scripts/assert-local-db.js && prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
     "dev": "node --watch server.js",
     "dev:debug": "NODE_DEBUG=http,net node --watch server.js",
     "install-deps": "npm install",
@@ -33,6 +37,8 @@
   "author": "InfraMind",
   "license": "MIT",
   "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "axios": "^1.6.7",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -43,16 +49,18 @@
     "helmet": "^8.1.0",
     "joi": "^17.13.3",
     "node-fetch": "^3.3.2",
+    "pg": "8.23.1",
     "socket.io": "^4.7.4",
     "uuid": "^9.0.1",
     "zod": "^4.6.7"
   },
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^20.19 || ^22.12 || >=24.0"
   },
   "devDependencies": {
     "jsonwebtoken": "^9.0.2",
+    "prisma": "7.10.1",
     "socket.io-client": "~4.8.1"
   }
 }

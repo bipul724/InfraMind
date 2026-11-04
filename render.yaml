@@ -3,12 +3,15 @@ services:
   - type: web
     name: inframind-backend
     env: node
-    buildCommand: cd server && npm install
+    # --include=dev keeps the Prisma CLI available although NODE_ENV=production;
+    # db:generate writes the Prisma client to server/generated/. Migrations are never run
+    # here: the owner runs `npm run db:deploy` deliberately before deploying.
+    buildCommand: cd server && npm ci --include=dev && npm run db:generate
     startCommand: cd server && npm start
     plan: free
     envVars:
       - key: NODE_VERSION
-        value: 18.0.0
+        value: "24"
       - key: NODE_ENV
         value: production
       - key: PORT
