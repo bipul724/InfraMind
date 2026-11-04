@@ -43,7 +43,8 @@ The server exits at startup without these (`startServer` in `server/server.js`):
 ## AI providers
 
 - [ ] `RUN_LIVE_AI=1 npm run ai:smoke` passes for the configured providers (`server/scripts/ai-smoke.js`)
-- [ ] You accept that the repository file list, detected tech stack and `package.json` dependencies are sent to these providers, including for private repositories ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers))
+- [ ] You accept that up to 300 repository file paths, the detected tech stack, the contents of the top-level manifests (such as `requirements.txt`, `pyproject.toml`, `package.json`; up to 32 KB) and excerpts of an existing Dockerfile and workflows are sent to these providers, including for private repositories ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers))
+- [ ] You know that credentials found in manifests and in the existing Dockerfile and workflow excerpts are redacted on a best-effort basis before they reach a prompt: URL user names and passwords, tokens shaped like known secrets, and the values of keys containing TOKEN, SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY become `REDACTED` (`redactCredentials` in `server/agents/grounding.js`); keep secrets out of manifests.
 - [ ] OpenRouter: `OPENROUTER_DATA_COLLECTION` left at `deny` unless you decide otherwise
 
 ## Checks after deploying
@@ -53,6 +54,7 @@ The server exits at startup without these (`startServer` in `server/server.js`):
 - [ ] Connect GitHub completes on `/auth/success` and the dashboard shows the GitHub login
 - [ ] A repository picked on `/select-repo` (Browse Repositories) clones and analyzes, including a private one
 - [ ] The generated files download, and "Save to Account" stores them in Saved Files
+- [ ] Each downloaded file starts with the file itself (no prose before it), and a completed run shows the verifier's text under "Review"
 - [ ] `/dashboard?session=<id>` (where `/select-repo` lands after an analysis, and the "View" button in Results from This Visit) shows a completed session's files; an unknown id shows "This analysis was not found or has expired"
 - [ ] A second account can see neither the first account's sessions (404 on `/api/status/:sessionId`) nor its saved files
 - [ ] After a backend restart, a completed session's files are still returned by `GET /api/files/:sessionId` (`SESSION_STORE=database`)
@@ -66,5 +68,8 @@ Each item is a fact about the code today, for deciding what to fix before launch
 - The agents report progress only after all four have run. Until then the step cards show one shared "In sequence" state; after the result event they show Done, Failed or Not run for each agent (`server/agents/index.js`, `client/src/components/AgentProgress.tsx`).
 - Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
 - Only `/api/clone-repo` and `/api/analyze` are rate-limited (`server/utils/security.js`, `server/server.js`).
-- When all three generator calls fail, the verifier makes no AI call, but the landing page still says "5 AI calls per run" and the verifier's step card says "AI task: verifier, 1 call" (`client/src/pages/Landing.tsx`, `client/src/components/AgentProgress.tsx`, `server/agents/index.js`).
+- File validation checks format and the workflow policy only. It does not build the image, run the workflow, or check that the `.env.example` variables are complete (`server/agents/files.js`).
+- The generated workflow triggers on `main`, with a comment to change it: the analyzer does not know the repository's default branch (`server/agents/prompts.js`).
+- Java `spring` detection still uses a file-path substring; Python frameworks come from the dependency names (`server/agents/index.js` `analyzeTechStack`).
+- The verifier's review is AI text shown as advice; nothing checks it (`client/src/components/AgentProgress.tsx`).
 - A clone stays on the server's disk until its session expires, 24 hours after creation (`server/server.js`, `server/utils/sessionStore.js`).

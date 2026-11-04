@@ -1,0 +1,99 @@
+Here is the optimized, multi-stage, and secure production `Dockerfile` for your Python RAG application.
+
+### `Dockerfile`
+
+```dockerfile
+# ==========================================
+# Stage 1: Builder
+# ==========================================
+FROM python:3.11-slim AS builder
+
+# Prevent Python from writing .pyc files and enable unbuffered logging
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system dependencies needed for compiling C extensions / building packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment to isolate dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Leverage Docker layer caching: copy requirements first
+COPY requirements.txt .
+
+# Upgrade pip and install application dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+
+# ==========================================
+# Stage 2: Final Runtime
+# ==========================================
+FROM python:3.11-slim AS runner
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    PORT=5000
+
+WORKDIR /app
+
+# Install runtime utilities (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python virtualenv from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Create a non-root security group and user
+RUN groupadd -g 10001 appgroup && \
+    useradd -u 10001 -g appgroup -s /bin/sh -m appuser
+
+# Copy application source code and set correct permissions
+COPY --chown=appuser:appgroup . /app
+
+# Ensure data directory exists and is writable for RAG embeddings/vector store caching
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+
+# Switch to non-root user
+USER appuser
+
+# Expose app port
+EXPOSE 5000
+
+# Container healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || curl -f http://localhost:${PORT}/ || exit 1
+
+# Launch the application
+CMD ["python", "app.py"]
+```
+
+---
+
+### Key Optimization & Security Features:
+
+1. **Multi-Stage Build**:
+   - **Builder Stage**: Installs `build-essential` and builds wheels into a Python virtual environment (`/opt/venv`).
+   - **Runner Stage**: Drops build tools and only copies the lightweight virtual environment, reducing image size and attack surface.
+
+2. **Security & Least Privilege**:
+   - Runs as a non-root user (`appuser`, UID `10001`).
+   - Excludes unnecessary system binaries and cleans up `apt` package lists after installation.
+
+3. **Performance & Caching**:
+   - `COPY requirements.txt` before copying the rest of the source code ensures Docker caches `pip install` layers when code changes without altering dependencies.
+   - `PYTHONDONTWRITEBYTECODE=1` prevents `.pyc` clutter.
+   - `PYTHONUNBUFFERED=1` ensures real-time logging output in container logs.
+
+4. **Production Readiness**:
+   - Includes health check (`HEALTHCHECK`) to integrate seamlessly with container orchestrators (Docker Swarm, Kubernetes, ECS).
+   - Dynamically handles write permissions for the `/app/data` directory required by RAG vector stores or file ingest processes.

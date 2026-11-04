@@ -172,7 +172,7 @@ sequenceDiagram
     S->>St: status analyzing
     S->>B: progress 30%, analyzing
     S->>P: runAgentPipeline(owner/repo, clone path)
-    P->>AI: generateText: planner x1, generator x3, verifier x1 or x0
+    P->>AI: generateText: planner x1, generator x3 to x6, verifier x1 or x0
     P-->>S: result
     S->>B: progress 100% or 95%, analyzing, with messages and errors
     S->>St: saveResult: status completed plus generated files
@@ -190,7 +190,10 @@ Details:
 - The agents report progress once, after all four have run. That event carries 100% when the verifier's AI call succeeded or the verifier was skipped (no generated file), and 95% when its call failed (`server/agents/index.js`).
 - The final `completed` event, the `POST /api/analyze` response and `GET /api/files/:sessionId` all carry the run's `messages` and `errors`, copied through an allow-list (`toAgentMessages`, `toErrorList` in `server/utils/sessionView.js`). The final event is the stored snapshot, so a late subscriber and a reopened session see which agents finished and why files are missing (`server/server.js`).
 - `POST /api/analyze` answers only after the pipeline has finished and the result is saved (`server/server.js`).
-- An AI failure inside an agent does not fail the session. The agent adds a fixed message to `errors` and the pipeline continues. The three generator calls are independent: a failed call adds one `Generator Agent Error:` entry and the other files are kept. Only when all three fail does the session complete with no generated files, and then the verifier makes no AI call (`server/agents/index.js`).
+- An AI failure inside an agent does not fail the session. The agent adds a fixed message to `errors` and the pipeline continues. The three files are generated independently: a failed AI call adds one `Generator Agent Error:` entry and the other files are kept. Only when all three fail does the session complete with no generated files, and then the verifier makes no AI call (`server/agents/index.js`).
+- Each generator reply is reduced to one raw file and validated before it is saved: a Dockerfile must consist of Dockerfile instructions, the workflow must parse as YAML and follow a fixed CI-only policy (read-only `permissions`, major-version action refs, no registry login or push), and `.env.example` must hold only comments and `KEY=value` lines without real-looking credentials. An invalid reply gets one repair call; if that fails too, the file is left out and `errors` gets `Generator Agent Error: <label>: the AI output did not pass validation` (`server/agents/files.js`, `server/agents/index.js`). Details in [README-AI-AGENTS.md](README-AI-AGENTS.md#generated-files-extraction-validation-repair).
+- The generator prompts carry the repository's top-level manifests (up to 8 KB each, 32 KB in total), an excerpt of an existing Dockerfile and workflows, evidence flags (entry points, tests, linters) and at most 300 file paths, within 24,000 characters per prompt. `.env` files are never read (`server/agents/grounding.js`, `server/agents/prompts.js`).
+- The verifier sees each saved file up to 4,000 characters. Its review (`verificationResults`) is shown in the browser under "Review", as plain text, when a run completes and when a completed session is reopened (`client/src/components/AgentProgress.tsx`).
 - A failed clone or analysis sets the session to `failed` and emits a progress event with 0% and status `failed` (`server/server.js`).
 - Clone safety: HTTPS only, `--depth 1 --single-branch --no-tags`, `core.symlinks=false`, no shell, no credential prompts. A token is passed to git as an HTTP header through the child process environment, never in the URL or the arguments. Defaults: 120 s timeout (`CLONE_TIMEOUT_MS`) and 200 MB (`MAX_REPO_SIZE_MB`) (`server/utils/git.js`).
 - The clone stays on disk after the analysis; it is removed when its session is deleted at expiry, or at startup if it has no session (`server/server.js`).
@@ -320,6 +323,8 @@ The planner, generator and verifier ask `server/ai/` for a *task*; the configura
 | `OPENROUTER_DATA_COLLECTION` | `deny` | `deny`, `allow` | Sent to OpenRouter as `provider.data_collection` |
 
 Retries, fallback and the circuit breaker are described with a diagram in [README-AI-AGENTS.md](README-AI-AGENTS.md#ai-provider-fallback).
+
+A run makes 4 to 8 AI calls: planner 1, generator 3 to 6 (one per file, plus one repair call for each file whose reply fails validation), verifier 0 or 1. Each call can make several attempts across providers. The agents use `generateText` only; the generator validates its replies itself rather than asking for JSON (`server/agents/index.js`, `server/agents/files.js`).
 
 ## 8. Startup checks and configuration
 

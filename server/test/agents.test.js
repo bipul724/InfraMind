@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { analyzeTechStack, runAgentPipeline, scanProjectStructure } from '../agents/index.js';
 import { resetDefaultAiClient } from '../ai/index.js';
+import { generatorUserPrompt } from '../agents/prompts.js';
+import { defaultContentFor, generatorKindOf } from './fakeLlm.js';
 
 let fixtureDir;
 let outsideDir;
@@ -31,10 +33,11 @@ const savedEnv = {};
 let stubMode = 'ok';
 // Optional per-request failure: (requestBody) => true fails that request (SERVER-FIX)
 let failWhen = null;
+// B2.5: the generator's user prompts come from agents/prompts.js
 const PROMPTS = {
-  dockerfile: 'Generate an optimized Dockerfile for this project',
-  githubActions: 'Generate a complete GitHub Actions CI/CD workflow',
-  envExample: 'Generate a comprehensive .env.example file',
+  dockerfile: generatorUserPrompt('dockerfile'),
+  githubActions: generatorUserPrompt('githubActions'),
+  envExample: generatorUserPrompt('envExample'),
   verifier: 'Verify and validate all generated files'
 };
 const countRequests = (bodies, prompt) => bodies.filter((body) => body.includes(prompt)).length;
@@ -74,7 +77,12 @@ before(async () => {
       // A provider error body that echoes the key and a marker: neither may reach the result
       return new Response(JSON.stringify({ error: { message: `${ERROR_BODY_MARKER} invalid key ${STUB_KEY}` } }), { status: 500 });
     }
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+    // B2.5: generator calls get a valid file of the kind they ask for (a chat-style reply);
+    // every other call gets 'ok'
+    let parsed = null;
+    try { parsed = JSON.parse(String(options.body ?? '')); } catch { /* not JSON */ }
+    const content = generatorKindOf(parsed) ? defaultContentFor(parsed) : 'ok';
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
   };
 });
 

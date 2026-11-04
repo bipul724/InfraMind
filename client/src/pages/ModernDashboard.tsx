@@ -62,6 +62,9 @@ interface SessionView {
   errors: string[];
   techStack: TechStack | null;
   generatedFiles: string[];
+  // Set from GET /api/files for a completed session (null: no review); left undefined
+  // otherwise, so AgentProgress loads it when the run completes
+  verificationResults?: string | null;
 }
 
 // The step and percentage the server emits when a session enters each status
@@ -202,6 +205,7 @@ export const ModernDashboard = () => {
           ...base,
           techStack: result.techStack ?? null,
           generatedFiles: Object.keys(result.files ?? {}),
+          verificationResults: typeof result.verificationResults === 'string' ? result.verificationResults : null,
           ...(Array.isArray(result.messages) ? { messages: result.messages } : {}),
           ...(Array.isArray(result.errors) ? { errors: result.errors } : {})
         });
@@ -334,6 +338,7 @@ export const ModernDashboard = () => {
               errors={view.errors}
               techStack={view.techStack}
               generatedFiles={view.generatedFiles}
+              verificationResults={view.verificationResults}
               onProgressUpdate={handleSessionProgress}
             />
           </CardContent>

@@ -1,7 +1,15 @@
 import fs from 'fs-extra';
 import path from 'path';
-import { isPathInside, redactSecrets } from '../utils/repository.js';
+import { redactSecrets } from '../utils/repository.js';
 import { AiError, generateText } from '../ai/index.js';
+import { extractFileContent } from './files.js';
+import { collectRepositoryEvidence, detectPythonFrameworks, readRepoJson } from './grounding.js';
+import {
+  buildGeneratorSystemPrompt,
+  buildVerifierSystemPrompt,
+  generatorUserPrompt,
+  repairUserPrompt
+} from './prompts.js';
 
 // state.errors is sent to the browser, so it only ever holds fixed text: the AI layer's
 // constant message, or "Internal error" (the real error is logged server-side, redacted)
@@ -24,6 +32,7 @@ class AgentState {
     this.progress = 0;
     this.messages = [];
     this.errors = [];
+    this.evidence = null; // manifests and evidence flags for the generator prompts; never saved or sent to the browser
     this.meta = {}; // { sessionId, userId }: passed to the AI call records only, never to a provider
   }
 }
@@ -91,6 +100,9 @@ const analyzerAgent = async (state) => {
     // Detailed codebase analysis
     const detailedAnalysis = await performDetailedAnalysis(state.repoPath, projectFiles);
     state.codebaseAnalysis = detailedAnalysis;
+
+    // Manifests, existing configuration and evidence flags, for the generator prompts only
+    state.evidence = await collectRepositoryEvidence(state.repoPath, projectFiles);
     
     state.messages.push({
       agent: 'analyzer',
@@ -106,43 +118,62 @@ const analyzerAgent = async (state) => {
 };
 
 // Generator Agent - Generates CI/CD files based on analysis.
-// The three calls are independent: each success sets its own key, each failure adds one
-// "Generator Agent Error: <file>: ..." entry, and the other files are kept.
+// The three files are independent: each success sets its own key, each failure adds one
+// "Generator Agent Error: <label>: ..." entry, and the other files are kept.
+// Each reply is reduced to one raw file and validated (agents/files.js). An invalid reply
+// gets one repair call; if that fails too, the file is not saved. AI-layer errors are not
+// retried here: the AI layer already retries and falls back.
 const GENERATED_FILES = [
-  { key: 'dockerfile', label: 'Dockerfile', prompt: 'Generate an optimized Dockerfile for this project' },
-  { key: 'githubActions', label: 'GitHub Actions workflow', prompt: 'Generate a complete GitHub Actions CI/CD workflow' },
-  { key: 'envExample', label: '.env.example', prompt: 'Generate a comprehensive .env.example file' }
+  { key: 'dockerfile', label: 'Dockerfile' },
+  { key: 'githubActions', label: 'GitHub Actions workflow' },
+  { key: 'envExample', label: '.env.example' }
 ];
+const VALIDATION_FAILED = 'the AI output did not pass validation';
+
+// Kind and error list only: never file content
+const logValidationFailure = (kind, attempt, errors) => {
+  console.warn(`Generator validation failed: kind=${kind} attempt=${attempt} errors=${errors.join('; ')}`);
+};
+
+async function generateOneFile(state, file, system) {
+  const ask = (prompt) => generateText({ task: 'generator', system, prompt, meta: state.meta });
+
+  const first = extractFileContent(file.key, (await ask(generatorUserPrompt(file.key))).text);
+  if (first.ok) return first.content;
+  logValidationFailure(file.key, 1, first.errors);
+
+  const repaired = extractFileContent(file.key, (await ask(repairUserPrompt(file.key, first.errors))).text);
+  if (repaired.ok) return repaired.content;
+  logValidationFailure(file.key, 2, repaired.errors);
+  return null;
+}
 
 const generatorAgent = async (state) => {
   console.log('⚡ Generator Agent: Generating CI/CD files...');
   
   state.currentStep = 'Generating CI/CD configurations';
   state.progress = 80;
-  
-  const generatorPrompt = `You are a DevOps Generation Agent. Based on the codebase analysis, generate production-ready files.
 
-Tech Stack: ${JSON.stringify(state.techStack, null, 2)}
-Project Structure: ${JSON.stringify(state.projectStructure, null, 2)}
-Analysis: ${JSON.stringify(state.codebaseAnalysis, null, 2)}
-
-Generate the following files with best practices:
-1. Dockerfile - Multi-stage, optimized, secure
-2. GitHub Actions Workflow - Complete CI/CD pipeline
-3. .env.example - All required environment variables
-
-For each file, provide the complete content optimized for this specific project.`;
+  const context = {
+    repoName: state.repoName,
+    techStack: state.techStack,
+    projectFiles: state.projectStructure || {},
+    evidence: state.evidence || {
+      manifests: [], manifestsOmitted: [], existingConfig: { names: [], excerpts: [], omitted: [] },
+      entryPoints: [], testEvidence: [], linterEvidence: [], pythonDependencies: []
+    }
+  };
 
   state.generatedFiles = {};
   for (const file of GENERATED_FILES) {
     try {
-      const response = await generateText({
-        task: 'generator',
-        system: generatorPrompt,
-        prompt: file.prompt,
-        meta: state.meta
-      });
-      state.generatedFiles[file.key] = response.text;
+      const { system } = buildGeneratorSystemPrompt(file.key, context);
+      const content = await generateOneFile(state, file, system);
+      if (content === null) {
+        state.errors.push(`Generator Agent Error: ${file.label}: ${VALIDATION_FAILED}`);
+      } else {
+        state.generatedFiles[file.key] = content;
+      }
     } catch (error) {
       state.errors.push(`Generator Agent Error: ${file.label}: ${publicErrorMessage('Generator', error)}`);
     }
@@ -175,16 +206,10 @@ const verifierAgent = async (state) => {
     return state;
   }
   
-  const verifierPrompt = `You are a DevOps Verification Agent. Review the generated files for:
-1. Syntax correctness
-2. Security best practices
-3. Performance optimizations
-4. Compliance with standards
-
-Generated Files:
-${present.map((file) => `- ${file.label}: ${state.generatedFiles[file.key].substring(0, 500)}...`).join('\n')}
-
-Provide verification results and any recommendations for improvements.`;
+  // Each saved file up to 4,000 characters, within the 24,000-character prompt cap
+  const verifierPrompt = buildVerifierSystemPrompt(
+    present.map((file) => ({ label: file.label, content: state.generatedFiles[file.key] }))
+  );
 
   try {
     const response = await generateText({
@@ -251,33 +276,6 @@ async function scanProjectStructure(repoPath) {
   return structure;
 }
 
-// Read a file from the cloned repository. Only regular files whose real path stays
-// inside the repository are read, so symlinks cannot point the analyzer elsewhere.
-async function readRepoFile(repoPath, relativePath) {
-  const root = path.resolve(repoPath);
-  const target = path.resolve(root, relativePath);
-  if (!isPathInside(root, target)) {
-    throw new Error(`Refusing to read ${relativePath}: outside the repository`);
-  }
-
-  const stats = await fs.lstat(target);
-  if (!stats.isFile()) {
-    throw new Error(`Refusing to read ${relativePath}: not a regular file`);
-  }
-
-  // Catches symlinked parent directories as well
-  const [realRoot, realTarget] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
-  if (!isPathInside(realRoot, realTarget)) {
-    throw new Error(`Refusing to read ${relativePath}: outside the repository`);
-  }
-
-  return fs.readFile(target, 'utf8');
-}
-
-async function readRepoJson(repoPath, relativePath) {
-  return JSON.parse(await readRepoFile(repoPath, relativePath));
-}
-
 // Top-level Compose files (Compose's own default names)
 const COMPOSE_FILES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
 const KUBERNETES_DIRECTORIES = new Set(['k8s', 'kubernetes']);
@@ -326,9 +324,11 @@ async function analyzeTechStack(repoPath, projectFiles) {
     }
   } else if (fileNames.includes('requirements.txt') || fileNames.includes('pyproject.toml')) {
     techStack.primary = 'python';
-    if (fileNames.includes('manage.py')) techStack.frameworks.push('django');
-    if (fileNames.some(f => f.includes('flask'))) techStack.frameworks.push('flask');
-    if (fileNames.some(f => f.includes('fastapi'))) techStack.frameworks.push('fastapi');
+    // From the dependency names in requirements*.txt, pyproject.toml and Pipfile, not from
+    // file paths; manage.py still means django
+    const frameworks = await detectPythonFrameworks(repoPath, projectFiles);
+    if (fileNames.includes('manage.py') && !frameworks.includes('django')) frameworks.unshift('django');
+    techStack.frameworks.push(...frameworks);
   } else if (fileNames.includes('go.mod')) {
     techStack.primary = 'go';
   } else if (fileNames.includes('Cargo.toml')) {
@@ -444,4 +444,4 @@ export async function runAgentPipeline(repoName, repoPath, progressCallback = nu
   }
 }
 
-export { AgentState, scanProjectStructure, analyzeTechStack }; 
+export { AgentState, GENERATED_FILES, scanProjectStructure, analyzeTechStack }; 

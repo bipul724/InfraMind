@@ -41,10 +41,11 @@ Diagrams:
 
 - **Sign-in with Supabase Auth:** email and password, GitHub or Google (`client/src/lib/supabase.ts`). The server checks the Supabase access token on its account API routes (every `/api` route except `/api/metrics` and `/api/analytics`) and on Socket.IO connections (`server/server.js`, `server/utils/auth.js`, `server/utils/realtime.js`).
 - **GitHub connection for repository access:** a separate GitHub OAuth App, run by the server, with scope `repo,user:email`. The token stays on the server, encrypted with AES-256-GCM (`server/github.js`, `server/utils/githubConnections.js`). Connected users can list their repositories and organizations and analyze private repositories they can access.
-- **Analysis:** a shallow `git clone`, then the four agents. Only the planner, generator and verifier call the AI layer; the analyzer reads the cloned files (`server/agents/index.js`).
+- **Analysis:** a shallow `git clone`, then the four agents. Only the planner, generator and verifier call the AI layer, 4 to 8 calls per run. The analyzer reads the cloned files: the file list and the top-level manifests such as `requirements.txt`, `pyproject.toml` and `package.json`, never `.env` files (`server/agents/index.js`, `server/agents/grounding.js`).
+- **Checked output:** each generated file is extracted from the AI reply as one raw file and validated before it is saved; the workflow must be CI-only (read-only permissions, major-version action refs, no registry push). An invalid reply gets one repair attempt, then the file is left out with an error (`server/agents/files.js`).
 - **Configurable AI providers:** per-task provider chains with retries and fallback; no provider or model is built in as the default (`server/ai/`).
 - **Live progress:** Socket.IO `progress` events, delivered only to the session's owner (`server/utils/realtime.js`).
-- **Results:** download the generated files, or save them to the `saved_files` table in Supabase (`client/src/components/AgentProgress.tsx`, `client/src/lib/api.ts`).
+- **Results:** download the generated files, or save them to the `saved_files` table in Supabase, and read the verifier's review as plain text under "Review" (`client/src/components/AgentProgress.tsx`, `client/src/lib/api.ts`).
 - **Session storage:** in process memory or in Postgres through Prisma (`SESSION_STORE`, `server/utils/sessionStore.js`). Sessions expire 24 hours after creation.
 
 ## Technology

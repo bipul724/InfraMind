@@ -39,10 +39,10 @@ export const Landing = () => {
     { name: "Planner Agent", description: "Asks the AI for an analysis plan", icon: <Brain className="h-5 w-5" /> },
     {
       name: "Analyzer Agent",
-      description: "Scans files, detects the tech stack",
+      description: "Scans files and manifests, detects the tech stack",
       icon: <Search className="h-5 w-5" />
     },
-    { name: "Generator Agent", description: "Writes the three DevOps files", icon: <Settings className="h-5 w-5" /> },
+    { name: "Generator Agent", description: "Writes the three DevOps files and checks each one", icon: <Settings className="h-5 w-5" /> },
     { name: "Verifier Agent", description: "Asks the AI to review the files", icon: <CheckCircle className="h-5 w-5" /> }
   ];
 
@@ -52,21 +52,21 @@ export const Landing = () => {
       setCurrentAgentIndex((prev) => (prev + 1) % agents.length);
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [agents.length]);
   
   const features = [
     {
       icon: <Bot className="h-6 w-6" />,
       title: "Four Agents in Sequence",
       description: "Planner, analyzer, generator and verifier run one after another on a shared state. The planner, generator and verifier call the AI layer; the analyzer works on the cloned files.",
-      tech: "Sequential pipeline · 5 AI calls per run",
+      tech: "Sequential pipeline · 4 to 8 AI calls per run",
       highlight: "AGENTS"
     },
     {
       icon: <Search className="h-6 w-6" />,
       title: "Repository Scan",
-      description: "The analyzer lists the repository's files and reads package.json to detect the primary language, frameworks, databases and tools. This step makes no AI call.",
-      tech: "File list + package.json",
+      description: "The analyzer lists the repository's files and reads its top-level manifests, such as requirements.txt, pyproject.toml and package.json, to find the language, frameworks, entry points, tests and linters. It never reads .env files. This step makes no AI call.",
+      tech: "File list + top-level manifests",
       highlight: "ANALYSIS"
     },
     {
@@ -93,8 +93,8 @@ export const Landing = () => {
     {
       icon: <Workflow className="h-6 w-6" />,
       title: "Three Generated Files",
-      description: "A Dockerfile, a GitHub Actions workflow and a .env.example, generated from the detected tech stack and file list. Download them or save them to your account.",
-      tech: "AI-generated",
+      description: "A Dockerfile, a read-only CI workflow and a .env.example, generated from the repository's manifests, entry points and file list. Each file is format-checked before it is saved; one that fails twice is left out. Download them or save them to your account.",
+      tech: "AI-generated, format-checked",
       highlight: "OUTPUT"
     }
   ];
@@ -162,7 +162,7 @@ export const Landing = () => {
     {
       step: "3",
       title: "Four Agents",
-      description: "Planner, analyzer, generator and verifier run in sequence and produce three files",
+      description: "Planner, analyzer, generator and verifier run in sequence and produce up to three files and a review",
       icon: <Cpu className="h-5 w-5" />,
       details: "Progress milestones over Socket.IO, for your sessions only"
     },

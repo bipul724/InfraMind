@@ -17,7 +17,8 @@ import {
   Download,
   Loader2,
   Save,
-  FileCode
+  FileCode,
+  ClipboardCheck
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,7 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
 import { apiFetch } from '@/lib/apiClient';
 import { getAccessToken } from '@/lib/supabase';
-import type { AgentMessage, ProgressPayload, SessionStatus, TechStack } from '@/lib/session';
+import type { AgentMessage, ProgressPayload, SessionFilesResponse, SessionStatus, TechStack } from '@/lib/session';
 
 interface AgentProgressProps {
   sessionId?: string | null;
@@ -38,6 +39,9 @@ interface AgentProgressProps {
   errors?: string[];
   techStack?: TechStack | null;
   generatedFiles?: string[];
+  // The verifier's review: a string, null when the session has none, undefined when not
+  // loaded yet (it is then fetched from GET /api/files/:sessionId once the run completes)
+  verificationResults?: string | null;
   onProgressUpdate?: (data: ProgressPayload) => void;
 }
 
@@ -69,7 +73,8 @@ const WORKFLOW_STEPS = [
     title: 'Generator Agent',
     description: 'Generates the Dockerfile, workflow and .env.example',
     icon: Cog,
-    aiUsage: 'generator, 3 calls'
+    // One call per file, plus one repair call for a file whose output fails its check
+    aiUsage: 'generator, 3 to 6 calls'
   },
   {
     id: 'verify',
@@ -78,16 +83,17 @@ const WORKFLOW_STEPS = [
     title: 'Verifier Agent',
     description: 'Asks the AI to review the generated files',
     icon: Shield,
-    aiUsage: 'verifier, 1 call'
+    aiUsage: 'verifier, 1 call, none without files'
   }
 ];
 
-type StepState = 'waiting' | 'running' | 'done' | 'failed' | 'not-run' | 'unknown';
+type StepState = 'waiting' | 'running' | 'done' | 'partial' | 'failed' | 'not-run' | 'unknown';
 
 const STEP_LABELS: Record<StepState, string> = {
   waiting: 'Waiting',
   running: 'In sequence',
   done: 'Done',
+  partial: 'Partial',
   failed: 'Failed',
   'not-run': 'Not run',
   unknown: 'No details'
@@ -127,9 +133,12 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   errors = [],
   techStack,
   generatedFiles = [],
+  verificationResults,
   onProgressUpdate
 }) => {
   const [showDetails, setShowDetails] = useState(false);
+  // The review fetched by this component, for the session it was fetched for
+  const [fetchedReview, setFetchedReview] = useState<{ sessionId: string; text: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const { user } = useAuth();
@@ -182,13 +191,48 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     };
   }, [sessionId]);
 
+  // The review is not in progress events: once the run has completed, load it from
+  // GET /api/files/:sessionId unless the parent already passed it
+  useEffect(() => {
+    if (!sessionId || status !== 'completed' || verificationResults !== undefined) return;
+    if (fetchedReview?.sessionId === sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await apiFetch(`/api/files/${sessionId}`);
+        if (!response.ok) return;
+        const data: SessionFilesResponse = await response.json();
+        if (!cancelled) {
+          setFetchedReview({ sessionId, text: typeof data.verificationResults === 'string' ? data.verificationResults : null });
+        }
+      } catch {
+        // No review shown; downloads still fetch the files on demand
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, status, verificationResults, fetchedReview]);
+
+  const reviewText =
+    verificationResults !== undefined
+      ? verificationResults
+      : fetchedReview && fetchedReview.sessionId === sessionId
+        ? fetchedReview.text
+        : null;
+  const review = status === 'completed' && typeof reviewText === 'string' && reviewText.trim() !== '' ? reviewText : null;
+
   // Driven only by what the server reports: no per-agent events exist, so before the
-  // result event the cards make no per-agent claim
+  // result event the cards make no per-agent claim. An agent with both a message and an
+  // error (e.g. 2 of 3 files generated) is Partial; errors only is Failed.
   const hasAgentReport = Array.isArray(messages);
   const getStepState = (step: typeof WORKFLOW_STEPS[number]): StepState => {
     if (hasAgentReport) {
-      if (errors.some((error) => error.startsWith(step.errorPrefix))) return 'failed';
-      if (messages.some((message) => message.agent === step.agent)) return 'done';
+      const failed = errors.some((error) => error.startsWith(step.errorPrefix));
+      const finished = messages.some((message) => message.agent === step.agent);
+      if (failed && finished) return 'partial';
+      if (failed) return 'failed';
+      if (finished) return 'done';
       return 'not-run';
     }
     if (status === 'cloning' || status === 'cloned') return 'waiting';
@@ -203,6 +247,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         return <CheckCircle className="h-4 w-4 text-status-success" />;
       case 'running':
         return <Loader2 className="h-4 w-4 animate-spin text-status-running" />;
+      case 'partial':
+        return <AlertTriangle className="h-4 w-4 text-status-warning" />;
       case 'failed':
         return <AlertCircle className="h-4 w-4 text-status-error" />;
       default:
@@ -216,6 +262,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         return 'border-status-success/25 bg-card';
       case 'running':
         return 'border-primary/30 bg-primary/[0.03]';
+      case 'partial':
+        return 'border-status-warning/30 bg-status-warning/[0.05]';
       case 'failed':
         return 'border-status-error/30 bg-status-error/[0.05]';
       default:
@@ -229,6 +277,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         return 'border-status-success/30 bg-status-success/[0.06] text-status-success';
       case 'running':
         return 'border-primary/30 bg-primary/[0.06] text-primary';
+      case 'partial':
+        return 'border-status-warning/30 bg-status-warning/[0.06] text-status-warning';
       case 'failed':
         return 'border-status-error/30 bg-status-error/[0.06] text-status-error';
       default:
@@ -539,6 +589,26 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                 </Badge>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* The verifier's review, as plain text: never rendered as Markdown or HTML */}
+        {review !== null && (
+          <div className="min-w-0 space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+              <span>Review</span>
+            </h3>
+            <p className="text-xs leading-5 text-muted-foreground">
+              The verifier agent's AI review of the generated files. It is advice, not a test result.
+            </p>
+            <pre
+              className="code-surface scrollbar-slim max-h-96 w-full overflow-auto whitespace-pre rounded-md border border-border p-4 font-mono text-xs leading-5"
+              aria-label="Verifier review"
+              tabIndex={0}
+            >
+              {review}
+            </pre>
           </div>
         )}
 

@@ -50,7 +50,8 @@ export interface SessionStatusResponse {
 export interface SessionFilesResponse {
   files?: Record<string, string>;
   techStack?: TechStack | null;
-  verificationResults?: string;
+  // The verifier's review text; null (database store) or absent when there is none
+  verificationResults?: string | null;
   messages?: AgentMessage[];
   errors?: string[];
   metadata?: { repoUrl: string; repoName: string; completedAt: string };

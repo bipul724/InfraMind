@@ -47,6 +47,9 @@ From `package.json`:
 ```
 server.js               Routes, startup checks, cleanup
 agents/index.js         Planner, analyzer, generator, verifier
+agents/files.js         Extraction of one raw file from an AI reply, and the file validators
+agents/grounding.js     Manifests, existing configuration and evidence flags read from the clone
+agents/prompts.js       Generator and verifier prompts, with the 24,000-character cap
 ai/                     Provider registry, configuration, client with retries and fallback
 db/                     Database configuration and the Prisma client
 prisma/                 schema.prisma and the migration for analysis_sessions, generated_files, ai_calls

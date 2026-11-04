@@ -11,6 +11,8 @@ import { io as connectClient } from 'socket.io-client';
 import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
 import { DB_SKIP, createTestDatabase } from './db.js';
+import { FAKE_FILES, FAKE_LLM_CONTENT } from './fakeLlm.js';
+import { VALIDATORS } from '../agents/files.js';
 
 const DOCKERFILE_ERROR = 'Generator Agent Error: Dockerfile: AI providers are unavailable';
 
@@ -100,6 +102,19 @@ describe('per-agent results after a run with one failed generator call', { skip:
     assert.deepEqual(Object.keys(body.files), ['githubActions', 'envExample']);
     assert.deepEqual(body.errors, [DOCKERFILE_ERROR]);
     assert.deepEqual(body.messages, analyze.json.messages);
+  });
+
+  test('B2.5: GET /api/files returns the review and only validated, raw files', async () => {
+    const body = JSON.parse((await getJson(`/api/files/${sessionId}`, fakes.tokens.A)).text);
+    assert.equal(body.verificationResults, FAKE_LLM_CONTENT);
+    // The fake answers chat-style (prose around a fence): only the file inside is stored
+    assert.deepEqual(body.files, { githubActions: FAKE_FILES.githubActions, envExample: FAKE_FILES.envExample });
+    for (const [kind, content] of Object.entries(body.files)) {
+      assert.deepEqual(VALIDATORS[kind](content), { ok: true, errors: [] }, kind);
+      assert.ok(!content.includes('Here is'));
+    }
+    const download = await fetch(`${server.baseUrl}/api/files/${sessionId}/githubActions`, { headers: authHeaders(fakes.tokens.A) });
+    assert.equal(await download.text(), FAKE_FILES.githubActions);
   });
 
   test('the final completed event carries messages and errors', () => {
