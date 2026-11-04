@@ -5,7 +5,8 @@ import path from "path";
 // https://vitejs.dev/config/
 export default defineConfig({
   server: {
-    host: "::",
+    // Listening on all interfaces exposes the dev server to the network; use `npm run dev -- --host` deliberately when LAN access is needed
+    host: "localhost",
     port: 5173,
   },
   plugins: [react()],

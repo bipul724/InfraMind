@@ -4,7 +4,7 @@ How to configure and deploy InfraMind as it is implemented in this repository. F
 
 ## What you need
 
-- **Node.js** matching `server/package.json` `engines`: `^20.19 || ^22.12 || >=24.0`
+- **Node.js** matching `server/package.json` `engines`: `^20.19 || ^22.12 || >=24.0`. The root `npm run dev` launcher, `concurrently` 10, requires Node.js 22 or later (its `engines`); on Node 20 use `npm run dev:client` and `npm run dev:server`
 - **`git`** on the server machine: clones run the `git` binary (`server/utils/git.js`)
 - **A Supabase project:** Auth, and Postgres for `saved_files` and (optionally) `github_connections`
 - **A GitHub OAuth App** for repository access, separate from the GitHub sign-in provider in Supabase

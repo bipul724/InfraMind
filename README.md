@@ -74,6 +74,8 @@ cp client/.env.example client/.env.local
 npm run dev
 ```
 
+`npm run dev` runs both through `concurrently` 10, whose `engines` require Node.js 22 or later (root `package.json`); on Node 20, start them separately with `npm run dev:client` and `npm run dev:server`.
+
 The client runs on `http://localhost:5173` (`client/vite.config.ts`). The server listens on `PORT`, or 10000 without it (`server/utils/port.js`); 10000 is also the client's fallback for `VITE_API_URL` (`client/src/lib/api.ts`), `server/.env.example` and `render.yaml`. If you set another `PORT`, set `VITE_API_URL` to match.
 
 Supabase setup (project, `saved_files` table, sign-in providers, redirect URLs), the GitHub OAuth App, database mode and production deployment are in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md).

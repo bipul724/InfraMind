@@ -28,7 +28,7 @@ React 18 + TypeScript app built with Vite and Tailwind CSS (`package.json`).
    npm run dev
    ```
 
-4. Open [http://localhost:5173](http://localhost:5173) (`vite.config.ts`).
+4. Open [http://localhost:5173](http://localhost:5173) (`vite.config.ts`). The dev server listens on localhost only; run `npm run dev -- --host` when you deliberately want it reachable from your local network.
 
 ## Scripts
 
