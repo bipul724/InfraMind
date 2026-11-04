@@ -278,7 +278,7 @@ What specific aspect would you like to explore?`;
   };
 
   const SuggestedQuestions = () => (
-    <div className="flex flex-wrap gap-2 mt-4">
+    <div className="mt-3 flex flex-wrap gap-2">
       {[
         "What's my tech stack?",
         "Help me set up CI/CD",
@@ -294,6 +294,7 @@ What specific aspect would you like to explore?`;
           key={question}
           variant="outline"
           size="sm"
+          className="h-8 rounded-full px-3 text-xs font-normal text-foreground/80 hover:text-foreground"
           onClick={() => handleSendMessage(question)}
           disabled={isTyping}
         >
@@ -304,20 +305,20 @@ What specific aspect would you like to explore?`;
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="bg-background text-foreground">
       {/* Demo Mode Banner */}
-      <div className="border-b border-status-warning/30 bg-status-warning/10 py-2">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-status-warning">
-              <Terminal className="h-4 w-4" />
+      <div className="border-b border-status-warning/25 bg-status-warning/[0.07]">
+        <div className="container mx-auto px-4 py-2.5 sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-status-warning">
+              <Terminal className="h-4 w-4 shrink-0" />
               <span className="text-sm font-medium">Running in Demo Mode</span>
             </div>
             <Button
               variant="outline"
               size="sm"
               onClick={() => navigate('/auth')}
-              className="border-status-warning/30 text-status-warning hover:bg-status-warning/10"
+              className="h-8 shrink-0 border-status-warning/30 bg-card text-status-warning hover:border-status-warning/50 hover:bg-status-warning/10 hover:text-status-warning"
             >
               Switch to Full Version
             </Button>
@@ -326,36 +327,38 @@ What specific aspect would you like to explore?`;
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        <div className="mx-auto max-w-[960px]">
+      <div className="container mx-auto px-4 py-10 sm:px-6 lg:py-14">
+        <div className="mx-auto max-w-3xl">
           {/* Repository Input Section */}
           {!hasAnalyzed && (
-            <Card className="mb-6 bg-card">
+            <Card className="shadow-raised">
               <CardHeader>
-                <CardTitle>Analyze Repository</CardTitle>
+                <CardTitle className="text-xl">Analyze Repository</CardTitle>
                 <CardDescription>
                   Enter your GitHub repository URL to start the analysis
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex space-x-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
-                    <Github className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Github className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       placeholder="https://github.com/username/repo"
                       value={repoUrl}
                       onChange={(e) => setRepoUrl(e.target.value)}
-                      className="pl-10"
+                      className="h-11 pl-10 font-mono text-[13px]"
                       disabled={isAnalyzing}
+                      aria-label="Repository URL"
                     />
                   </div>
                   <Button
                     onClick={simulateRepoAnalysis}
                     disabled={isAnalyzing || !repoUrl}
+                    size="lg"
                   >
                     {isAnalyzing ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                         Analyzing...
                       </>
                     ) : (
@@ -369,42 +372,43 @@ What specific aspect would you like to explore?`;
 
           {/* Chat Interface */}
           {hasAnalyzed && (
-            <Card className="border-border bg-card">
-              <CardHeader className="border-b border-border py-4">
-                <CardTitle className="flex items-center gap-2 text-base">
+            <Card className="overflow-hidden shadow-raised">
+              <CardHeader className="border-b border-border bg-muted/40 py-4 sm:py-4">
+                <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                   <Terminal className="h-4 w-4 text-primary" />
                   Repository analysis
                   <span className="font-mono text-xs font-normal text-muted-foreground">interactive demo</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-6">
+              <CardContent className="p-0 sm:p-0">
                 {/* Messages Area */}
-                <ScrollArea className="h-[500px] pr-4" ref={chatContainerRef}>
-                  <div className="space-y-4">
+                <ScrollArea className="h-[min(500px,60vh)] px-4 sm:px-6" ref={chatContainerRef}>
+                  <div className="space-y-5 py-5">
                     {/* Chat Messages */}
                     {messages.map((message) => (
                       <div
                         key={message.id}
-                        className={`flex items-start space-x-3 ${
+                        className={`flex items-start gap-3 ${
                           message.type === 'user' ? 'justify-end' : ''
                         }`}
                       >
                         {message.type === 'assistant' && (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-primary/15 bg-primary/[0.07] text-primary">
                             <Bot className="h-4 w-4" />
                           </div>
                         )}
-                        <div className={`flex-1 ${message.type === 'user' ? 'text-right' : ''}`}>
+                        <div className={`min-w-0 flex-1 ${message.type === 'user' ? 'flex justify-end' : ''}`}>
+                          <div className={message.type === 'user' ? 'max-w-[85%]' : ''}>
                           <div
-                            className={`rounded-lg p-4 shadow-sm ${
+                            className={`rounded-lg px-4 py-3 text-sm leading-6 ${
                               message.type === 'user'
-                                ? 'ml-12 bg-primary text-primary-foreground'
-                                : 'bg-muted text-foreground'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'border border-border bg-muted/50 text-foreground'
                             }`}
                           >
                             <p style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>
                             {message.isTyping && (
-                              <div className="mt-2">
+                              <div className="mt-2 flex gap-1" aria-hidden="true">
                                 <span className="animate-bounce text-muted-foreground">▪</span>
                                 <span className="animate-bounce text-muted-foreground delay-100">▪</span>
                                 <span className="animate-bounce text-muted-foreground delay-200">▪</span>
@@ -414,6 +418,7 @@ What specific aspect would you like to explore?`;
                           {message.type === 'assistant' && !message.isTyping && messages[messages.length - 1].id === message.id && (
                             <SuggestedQuestions />
                           )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -422,7 +427,7 @@ What specific aspect would you like to explore?`;
                 </ScrollArea>
 
                 {/* Input Area */}
-                <div className="mt-4 flex space-x-2">
+                <div className="flex gap-2 border-t border-border bg-muted/30 p-4 sm:px-6">
                   <Input
                     placeholder="Ask me anything about your repository..."
                     value={inputValue}
@@ -433,10 +438,14 @@ What specific aspect would you like to explore?`;
                       }
                     }}
                     disabled={isTyping}
+                    aria-label="Message"
                   />
                   <Button
                     onClick={() => handleSendMessage(inputValue)}
                     disabled={isTyping || !inputValue.trim()}
+                    size="icon"
+                    className="shrink-0"
+                    aria-label="Send message"
                   >
                     <Send className="h-4 w-4" />
                   </Button>

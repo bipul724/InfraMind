@@ -112,10 +112,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
-          <Card className="w-full max-w-2xl">
+          <Card className="w-full max-w-2xl shadow-raised">
             <CardHeader>
-              <CardTitle className="flex items-center space-x-2 text-destructive">
-                <AlertTriangle className="h-6 w-6" />
+              <CardTitle className="flex items-center gap-3 text-destructive">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-destructive/25 bg-destructive/[0.06]">
+                  <AlertTriangle className="h-5 w-5" />
+                </span>
                 <span>Something went wrong</span>
               </CardTitle>
             </CardHeader>
@@ -128,7 +130,7 @@ export class ErrorBoundary extends Component<Props, State> {
                       {this.state.error?.message || 'An unexpected error occurred'}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Error ID: <code className="rounded border border-border bg-muted px-1 font-mono text-xs">{this.state.errorId}</code>
+                      Error ID: <code className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-xs text-foreground">{this.state.errorId}</code>
                     </p>
                   </div>
                 </AlertDescription>
@@ -138,7 +140,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 <div className="space-y-4">
                   <div>
                     <h3 className="font-medium text-sm mb-2">Error Details:</h3>
-                    <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted p-3 font-mono text-xs text-muted-foreground">
+                    <pre className="code-surface scrollbar-slim max-h-48 overflow-auto rounded-md border border-border p-3 font-mono text-xs leading-5">
                       {this.state.error?.stack}
                     </pre>
                   </div>
@@ -146,7 +148,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   {this.state.errorInfo && (
                     <div>
                       <h3 className="font-medium text-sm mb-2">Component Stack:</h3>
-                      <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted p-3 font-mono text-xs text-muted-foreground">
+                      <pre className="code-surface scrollbar-slim max-h-48 overflow-auto rounded-md border border-border p-3 font-mono text-xs leading-5">
                         {this.state.errorInfo}
                       </pre>
                     </div>
@@ -156,7 +158,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Button onClick={this.handleRetry} className="flex-1">
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                  <RefreshCw className="h-4 w-4" />
                   Try Again
                 </Button>
                 
@@ -165,7 +167,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   onClick={this.handleReportError}
                   className="flex-1"
                 >
-                  <Bug className="h-4 w-4 mr-2" />
+                  <Bug className="h-4 w-4" />
                   Report Error
                 </Button>
                 
@@ -173,7 +175,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   variant="outline" 
                   onClick={() => window.location.href = '/'}
                 >
-                  <Home className="h-4 w-4 mr-2" />
+                  <Home className="h-4 w-4" />
                   Go Home
                 </Button>
               </div>

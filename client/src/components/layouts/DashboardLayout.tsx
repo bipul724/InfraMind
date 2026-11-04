@@ -49,31 +49,34 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border/80 bg-background/95">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
+      <header className="sticky top-0 z-50 border-b border-border bg-card">
+        <div className="container mx-auto px-4 sm:px-6">
+          <div className="flex h-16 items-center justify-between gap-4">
             {/* Logo and Title */}
-            <div className="flex items-center space-x-4">
-              <Link to="/dashboard" className="flex items-center space-x-2 text-foreground transition-opacity hover:opacity-80">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <div className="flex min-w-0 items-center gap-3">
+              <Link
+                to="/dashboard"
+                className="flex items-center gap-2.5 rounded-md text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
                   <Terminal className="h-4 w-4" />
                 </div>
-                <h1 className="text-lg font-semibold tracking-tight">InfraMind</h1>
+                <h1 className="text-base font-semibold tracking-tight">InfraMind</h1>
               </Link>
+              <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
               <Badge variant="secondary" className="hidden sm:inline-flex">
                 {title}
               </Badge>
             </div>
             
             {/* Navigation and User Menu */}
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Main Navigation */}
-              <nav className="hidden md:flex items-center space-x-2">
+              <nav className="hidden items-center gap-1 md:flex">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => navigate('/dashboard')}
-                  className="flex items-center space-x-2"
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   <span>Dashboard</span>
@@ -82,7 +85,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                   variant="ghost"
                   size="sm"
                   onClick={() => navigate('/select-repo')}
-                  className="flex items-center space-x-2"
                 >
                   <GitBranch className="h-4 w-4" />
                   <span>Repositories</span>
@@ -91,8 +93,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
               {/* GitHub Username Display */}
               {user?.prefs?.githubUsername && (
-                <div className="hidden items-center font-mono text-xs text-muted-foreground sm:flex">
-                  <Github className="h-4 w-4 mr-1" />
+                <div className="hidden items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 font-mono text-xs text-muted-foreground sm:flex">
+                  <Github className="h-3.5 w-3.5" />
                   {user.prefs.githubUsername}
                 </div>
               )}
@@ -100,8 +102,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               {/* User Menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                    <Avatar className="h-8 w-8">
+                  <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
+                    <Avatar className="h-9 w-9">
                       <AvatarImage src={avatarUrl} alt={userName} />
                       <AvatarFallback>
                         {userName[0]?.toUpperCase() || 'U'}
@@ -109,27 +111,27 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                     </Avatar>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end" forceMount>
-                  <div className="flex items-center justify-start gap-2 p-2">
-                    <div className="flex flex-col space-y-1 leading-none">
-                      <p className="font-medium">{userName}</p>
-                      <p className="w-[200px] truncate text-sm text-muted-foreground">
+                <DropdownMenuContent className="w-60" align="end" forceMount>
+                  <div className="flex items-center justify-start gap-2 px-2.5 py-2">
+                    <div className="flex min-w-0 flex-col space-y-1 leading-none">
+                      <p className="truncate text-sm font-medium">{userName}</p>
+                      <p className="w-[200px] truncate text-xs text-muted-foreground">
                         {userEmail}
                       </p>
                     </div>
                   </div>
-                  <Separator />
+                  <Separator className="my-1" />
                   <DropdownMenuItem onClick={() => navigate('/dashboard')}>
-                    <LayoutDashboard className="mr-2 h-4 w-4" />
+                    <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
                     Dashboard
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate('/select-repo')}>
-                    <GitBranch className="mr-2 h-4 w-4" />
+                    <GitBranch className="h-4 w-4 text-muted-foreground" />
                     Repositories
                   </DropdownMenuItem>
-                  <Separator />
+                  <Separator className="my-1" />
                   <DropdownMenuItem onClick={handleLogout}>
-                    <LogOut className="mr-2 h-4 w-4" />
+                    <LogOut className="h-4 w-4 text-muted-foreground" />
                     Sign out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -140,10 +142,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="space-y-8">
-          <GitHubConnect />
-          <div className="mx-auto max-w-[1180px]">
+      <main className="container mx-auto px-4 py-8 sm:px-6 lg:py-10">
+        <div className="mx-auto max-w-5xl space-y-10">
+          <div>
             {subtitle && (
               <div className="mb-8">
                 <h2 className="text-3xl font-semibold tracking-tight">{title}</h2>
@@ -152,6 +153,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
             )}
             {children}
           </div>
+          <GitHubConnect />
         </div>
       </main>
     </div>

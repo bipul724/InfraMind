@@ -177,57 +177,63 @@ export const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <nav className="fixed inset-x-0 top-0 z-50 border-b border-border/80 bg-background">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
+      <nav className="sticky top-0 z-50 border-b border-border bg-card">
+        <div className="container mx-auto px-4 sm:px-6">
+          <div className="flex h-16 items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
                 <Terminal className="h-4 w-4" />
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-semibold tracking-tight">InfraMind</span>
-                <span className="text-xs text-muted-foreground">Powered by Supabase</span>
+              <div className="flex flex-col leading-tight">
+                <span className="text-base font-semibold tracking-tight">InfraMind</span>
+                <span className="text-[11px] text-muted-foreground">Powered by Supabase</span>
               </div>
             </div>
-            <div className="hidden items-center gap-6 md:flex">
+            <div className="hidden items-center gap-1 md:flex">
               <a
                 href="#features"
-                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 AI Agents
               </a>
               <a
                 href="#tech"
-                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 Technology
               </a>
-              <Button onClick={() => navigate('/auth')}>
+              <Button onClick={() => navigate('/auth')} className="ml-3">
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
             <div className="md:hidden">
-              <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+                aria-expanded={mobileMenuOpen}
+              >
                 {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </Button>
             </div>
           </div>
           {mobileMenuOpen && (
-            <div className="animate-slideDown space-y-3 border-t border-border/80 py-4 md:hidden">
+            <div className="animate-slideDown space-y-1 border-t border-border pb-4 pt-3 md:hidden">
               <a
                 href="#features"
-                className="block text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="block rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 AI Agents
               </a>
               <a
                 href="#tech"
-                className="block text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="block rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 Technology
               </a>
-              <Button onClick={() => navigate('/auth')} className="w-full">
+              <Button onClick={() => navigate('/auth')} className="mt-2 w-full">
                 Get Started Free
                 <ArrowRight className="h-4 w-4" />
               </Button>
@@ -237,15 +243,16 @@ export const Landing = () => {
       </nav>
 
       <main>
-        <section className="border-b border-border bg-muted/20">
-          <div className="container mx-auto grid gap-12 px-4 py-16 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:py-24">
+        <section className="border-b border-border">
+          <div className="container mx-auto grid gap-12 px-4 py-16 sm:px-6 md:py-20 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-center lg:gap-16 lg:py-24">
             <div className="max-w-xl">
-              <Badge variant="outline" className="mb-6 gap-2 border-primary/30 bg-primary/5 text-primary">
+              <Badge variant="outline" className="mb-6 gap-2 border-primary/25 bg-primary/[0.06] py-1.5 text-primary">
                 <GitBranch className="h-3.5 w-3.5" />
                 Multi-agent DevOps pipeline
               </Badge>
-              <h1 className="text-5xl font-semibold leading-[1.05] tracking-[-0.04em] sm:text-6xl">
-                DevOps config, generated by a four-agent pipeline
+              <h1 className="text-[2.5rem] font-semibold leading-[1.05] tracking-[-0.035em] sm:text-5xl lg:text-[3.25rem] xl:text-[3.5rem]">
+                DevOps config, generated by a{' '}
+                <span className="text-primary"><span className="whitespace-nowrap">four-agent</span> pipeline</span>
               </h1>
               <p className="mt-6 max-w-lg text-lg leading-8 text-muted-foreground">
                 Four specialized AI agents collaborate to understand, analyze, and automate your entire DevOps pipeline.
@@ -261,38 +268,41 @@ export const Landing = () => {
                   Watch AI Agents Demo
                 </Button>
               </div>
-              <div className="mt-8 flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-status-running" />
+              <div className="mt-10 flex items-center gap-2.5 border-t border-border pt-6 font-mono text-xs text-muted-foreground">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-running" />
                 <span>Planner → Analyzer → Generator → Verifier</span>
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
-              <div className="flex items-center justify-between border-b border-border px-3 py-3">
-                <div className="flex items-center gap-2">
-                  <Terminal className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground">agent-run / pipeline</span>
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-raised">
+              <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/50 px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate font-mono text-xs text-muted-foreground">agent-run / pipeline</span>
                 </div>
-                <Badge variant="secondary" className="font-mono text-[11px]">live preview</Badge>
+                <Badge variant="outline" className="shrink-0 gap-1.5 font-mono text-[11px]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-running" />
+                  live preview
+                </Badge>
               </div>
-              <div className="grid gap-4 p-3 md:grid-cols-[1fr_1.15fr]">
+              <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
                 <div className="space-y-2">
-                  <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="h-2 w-2 rounded-full bg-status-running" />
                     <span>Running {agents[currentAgentIndex].name}</span>
                   </div>
                   {agents.map((agent, index) => (
                     <div
                       key={agent.name}
-                      className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${
+                      className={`flex items-center gap-3 rounded-md border p-3 transition-colors duration-200 ${
                         index === currentAgentIndex
-                          ? 'border-primary/40 bg-primary/5'
-                          : 'border-border bg-background'
+                          ? 'border-primary/35 bg-primary/[0.05]'
+                          : 'border-border bg-card'
                       }`}
                     >
                       <div
                         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono
-                          text-[11px] ${
+                          text-[11px] transition-colors duration-200 ${
                           index <= currentAgentIndex
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-muted text-muted-foreground'
@@ -307,12 +317,12 @@ export const Landing = () => {
                     </div>
                   ))}
                 </div>
-                <div className="overflow-hidden rounded-md border border-border bg-foreground">
-                  <div className="flex items-center justify-between border-b border-background/15 px-3 py-2">
-                    <span className="font-mono text-[11px] text-background/70">Dockerfile</span>
-                    <Container className="h-3.5 w-3.5 text-background/60" />
+                <div className="code-surface flex min-w-0 flex-col overflow-hidden rounded-md border border-border">
+                  <div className="flex items-center justify-between border-b border-border bg-card/70 px-3 py-2">
+                    <span className="font-mono text-[11px] text-muted-foreground">Dockerfile</span>
+                    <Container className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
-                  <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-background/90">
+                  <pre className="scrollbar-slim flex-1 overflow-x-auto p-4 font-mono text-xs leading-6">
                     <code>
                       {`FROM node:20-alpine AS build\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci\nCOPY . .\nRUN npm run build\n\nFROM nginx:alpine\nCOPY --from=build /app/dist /usr/share/nginx/html\nEXPOSE 80`}
                     </code>
@@ -323,192 +333,186 @@ export const Landing = () => {
           </div>
         </section>
 
-        <section id="features" className="border-b border-border bg-background">
-          <div className="container mx-auto px-4 py-20">
-            <div className="mb-10 max-w-2xl">
-              <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">What it does</p>
+        <section id="features" className="scroll-mt-16 border-b border-border bg-card">
+          <div className="container mx-auto px-4 py-20 sm:px-6 lg:py-24">
+            <div className="mb-12 max-w-2xl">
+              <p className="eyebrow mb-3">What it does</p>
               <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Automated Pipeline Architecture</h2>
-              <p className="mt-3 text-muted-foreground">
+              <p className="mt-4 text-lg leading-8 text-muted-foreground">
                 Four specialized agents collaborate in an automated pipeline to produce
                 production-grade deployment configurations.
               </p>
             </div>
-            <div className="divide-y divide-border border-y border-border">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {features.map((feature, index) => (
-                 <div
-                   key={index}
-                   className="grid gap-4 py-5 md:grid-cols-[2rem_1fr_auto] md:items-start md:gap-6"
-                 >
-                  <div
-                    className="flex h-8 w-8 items-center justify-center rounded-md border border-border
-                      bg-muted text-primary"
-                  >
-                    {React.cloneElement(feature.icon, { className: "h-4 w-4" })}
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-medium">{feature.title}</h3>
-                      {feature.highlight && (
-                        <Badge variant="secondary" className="text-[11px]">
-                          {feature.highlight}
-                        </Badge>
-                      )}
+                <div
+                  key={index}
+                  className="flex flex-col rounded-lg border border-border bg-background p-6 transition-colors duration-150 hover:border-primary/30"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-card text-primary shadow-soft">
+                      {React.cloneElement(feature.icon, { className: "h-5 w-5" })}
                     </div>
-                     <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
-                       {feature.description}
-                     </p>
+                    {feature.highlight && (
+                      <Badge variant="secondary" className="font-mono text-[10px] tracking-wider">
+                        {feature.highlight}
+                      </Badge>
+                    )}
                   </div>
-                  <Badge
-                    variant="outline"
-                    className="w-fit font-mono text-[11px] text-muted-foreground"
-                  >
+                  <h3 className="mt-5 text-base font-semibold">{feature.title}</h3>
+                  <p className="mt-2 flex-1 text-sm leading-6 text-muted-foreground">
+                    {feature.description}
+                  </p>
+                  <p className="mt-5 border-t border-border pt-4 font-mono text-[11px] text-muted-foreground">
                     {feature.tech}
-                  </Badge>
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        <section id="tech" className="border-b border-border bg-muted/20">
-        <div className="container mx-auto px-4 py-20">
-          <div className="mb-10 max-w-2xl">
-            <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">Under the hood</p>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Technology stack</h2>
-            <p className="mt-3 text-muted-foreground">Built on AI models and cloud-native infrastructure.</p>
-          </div>
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
-            <div
-              className="hidden grid-cols-[1.1fr_1fr_1.5fr] gap-6 border-b border-border bg-muted/50 px-5 py-3
-                font-mono text-[11px] uppercase tracking-wider text-muted-foreground md:grid"
-            >
-              <span>Component</span>
-              <span>Role</span>
-              <span>Capabilities</span>
+        <section id="tech" className="scroll-mt-16 border-b border-border">
+          <div className="container mx-auto px-4 py-20 sm:px-6 lg:py-24">
+            <div className="mb-12 max-w-2xl">
+              <p className="eyebrow mb-3">Under the hood</p>
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Technology stack</h2>
+              <p className="mt-4 text-lg leading-8 text-muted-foreground">Built on AI models and cloud-native infrastructure.</p>
             </div>
-            {techStack.map((tech, index) => (
+            <div className="overflow-hidden rounded-lg border border-border bg-card shadow-soft">
               <div
-                key={index}
-                className="grid gap-3 border-b border-border px-5 py-5 last:border-0
-                  md:grid-cols-[1.1fr_1fr_1.5fr] md:items-start md:gap-6"
+                className="hidden grid-cols-[1.1fr_1fr_1.6fr] gap-6 border-b border-border bg-muted/60 px-6 py-3
+                  font-mono text-[11px] uppercase tracking-wider text-muted-foreground md:grid"
               >
-                <div>
-                  <p className="font-medium">{tech.name}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{tech.provider}</p>
-                </div>
-                <Badge variant="outline" className="w-fit text-[11px]">
-                  {tech.category}
-                </Badge>
-                <div>
-                  <p className="text-sm text-muted-foreground">{tech.description}</p>
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                    {tech.features.map((feature, idx) => (
-                      <span
-                        key={idx}
-                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                      >
-                        <CheckCircle className="h-3.5 w-3.5 text-status-success" />
-                        {feature}
-                      </span>
-                    ))}
+                <span>Component</span>
+                <span>Role</span>
+                <span>Capabilities</span>
+              </div>
+              {techStack.map((tech, index) => (
+                <div
+                  key={index}
+                  className="grid gap-3 border-b border-border px-5 py-5 transition-colors duration-150 last:border-0 hover:bg-muted/30
+                    sm:px-6 md:grid-cols-[1.1fr_1fr_1.6fr] md:items-start md:gap-6"
+                >
+                  <div>
+                    <p className="font-semibold">{tech.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{tech.provider}</p>
+                  </div>
+                  <Badge variant="outline" className="w-fit text-[11px]">
+                    {tech.category}
+                  </Badge>
+                  <div>
+                    <p className="text-sm text-foreground/80">{tech.description}</p>
+                    <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
+                      {tech.features.map((feature, idx) => (
+                        <span
+                          key={idx}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5 text-status-success" />
+                          {feature}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="workflow" className="scroll-mt-16 bg-card">
+          <div className="container mx-auto px-4 py-20 sm:px-6 lg:py-24">
+            <div className="mb-12 max-w-2xl">
+              <p className="eyebrow mb-3">Execution flow</p>
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">How the Multi-Agent Pipeline Works</h2>
+              <p className="mt-4 text-lg leading-8 text-muted-foreground">
+                Deterministic sequence from repository ingestion to verified CI/CD artifact creation.
+              </p>
+            </div>
+            <ol className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {workflows.map((workflow, index) => (
+                <li
+                  key={index}
+                  className="relative flex flex-col rounded-lg border border-border bg-background p-6"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary font-mono text-xs font-medium text-primary-foreground">
+                      {workflow.step}
+                    </span>
+                    <span className="text-primary">{workflow.icon}</span>
+                  </div>
+                  <h3 className="mt-5 text-base font-semibold">{workflow.title}</h3>
+                  <p className="mt-2 flex-1 text-sm leading-6 text-muted-foreground">
+                    {workflow.description}
+                  </p>
+                  <p className="mt-5 border-t border-border pt-4 font-mono text-[11px] leading-5 text-muted-foreground">
+                    {workflow.details}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        <section className="border-t border-border bg-card pb-20 sm:pb-24">
+          <div className="container mx-auto px-4 sm:px-6">
+            <div className="grid gap-8 rounded-xl bg-primary px-6 py-10 text-primary-foreground sm:px-10 md:grid-cols-[1fr_auto] md:items-center lg:px-12 lg:py-12">
+              <div className="max-w-2xl">
+                <h2 className="text-2xl font-semibold tracking-tight text-primary-foreground sm:text-3xl">
+                  Ready to Automate Your DevOps Pipeline?
+                </h2>
+                <p className="mt-3 text-primary-foreground/80">
+                  Connect your repository and generate Docker and CI/CD pipelines in seconds.
+                </p>
               </div>
-            ))}
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button
+                  onClick={() => navigate('/auth')}
+                  size="lg"
+                  className="bg-card text-primary hover:bg-card/90 focus-visible:ring-card focus-visible:ring-offset-primary"
+                >
+                  Start Free Trial
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => window.open('https://github.com', '_blank')}
+                  className="border-primary-foreground/30 bg-transparent text-primary-foreground shadow-none hover:border-primary-foreground/50 hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:ring-card focus-visible:ring-offset-primary"
+                >
+                  <Github className="h-4 w-4" />
+                  View on GitHub
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
-
-      <section id="workflow" className="bg-background">
-        <div className="container mx-auto px-4 py-20">
-          <div className="mb-10 max-w-2xl">
-            <p className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-primary">Execution flow</p>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">How the Multi-Agent Pipeline Works</h2>
-            <p className="mt-3 text-muted-foreground">
-              Deterministic sequence from repository ingestion to verified CI/CD artifact creation.
-            </p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-             {workflows.map((workflow, index) => (
-               <div
-                 key={index}
-                 className="flex gap-4 rounded-lg border border-border bg-card p-5"
-               >
-                 <div
-                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-xs
-                     text-primary-foreground"
-                 >
-                   {workflow.step}
-                 </div>
-                 <div>
-                   <div className="flex items-center gap-2">
-                     <span className="text-primary">{workflow.icon}</span>
-                     <h3 className="font-medium">{workflow.title}</h3>
-                   </div>
-                   <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                     {workflow.description}
-                   </p>
-                   <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-                     {workflow.details}
-                   </p>
-                 </div>
-               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="border-b border-border bg-secondary/50">
-        <div className="container mx-auto grid gap-8 px-4 py-16 md:grid-cols-[1fr_auto] md:items-center">
-          <div className="max-w-2xl">
-            <h2 className="text-3xl font-semibold tracking-tight">
-              Ready to Automate Your DevOps Pipeline?
-            </h2>
-            <p className="mt-3 text-muted-foreground">
-              Connect your repository and generate Docker and CI/CD pipelines in seconds.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button onClick={() => navigate('/auth')} size="lg">
-              Start Free Trial
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={() => window.open('https://github.com', '_blank')}
-            >
-              <Github className="h-4 w-4" />
-              View on GitHub
-            </Button>
-          </div>
-        </div>
-      </section>
+        </section>
       </main>
 
-      <footer className="bg-foreground text-background">
-        <div className="container mx-auto px-4 py-12">
+      <footer className="border-t border-border bg-background">
+        <div className="container mx-auto px-4 py-12 sm:px-6">
           <div className="grid gap-10 md:grid-cols-4">
             <div className="space-y-3 md:col-span-2">
               <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-foreground">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
                   <Terminal className="h-3.5 w-3.5" />
                 </div>
                 <span className="font-semibold tracking-tight">InfraMind</span>
               </div>
-              <p className="max-w-sm text-xs leading-5 text-background/70">
+              <p className="max-w-sm text-sm leading-6 text-muted-foreground">
                 Multi-agent AI system for automated DevOps with authentication, Postgres data, and row-level security.
               </p>
-              <div className="font-mono text-[11px] leading-5 text-background/60">
+              <div className="font-mono text-[11px] leading-5 text-muted-foreground">
                 <div>AI Core: Llama 3 70B • Tavily • Mem0</div>
                 <div>Backend: Supabase Cloud Infrastructure</div>
               </div>
             </div>
             <div>
-              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">
+              <h3 className="eyebrow mb-3 text-muted-foreground">
                 AI Agents
               </h3>
-              <div className="space-y-2 text-xs text-background/70">
+              <div className="space-y-2 text-sm text-foreground/80">
                 <div>Planner Agent</div>
                 <div>Analyzer Agent</div>
                 <div>Generator Agent</div>
@@ -516,10 +520,10 @@ export const Landing = () => {
               </div>
             </div>
             <div>
-              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-background/70">
+              <h3 className="eyebrow mb-3 text-muted-foreground">
                 Technology
               </h3>
-              <div className="space-y-2 text-xs text-background/70">
+              <div className="space-y-2 text-sm text-foreground/80">
                 <div>Sequential Agent Pipeline</div>
                 <div>Llama 3 70B Model</div>
                 <div>Supabase Backend</div>
@@ -527,7 +531,7 @@ export const Landing = () => {
               </div>
             </div>
           </div>
-          <div className="mt-10 border-t border-background/15 pt-6 text-xs text-background/60">
+          <div className="mt-10 border-t border-border pt-6 text-xs text-muted-foreground">
             <p>&copy; 2024 InfraMind. Built with Supabase and modern AI technologies.</p>
           </div>
         </div>

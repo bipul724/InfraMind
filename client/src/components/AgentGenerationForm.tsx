@@ -230,37 +230,38 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
 
   return (
     <div className={`space-y-6 ${className}`}>
-      <Card className="border-border bg-card shadow-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <div className="rounded-md bg-muted p-2">
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b border-border pb-5">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-primary/15 bg-primary/[0.07]">
               <Bot className="h-5 w-5 text-primary" />
             </div>
-            <span>AI Agent DevOps Generator</span>
-            <Badge
-              variant="secondary"
-              className="border border-border bg-muted text-muted-foreground"
-            >
-              Multi-Agent System
-            </Badge>
-          </CardTitle>
-          <CardDescription>
-            Enter your GitHub repository URL to let our AI agents analyze and generate production-ready CI/CD configurations
-          </CardDescription>
+            <div className="min-w-0 space-y-1.5">
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                <span>AI Agent DevOps Generator</span>
+                <Badge variant="secondary" className="font-normal">
+                  Multi-Agent System
+                </Badge>
+              </CardTitle>
+              <CardDescription>
+                Enter your GitHub repository URL to let our AI agents analyze and generate production-ready CI/CD configurations
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
 
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-6 pt-5 sm:pt-6">
           <Tabs defaultValue="setup" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:min-w-[22rem]">
               <TabsTrigger value="setup">Repository Setup</TabsTrigger>
               <TabsTrigger value="progress">Analysis Progress</TabsTrigger>
             </TabsList>
             
-            <TabsContent value="setup" className="space-y-4">
-              <div className="space-y-4">
+            <TabsContent value="setup" className="mt-6 space-y-4">
+              <div className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="repo-url" className="flex items-center space-x-2">
-                    <GitBranch className="h-4 w-4" />
+                  <Label htmlFor="repo-url" className="flex items-center gap-2">
+                    <GitBranch className="h-4 w-4 text-muted-foreground" />
                     <span>GitHub Repository URL</span>
                   </Label>
                   <div className="relative">
@@ -270,19 +271,20 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                       value={repoUrl}
                       onChange={handleUrlChange}
                       disabled={isRunning}
-                      className={
+                      aria-invalid={urlError ? true : undefined}
+                      className={`h-11 font-mono text-[13px] ${
                         urlError
-                          ? 'border-status-error/50 pr-10'
+                          ? 'border-status-error/60 pr-10'
                           : isValidUrl
                             ? 'border-status-success/50 pr-10'
                             : ''
-                      }
+                      }`}
                     />
                     {isValidUrl && (
-                      <CheckCircle className="absolute right-3 top-2.5 h-4 w-4 text-status-success" />
+                      <CheckCircle className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-success" />
                     )}
                     {urlError && (
-                      <AlertCircle className="absolute right-3 top-2.5 h-4 w-4 text-status-error" />
+                      <AlertCircle className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-error" />
                     )}
                   </div>
                   {urlError && (
@@ -292,7 +294,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                     </Alert>
                   )}
                   {isValidUrl && (
-                    <Alert className="mt-2 border-status-success/30 bg-status-success/10">
+                    <Alert className="mt-2 border-status-success/25 bg-status-success/[0.06]">
                        <CheckCircle className="h-4 w-4 text-status-success" />
                        <AlertDescription className="text-status-success">
                         Valid GitHub repository URL detected
@@ -301,33 +303,33 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                   )}
                 </div>
 
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setUseAdvancedMode(!useAdvancedMode)}
                       disabled={isRunning}
-                      className="transition-colors duration-200 hover:bg-muted"
+                      aria-expanded={useAdvancedMode}
                     >
-                      <Settings className="h-4 w-4 mr-2" />
+                      <Settings className="h-4 w-4" />
                       {useAdvancedMode ? 'Hide' : 'Show'} Advanced Options
                     </Button>
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="font-normal">
                       For Private Repos
                     </Badge>
                   </div>
 
                   {useAdvancedMode && (
                     <div
-                      className="animate-in slide-in-from-top space-y-4 rounded-md border border-border
-                        bg-muted/50 p-4 duration-300"
+                      className="animate-in fade-in-0 slide-in-from-top-1 space-y-4 rounded-md border border-border
+                        bg-muted/50 p-4 duration-200"
                     >
                       <div className="space-y-2">
-                        <Label htmlFor="auth-token" className="flex items-center space-x-2">
-                          <Key className="h-4 w-4" />
+                        <Label htmlFor="auth-token" className="flex flex-wrap items-center gap-2">
+                          <Key className="h-4 w-4 text-muted-foreground" />
                           <span>GitHub Personal Access Token</span>
-                          <Badge variant="outline" className="text-xs">
+                          <Badge variant="outline" className="font-normal">
                             Optional
                           </Badge>
                         </Label>
@@ -340,17 +342,17 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                             // Handle auth token change
                           }}
                           disabled={isRunning}
-                          className="font-mono text-sm"
+                          className="font-mono text-[13px]"
                         />
-                        <Alert className="mt-2">
-                          <Info className="h-4 w-4" />
-                          <AlertDescription className="text-sm">
+                        <Alert className="mt-2 bg-card">
+                          <Info className="h-4 w-4 text-muted-foreground" />
+                          <AlertDescription className="text-sm text-muted-foreground">
                             Required only for private repositories. Generate at{' '}
                             <a
                               href="https://github.com/settings/tokens"
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-primary underline hover:text-primary/80"
+                              className="rounded-sm font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               GitHub Settings → Developer settings → Personal access tokens
                             </a>
@@ -361,27 +363,25 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                   )}
                 </div>
 
-                <Separator />
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div className="flex items-center space-x-3 rounded-md border border-border bg-muted/50 p-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-md bg-secondary">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card">
                       <Zap className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
-                      <h3 className="font-medium">AI-Powered Analysis</h3>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold">AI-Powered Analysis</h3>
                       <p className="text-sm text-muted-foreground">
                         Multi-agent system analyzes your repository
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-3 rounded-md border border-border bg-muted/50 p-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-md bg-secondary">
+                  <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card">
                       <Github className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
-                      <h3 className="font-medium">Production Ready</h3>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold">Production Ready</h3>
                       <p className="text-sm text-muted-foreground">
                         Generates optimized CI/CD configurations
                       </p>
@@ -389,34 +389,36 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                   </div>
                 </div>
 
-                <Button
-                  onClick={handleStartAnalysis}
-                  disabled={!isValidUrl || isRunning}
-                  className="w-full py-3 font-medium shadow-sm transition-colors duration-200"
-                  size="lg"
-                >
-                  {isRunning ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Running Analysis...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="mr-2 h-5 w-5" />
-                      Start AI Analysis
-                    </>
-                  )}
-                </Button>
+                <div className="space-y-3 border-t border-border pt-6">
+                  <Button
+                    onClick={handleStartAnalysis}
+                    disabled={!isValidUrl || isRunning}
+                    className="w-full"
+                    size="lg"
+                  >
+                    {isRunning ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Running Analysis...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-5 w-5" />
+                        Start AI Analysis
+                      </>
+                    )}
+                  </Button>
 
-                {!isValidUrl && repoUrl && (
-                  <p className="text-center text-sm text-muted-foreground">
-                    Please enter a valid GitHub repository URL to continue
-                  </p>
-                )}
+                  {!isValidUrl && repoUrl && (
+                    <p className="text-center text-sm text-muted-foreground">
+                      Please enter a valid GitHub repository URL to continue
+                    </p>
+                  )}
+                </div>
               </div>
             </TabsContent>
             
-            <TabsContent value="progress" className="space-y-4">
+            <TabsContent value="progress" className="mt-6 space-y-4">
               <AgentProgress
                 sessionId={sessionId}
                 repoUrl={repoUrl}

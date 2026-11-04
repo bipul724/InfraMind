@@ -135,23 +135,25 @@ const AuthSuccess: React.FC = () => {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
-      <Card className="w-full max-w-md bg-card">
-        <CardHeader className="text-center">
-          <CardTitle className="flex items-center justify-center gap-2">
+      <Card className="w-full max-w-md shadow-raised">
+        <CardHeader className="items-center pb-4 text-center">
+          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
             <Github className="h-6 w-6" />
+          </div>
+          <CardTitle className="flex items-center justify-center gap-2">
             GitHub Authentication
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {status === 'loading' && (
-            <div className="text-center py-8">
+            <div className="py-6 text-center" aria-busy="true">
               <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
-              <p className="text-muted-foreground">Processing authentication...</p>
+              <p className="text-sm text-muted-foreground">Processing authentication...</p>
             </div>
           )}
 
           {status === 'success' && (
-              <Alert className="border-status-success/30 bg-status-success/10">
+              <Alert className="border-status-success/25 bg-status-success/[0.06]">
               <CheckCircle className="h-4 w-4 text-status-success" />
               <AlertDescription className="text-status-success">
                 <strong>Success!</strong> Your GitHub account has been connected.

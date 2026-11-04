@@ -15,7 +15,8 @@ import {
   Download,
   ExternalLink,
   Loader2,
-  Save
+  Save,
+  FileCode
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -208,26 +209,26 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const getStatusIcon = (stepStatus: string) => {
     switch (stepStatus) {
       case 'done':
-        return <CheckCircle className="h-5 w-5 text-status-success" />;
+        return <CheckCircle className="h-4 w-4 text-status-success" />;
       case 'running':
-        return <Loader2 className="h-5 w-5 animate-spin text-status-running" />;
+        return <Loader2 className="h-4 w-4 animate-spin text-status-running" />;
       case 'failed':
-        return <AlertCircle className="h-5 w-5 text-status-error" />;
+        return <AlertCircle className="h-4 w-4 text-status-error" />;
       case 'pending':
-        return <Clock className="h-5 w-5 text-muted-foreground" />;
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
       default:
-        return <Clock className="h-5 w-5 text-muted-foreground" />;
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
   const getStepColor = (stepStatus: string) => {
     switch (stepStatus) {
       case 'done':
-        return 'border-status-success/30 bg-status-success/10';
+        return 'border-status-success/25 bg-card';
       case 'running':
-        return 'border-status-running/30 bg-status-running/10';
+        return 'border-primary/40 bg-primary/[0.04] ring-1 ring-primary/20';
       case 'failed':
-        return 'border-status-error/30 bg-status-error/10';
+        return 'border-status-error/30 bg-status-error/[0.05]';
       case 'pending':
         return 'border-border bg-muted/40';
       default:
@@ -320,81 +321,88 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const displayGeneratedFiles = localGeneratedFiles.length > 0 ? localGeneratedFiles : generatedFiles;
 
   return (
-    <Card className="mx-auto w-full max-w-4xl border-border bg-card shadow-sm">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center space-x-2">
-              <Bot className="h-6 w-6 text-primary" />
-              <span>AI DevOps Agent Pipeline</span>
-              {sessionId && (
-                <Badge variant="outline" className="text-xs">
-                  Session: {sessionId.substring(0, 8)}...
-                </Badge>
-              )}
-            </CardTitle>
-            <CardDescription>
-              Multi-agent system analyzing your repository and generating CI/CD configurations
-            </CardDescription>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowDetails(!showDetails)}
-          >
-            {showDetails ? 'Hide Details' : 'Show Details'}
-          </Button>
+    <section className="w-full space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1.5">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+            <Bot className="h-5 w-5 text-primary" />
+            <span>AI DevOps Agent Pipeline</span>
+            {sessionId && (
+              <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">
+                Session: {sessionId.substring(0, 8)}...
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            Multi-agent system analyzing your repository and generating CI/CD configurations
+          </CardDescription>
         </div>
-      </CardHeader>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowDetails(!showDetails)}
+          aria-expanded={showDetails}
+          className="shrink-0 self-start"
+        >
+          {showDetails ? 'Hide Details' : 'Show Details'}
+        </Button>
+      </div>
 
-      <CardContent className="space-y-6">
+      <div className="space-y-6">
         {/* Progress Bar */}
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="font-medium">{currentStep}</span>
-            <span className="font-mono text-xs text-muted-foreground">{progress}% Complete</span>
+        <div className="space-y-2.5 rounded-md border border-border bg-muted/30 p-4">
+          <div className="flex items-baseline justify-between gap-4 text-sm">
+            <span className="min-w-0 font-medium" aria-live="polite">{currentStep}</span>
+            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{progress}% Complete</span>
           </div>
           <Progress
             value={progress}
-            className={`h-2 ${status === 'failed' ? 'bg-status-error/10' : 'bg-muted'}`}
+            aria-label="Generation progress"
+            className={`h-2 ${status === 'failed' ? 'bg-status-error/15' : 'bg-muted'}`}
           />
         </div>
 
         {/* Workflow Steps */}
-        <div className="grid gap-3 md:grid-cols-4">
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {WORKFLOW_STEPS.map((step, index) => {
             const stepStatus = getStepStatus(index);
             const Icon = step.icon;
             
             return (
-              <div
+              <li
                 key={step.id}
-                className={`flex min-h-40 flex-col gap-4 rounded-md border p-4 transition-colors duration-200 ${
+                className={`flex flex-col gap-3 rounded-md border p-4 transition-colors duration-200 ${
                   getStepColor(stepStatus)
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-muted-foreground">
+                  <span className="font-mono text-[11px] font-medium text-muted-foreground">
                     {String(index + 1).padStart(2, '0')}
                   </span>
                   {getStatusIcon(stepStatus)}
                 </div>
                 
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Icon className="h-4 w-4 text-foreground" />
-                    <h3 className="font-medium">{step.title}</h3>
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 shrink-0 text-foreground/70" />
+                    <h3 className="truncate text-sm font-semibold">{step.title}</h3>
                   </div>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {step.description}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 border-t border-border/80 pt-3">
                   <Badge
                     variant="outline"
-                    className={`mt-3 w-fit text-xs ${
+                    className={`w-fit text-[11px] ${
                       stepStatus === 'done'
-                        ? 'border-status-success/30 text-status-success'
+                        ? 'border-status-success/30 bg-status-success/[0.06] text-status-success'
                         : stepStatus === 'running'
-                          ? 'border-status-running/30 text-status-running'
+                          ? 'border-primary/30 bg-primary/[0.06] text-primary'
                           : stepStatus === 'failed'
-                            ? 'border-status-error/30 text-status-error'
-                            : 'border-border text-muted-foreground'
+                            ? 'border-status-error/30 bg-status-error/[0.06] text-status-error'
+                            : 'text-muted-foreground'
                     }`}
                   >
                     {stepStatus === 'done'
@@ -405,28 +413,25 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                           ? 'Failed'
                           : 'Pending'}
                   </Badge>
-                  <p className="mt-3 text-sm leading-5 text-muted-foreground">
-                    {step.description}
-                  </p>
-                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                  <p className="font-mono text-[11px] text-muted-foreground">
                     Est. time: {step.estimatedTime}
                   </p>
                 </div>
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ol>
 
         {/* Error Display */}
         {displayErrors.length > 0 && (
-          <div className="rounded-md border border-status-error/30 bg-status-error/10 p-4">
-            <div className="mb-2 flex items-center space-x-2">
-              <AlertCircle className="h-5 w-5 text-status-error" />
-              <h3 className="font-medium text-status-error">Errors Detected</h3>
+          <div className="rounded-md border border-status-error/30 bg-status-error/[0.05] p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-status-error" />
+              <h3 className="text-sm font-semibold text-status-error">Errors Detected</h3>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 pl-6">
               {displayErrors.map((error, index) => (
-                <p key={index} className="text-sm text-status-error">
+                <p key={index} className="break-words text-sm leading-6 text-status-error">
                   {error}
                 </p>
               ))}
@@ -437,20 +442,20 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {/* Agent Messages */}
         {showDetails && displayMessages.length > 0 && (
           <div className="space-y-3">
-            <h3 className="flex items-center space-x-2 font-medium">
-              <Bot className="h-4 w-4" />
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Bot className="h-4 w-4 text-muted-foreground" />
               <span>Agent Activity Log</span>
             </h3>
-            <ScrollArea className="scrollbar-slim h-48 w-full rounded-md border border-border p-3">
-              <div className="space-y-3">
+            <ScrollArea className="code-surface scrollbar-slim h-56 w-full rounded-md border border-border">
+              <div className="divide-y divide-border/70">
                 {displayMessages.map((message, index) => (
-                  <div key={index} className="flex items-start space-x-3">
-                    <Badge variant="outline" className="text-xs">
+                  <div key={index} className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-start sm:gap-3">
+                    <Badge variant="outline" className="w-fit shrink-0 font-mono text-[11px] font-normal">
                       {message.agent}
                     </Badge>
-                    <div className="flex-1">
-                      <p className="text-sm text-foreground">{message.message}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm leading-6">{message.message}</p>
+                      <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                         {new Date(message.timestamp).toLocaleTimeString()}
                       </p>
                     </div>
@@ -463,35 +468,39 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {/* Tech Stack Detection */}
         {displayTechStack && showDetails && (
-          <div className="rounded-md border border-primary/30 bg-primary/5 p-4">
-            <h3 className="mb-2 font-medium text-primary">Detected Tech Stack</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-md border border-border bg-card p-4">
+            <h3 className="mb-3 text-sm font-semibold">Detected Tech Stack</h3>
+            <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
               <div>
-                <span className="font-medium">Primary:</span> {displayTechStack.primary}
+                <dt className="text-xs font-medium text-muted-foreground">Primary:</dt>
+                <dd className="mt-0.5 font-medium">{displayTechStack.primary}</dd>
               </div>
               {displayTechStack.frameworks?.length > 0 && (
                 <div>
-                  <span className="font-medium">Frameworks:</span> {displayTechStack.frameworks.join(', ')}
+                  <dt className="text-xs font-medium text-muted-foreground">Frameworks:</dt>
+                  <dd className="mt-0.5">{displayTechStack.frameworks.join(', ')}</dd>
                 </div>
               )}
               {displayTechStack.tools?.length > 0 && (
                 <div>
-                  <span className="font-medium">Tools:</span> {displayTechStack.tools.join(', ')}
+                  <dt className="text-xs font-medium text-muted-foreground">Tools:</dt>
+                  <dd className="mt-0.5">{displayTechStack.tools.join(', ')}</dd>
                 </div>
               )}
               {displayTechStack.databases?.length > 0 && (
                 <div>
-                  <span className="font-medium">Databases:</span> {displayTechStack.databases.join(', ')}
+                  <dt className="text-xs font-medium text-muted-foreground">Databases:</dt>
+                  <dd className="mt-0.5">{displayTechStack.databases.join(', ')}</dd>
                 </div>
               )}
-            </div>
+            </dl>
           </div>
         )}
 
         {/* Generated Files */}
         {displayGeneratedFiles.length > 0 && (
-          <div className="rounded-md border border-status-success/30 bg-status-success/10 p-4">
-            <h3 className="mb-2 flex items-center space-x-2 font-medium text-status-success">
+          <div className="rounded-md border border-status-success/25 bg-status-success/[0.05] p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-status-success">
               <CheckCircle className="h-4 w-4" />
               <span>Generated Files</span>
             </h3>
@@ -499,9 +508,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
               {displayGeneratedFiles.map((file, index) => (
                 <Badge
                   key={index}
-                  variant="secondary"
-                  className="border border-status-success/30 bg-status-success/10 text-status-success"
+                  variant="outline"
+                  className="gap-1.5 rounded-md bg-card py-1.5 font-mono text-[11px] font-normal"
                 >
+                  <FileCode className="h-3.5 w-3.5 text-status-success" />
                   {file}
                 </Badge>
               ))}
@@ -510,8 +520,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         )}
 
         {/* Status Actions */}
-        <div className="flex items-center justify-between border-t border-border pt-4">
-          <div className="flex items-center space-x-2">
+        <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
             <div 
               className={`h-2 w-2 rounded-full ${
                 status === 'completed' ? 'bg-status-success' :
@@ -523,23 +533,23 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           </div>
           
           {status === 'completed' && (
-            <div className="flex space-x-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={handleDownloadFiles}>
-                <Download className="h-4 w-4 mr-2" />
+                <Download className="h-4 w-4" />
                 Download Files
               </Button>
               <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 {saving ? 'Saving...' : 'Save to Account'}
               </Button>
               <Button size="sm">
-                <ExternalLink className="h-4 w-4 mr-2" />
+                <ExternalLink className="h-4 w-4" />
                 View Results
               </Button>
             </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 };

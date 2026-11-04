@@ -8,53 +8,57 @@
   :root {
     color-scheme: light;
 
-    --background: 40 20% 97%;
-    --foreground: 220 18% 15%;
+    /* Warm-neutral surfaces with a forest-green accent */
+    --background: 80 18% 97%;          /* #F7F8F5 */
+    --foreground: 153 19% 12%;         /* #18231E */
 
-    --card: 40 25% 99%;
-    --card-foreground: 220 18% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 153 19% 12%;
 
-    --popover: 40 25% 99%;
-    --popover-foreground: 220 18% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 153 19% 12%;
 
-    --primary: 156 38% 25%;
-    --primary-foreground: 40 25% 98%;
+    --primary: 154 47% 26%;            /* #246348 */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 38 15% 92%;
-    --secondary-foreground: 220 18% 19%;
+    --secondary: 105 14% 94%;
+    --secondary-foreground: 153 19% 16%;
 
-    --muted: 38 15% 94%;
-    --muted-foreground: 220 10% 43%;
+    --muted: 105 14% 94%;
+    --muted-foreground: 135 6% 40%;    /* #606C63: #657168 nudged to clear 4.5:1 on muted fills */
 
-    --accent: 38 15% 92%;
-    --accent-foreground: 220 18% 19%;
+    --accent: 140 18% 93%;
+    --accent-foreground: 153 19% 12%;
 
-    --destructive: 0 58% 42%;
-    --destructive-foreground: 40 25% 98%;
+    --destructive: 4 70% 42%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 36 14% 86%;
-    --input: 36 14% 82%;
-    --ring: 156 38% 25%;
+    --border: 120 10% 89%;             /* #DFE5DF */
+    --input: 126 8% 57%;               /* form-control edge, 3:1 against white */
+    --ring: 154 47% 26%;
 
-    --success: 153 42% 30%;
-    --success-foreground: 40 25% 98%;
-    --warning: 36 72% 40%;
-    --warning-foreground: 35 40% 98%;
-    --error: 0 58% 42%;
-    --error-foreground: 40 25% 98%;
-    --running: 156 38% 25%;
-    --running-foreground: 40 25% 98%;
+    --success: 152 48% 28%;
+    --success-foreground: 0 0% 100%;
+    --warning: 34 80% 32%;
+    --warning-foreground: 0 0% 100%;
+    --error: 4 70% 42%;
+    --error-foreground: 0 0% 100%;
+    --running: 154 47% 26%;
+    --running-foreground: 0 0% 100%;
 
-    --radius: 0.4375rem;
+    --code-background: 100 16% 96%;
+    --code-foreground: 153 22% 16%;
 
-    --sidebar-background: 38 18% 95%;
-    --sidebar-foreground: 220 18% 20%;
-    --sidebar-primary: 156 38% 25%;
-    --sidebar-primary-foreground: 40 25% 98%;
-    --sidebar-accent: 38 15% 90%;
-    --sidebar-accent-foreground: 220 18% 19%;
-    --sidebar-border: 36 14% 86%;
-    --sidebar-ring: 156 38% 25%;
+    --radius: 0.625rem;
+
+    --sidebar-background: 100 16% 95%;
+    --sidebar-foreground: 153 19% 16%;
+    --sidebar-primary: 154 47% 26%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 140 18% 91%;
+    --sidebar-accent-foreground: 153 19% 12%;
+    --sidebar-border: 120 10% 89%;
+    --sidebar-ring: 154 47% 26%;
   }
 
   * {
@@ -62,10 +66,22 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
     text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-foreground;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
   }
 
   code,
@@ -132,9 +148,37 @@
     background-color: hsl(var(--muted));
   }
 
-  .terminal-surface {
-    background-color: hsl(220 18% 11%);
-    color: hsl(40 20% 92%);
+  /* Light, low-contrast surface for generated code and logs */
+  .terminal-surface,
+  .code-surface {
+    background-color: hsl(var(--code-background));
+    color: hsl(var(--code-foreground));
+  }
+
+  /* Compose with Tailwind's ring utilities so focus rings keep the base shadow */
+  .shadow-soft {
+    --tw-shadow: 0 1px 2px hsl(153 19% 12% / 0.05);
+    box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  }
+
+  .shadow-raised {
+    --tw-shadow: 0 1px 2px hsl(153 19% 12% / 0.04), 0 12px 32px -16px hsl(153 19% 12% / 0.16);
+    box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  }
+
+  /* Custom shadows are emitted after core utilities, so let shadow-none still flatten them */
+  .shadow-soft.shadow-none,
+  .shadow-raised.shadow-none {
+    --tw-shadow: 0 0 #0000;
+  }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(var(--primary));
   }
 
   .scrollbar-slim {

@@ -17,7 +17,8 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Shield
+  Shield,
+  User
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -147,38 +148,41 @@ export const Auth = () => {
   return (
     <div className="flex min-h-screen w-full flex-col bg-background text-foreground">
       {/* Header */}
-      <div className="flex items-center justify-between p-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/')}
-          className="flex items-center space-x-2 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Home</span>
-        </Button>
-        
-        <div className="flex items-center space-x-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Terminal className="h-4 w-4" />
+      <header className="border-b border-border bg-card">
+        <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
+              <Terminal className="h-4 w-4" />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span className="text-base font-semibold tracking-tight">
+                InfraMind
+              </span>
+              <span className="text-[11px] text-muted-foreground">Powered by Supabase</span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-lg font-semibold tracking-tight">
-              InfraMind
-            </span>
-            <span className="text-xs font-medium text-muted-foreground">Powered by Supabase</span>
-          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/')}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>Back to Home</span>
+          </Button>
         </div>
-      </div>
+      </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex items-center justify-center px-4 py-8">
-        <div className="w-full max-w-[450px] relative">
-          <Card className="border-border bg-card shadow-sm">
-            <CardHeader className="text-center pb-4 space-y-2">
+      <main className="flex flex-1 items-start justify-center px-4 py-10 sm:items-center sm:py-16">
+        <div className="relative w-full max-w-[440px]">
+          <Card className="shadow-raised">
+            <CardHeader className="space-y-2 pb-5 pt-7 text-center sm:pt-8">
               <CardTitle className="text-2xl font-semibold tracking-tight">
                 {activeTab === 'signin' ? 'Welcome back!' : 'Create your account'}
               </CardTitle>
-              <CardDescription className="text-muted-foreground">
+              <CardDescription className="mx-auto max-w-[22rem]">
                 {activeTab === 'signin' 
                   ? 'Sign in to access your multi-agent AI dashboard powered by cutting-edge technology'
                   : 'Join thousands of developers automating DevOps with AI agents'
@@ -186,19 +190,13 @@ export const Auth = () => {
               </CardDescription>
             </CardHeader>
             
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 sm:px-8">
               <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger 
-                    value="signin"
-                    className="data-[state=active]:bg-background data-[state=active]:text-foreground"
-                  >
+                  <TabsTrigger value="signin">
                     Sign In
                   </TabsTrigger>
-                  <TabsTrigger 
-                    value="signup"
-                    className="data-[state=active]:bg-background data-[state=active]:text-foreground"
-                  >
+                  <TabsTrigger value="signup">
                     Create Account
                   </TabsTrigger>
                 </TabsList>
@@ -212,12 +210,12 @@ export const Auth = () => {
                 )}
 
                 {/* Sign In Form */}
-                <TabsContent value="signin" className="space-y-4 mt-4">
+                <TabsContent value="signin" className="mt-5 space-y-4">
                   <form onSubmit={handleSignIn} className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="signin-email">Email</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-email"
                           type="email"
@@ -232,7 +230,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signin-password">Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-password"
                           type={showPassword ? "text" : "password"}
@@ -245,13 +243,14 @@ export const Auth = () => {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                          className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
                           onClick={() => setShowPassword(!showPassword)}
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                            <EyeOff className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4 text-muted-foreground" />
+                            <Eye className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -259,12 +258,13 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full"
+                      className="mt-2 w-full"
+                      size="lg"
                       disabled={loading}
                     >
                       {loading ? (
                         <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                           Signing in...
                         </>
                       ) : (
@@ -272,23 +272,23 @@ export const Auth = () => {
                       )}
                     </Button>
 
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
+                    <div className="relative py-1">
+                      <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                        <span className="w-full border-t border-border" />
                       </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                      <div className="relative flex justify-center">
+                        <span className="bg-card px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Or continue with</span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <Button 
                         type="button"
                         variant="outline"
                         onClick={() => handleOAuthLogin('github')}
                         disabled={loading}
                       >
-                        <Github className="mr-2 h-4 w-4" />
+                        <Github className="h-4 w-4" />
                         GitHub
                       </Button>
                       <Button 
@@ -297,7 +297,7 @@ export const Auth = () => {
                         onClick={() => handleOAuthLogin('google')}
                         disabled={loading}
                       >
-                        <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
                           <path
                             fill="currentColor"
                             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -322,12 +322,12 @@ export const Auth = () => {
                 </TabsContent>
 
                 {/* Sign Up Form */}
-                <TabsContent value="signup" className="space-y-4 mt-4">
+                <TabsContent value="signup" className="mt-5 space-y-4">
                   <form onSubmit={handleSignUp} className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="signup-name">Full Name</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-name"
                           type="text"
@@ -342,7 +342,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-email">Email</Label>
                       <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-email"
                           type="email"
@@ -357,7 +357,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-password">Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-password"
                           type={showPassword ? "text" : "password"}
@@ -370,13 +370,14 @@ export const Auth = () => {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                          className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
                           onClick={() => setShowPassword(!showPassword)}
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                            <EyeOff className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4 text-muted-foreground" />
+                            <Eye className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -385,7 +386,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-confirm-password">Confirm Password</Label>
                       <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-confirm-password"
                           type={showConfirmPassword ? "text" : "password"}
@@ -398,13 +399,14 @@ export const Auth = () => {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                          className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
                         >
                           {showConfirmPassword ? (
-                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                            <EyeOff className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4 text-muted-foreground" />
+                            <Eye className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -412,12 +414,13 @@ export const Auth = () => {
 
                     <Button 
                       type="submit" 
-                      className="w-full"
+                      className="mt-2 w-full"
+                      size="lg"
                       disabled={loading}
                     >
                       {loading ? (
                         <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                           Creating account...
                         </>
                       ) : (
@@ -425,23 +428,23 @@ export const Auth = () => {
                       )}
                     </Button>
 
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
+                    <div className="relative py-1">
+                      <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                        <span className="w-full border-t border-border" />
                       </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                      <div className="relative flex justify-center">
+                        <span className="bg-card px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Or continue with</span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <Button 
                         type="button"
                         variant="outline"
                         onClick={() => handleOAuthLogin('github')}
                         disabled={loading}
                       >
-                        <Github className="mr-2 h-4 w-4" />
+                        <Github className="h-4 w-4" />
                         GitHub
                       </Button>
                       <Button 
@@ -450,7 +453,7 @@ export const Auth = () => {
                         onClick={() => handleOAuthLogin('google')}
                         disabled={loading}
                       >
-                        <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
                           <path
                             fill="currentColor"
                             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -476,15 +479,15 @@ export const Auth = () => {
               </Tabs>
             </CardContent>
 
-            <CardFooter className="flex flex-col items-center justify-center pt-0 pb-6">
-              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+            <CardFooter className="flex flex-col items-center justify-center rounded-b-lg border-t border-border bg-muted/40 px-6 py-4 sm:py-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Shield className="h-4 w-4" />
                 <span>Secured by</span>
                 <a 
                   href="https://supabase.com" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="font-semibold text-primary transition-colors hover:text-primary/80"
+                  className="rounded-sm font-semibold text-primary underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   Supabase
                 </a>
@@ -492,7 +495,7 @@ export const Auth = () => {
             </CardFooter>
           </Card>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

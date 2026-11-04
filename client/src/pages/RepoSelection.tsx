@@ -142,19 +142,19 @@ export const RepoSelection = () => {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 text-foreground">
+    <div className="text-foreground">
       <div className="space-y-8">
-        <div>
+        <div className="border-b border-border pb-6">
           <h1 className="text-3xl font-semibold tracking-tight">Repository Selection</h1>
-          <p className="mt-2 text-muted-foreground">
+          <p className="mt-2 max-w-2xl text-muted-foreground">
             Enter a GitHub repository URL to generate CI/CD configuration
           </p>
         </div>
 
-        <div className="max-w-4xl mx-auto space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
           {/* Repository Selection Tabs */}
-          <Card className="border-border bg-card">
-            <CardHeader>
+          <Card className="min-w-0">
+            <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
                 <Github className="h-5 w-5" />
                 Select Repository
@@ -166,13 +166,13 @@ export const RepoSelection = () => {
             <CardContent>
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="browse" className="flex items-center gap-2">
+                  <TabsTrigger value="browse">
                     <Users className="h-4 w-4" />
-                    Browse Repositories
+                    <span className="truncate">Browse Repositories</span>
                   </TabsTrigger>
-                  <TabsTrigger value="manual" className="flex items-center gap-2">
+                  <TabsTrigger value="manual">
                     <Link className="h-4 w-4" />
-                    Manual URL
+                    <span className="truncate">Manual URL</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -183,13 +183,13 @@ export const RepoSelection = () => {
                     onConnect={connectGitHub}
                   />
                   {selectedRepository && (
-                    <div className="mt-4 rounded-md border border-border bg-muted/50 p-4">
-                      <h4 className="mb-2 font-medium">Selected Repository:</h4>
-                      <div className="flex items-center gap-2">
-                        <Github className="h-4 w-4" />
-                        <span className="font-mono text-sm">{selectedRepository.fullName}</span>
+                    <div className="mt-4 flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/[0.05] p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <h4 className="text-sm font-medium text-primary">Selected Repository:</h4>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Github className="h-4 w-4 shrink-0" />
+                        <span className="truncate font-mono text-sm">{selectedRepository.fullName}</span>
                         {selectedRepository.private && (
-                           <span className="rounded border border-status-warning/30 bg-status-warning/10 px-2 py-1 text-xs text-status-warning">Private</span>
+                           <span className="shrink-0 rounded-full border border-status-warning/30 bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">Private</span>
                         )}
                       </div>
                     </div>
@@ -208,17 +208,17 @@ export const RepoSelection = () => {
                         placeholder="https://github.com/username/repository"
                         value={repoUrl}
                         onChange={(e) => setRepoUrl(e.target.value)}
-                        className="w-full"
+                        className="w-full font-mono text-[13px]"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Example: https://github.com/facebook/react
+                        Example: <span className="font-mono">https://github.com/facebook/react</span>
                       </p>
                     </div>
                   </div>
                 </TabsContent>
               </Tabs>
 
-              <div className="mt-6">
+              <div className="mt-6 border-t border-border pt-6">
                 <Button
                   onClick={handleGenerateCI}
                   disabled={loading || (activeTab === 'browse' && !selectedRepository) || (activeTab === 'manual' && !repoUrl.trim())}
@@ -227,13 +227,13 @@ export const RepoSelection = () => {
                 >
                   {loading ? (
                     <>
-                       <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"></div>
+                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground"></div>
                       Processing Repository...
                     </>
                   ) : (
                     <>
                       Start AI Analysis
-                      <ArrowRight className="h-4 w-4 ml-2" />
+                      <ArrowRight className="h-4 w-4" />
                     </>
                   )}
                 </Button>
@@ -241,56 +241,56 @@ export const RepoSelection = () => {
             </CardContent>
           </Card>
 
-          {/* Example Repositories */}
-          <Card className="border-border bg-card">
-            <CardHeader>
-              <CardTitle className="text-lg">Example Repositories</CardTitle>
-              <CardDescription>
-                Try these example repositories to see the CI/CD generation in action
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3">
-                {exampleRepos.map((example, index) => (
-                  <div
-                    key={index}
-                    className="flex cursor-pointer items-center justify-between rounded-md border border-border bg-card p-3 transition-colors hover:bg-muted"
-                    onClick={() => handleExampleSelect(example)}
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                         <GitBranch className="h-4 w-4 text-muted-foreground" />
-                         <span className="font-medium">{example.name}</span>
-                         <span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
-                          {example.language}
-                        </span>
+          <div className="space-y-6">
+            {/* Example Repositories */}
+            <Card>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-base">Example Repositories</CardTitle>
+                <CardDescription>
+                  Try these example repositories to see the CI/CD generation in action
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2">
+                  {exampleRepos.map((example, index) => (
+                    <div
+                      key={index}
+                      className="group flex cursor-pointer items-start justify-between gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/50"
+                      onClick={() => handleExampleSelect(example)}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                           <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                           <span className="truncate font-mono text-[13px] font-medium">{example.name}</span>
+                           <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                            {example.language}
+                          </span>
+                        </div>
+                         <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{example.description}</p>
                       </div>
-                       <p className="mt-1 text-sm text-muted-foreground">{example.description}</p>
+                      <Button variant="ghost" size="sm" className="h-8 shrink-0 px-2.5 text-primary group-hover:bg-card">
+                        Use This
+                      </Button>
                     </div>
-                    <Button variant="ghost" size="sm">
-                      Use This
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
 
-          {/* GitHub Connection Notice */}
-          <Card className="border-primary/30 bg-primary/5">
-            <CardContent className="pt-6">
+            {/* GitHub Connection Notice */}
+            <div className="rounded-lg border border-primary/20 bg-primary/[0.05] p-5">
               <div className="flex items-start gap-3">
-                 <Globe className="mt-0.5 h-5 w-5 text-primary" />
+                 <Globe className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <div>
-                   <h3 className="font-medium text-primary">Repository Access</h3>
-                   <p className="mt-1 text-sm text-muted-foreground">
+                   <h3 className="text-sm font-semibold text-primary">Repository Access</h3>
+                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
                     Currently supporting public GitHub repositories. For private repositories, 
                     you can still generate CI/CD configurations by entering the repository URL.
                   </p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       </div>
     </div>

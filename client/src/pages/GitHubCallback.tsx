@@ -50,24 +50,26 @@ export const GitHubCallback = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
-      <Card className="w-full max-w-md bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Github className="h-5 w-5" />
+    <div className="flex min-h-[60vh] items-center justify-center py-8 text-foreground">
+      <Card className="w-full max-w-md shadow-raised">
+        <CardHeader className="items-center pb-4 text-center">
+          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
+            <Github className="h-6 w-6" />
+          </div>
+          <CardTitle className="flex items-center gap-2">
             <span>GitHub Connection</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {status === 'loading' && (
-            <div className="text-center space-y-4">
+            <div className="space-y-4 py-4 text-center" aria-busy="true">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-              <p className="text-muted-foreground">{message}</p>
+              <p className="text-sm text-muted-foreground">{message}</p>
             </div>
           )}
 
           {status === 'success' && (
-              <Alert className="border-status-success/30 bg-status-success/10">
+              <Alert className="border-status-success/25 bg-status-success/[0.06]">
               <CheckCircle className="h-4 w-4 text-status-success" />
               <AlertDescription className="text-status-success">
                 {message}
@@ -84,7 +86,7 @@ export const GitHubCallback = () => {
                 </AlertDescription>
               </Alert>
               
-              <div className="flex space-x-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <Button onClick={handleRetry} className="flex-1">
                   Try Again
                 </Button>

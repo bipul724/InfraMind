@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
@@ -55,6 +54,11 @@ interface RepositorySelectorProps {
   isConnected: boolean;
   onConnect: () => void;
 }
+
+// Radix Select rejects an empty item value, so the default option uses a
+// sentinel that maps back to the empty "no organization" state.
+// GitHub logins cannot contain underscores, so it never collides with an org.
+const PERSONAL_REPOS_VALUE = '__personal__';
 
 export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   onRepositorySelect,
@@ -143,65 +147,60 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
 
   if (!isConnected) {
     return (
-      <Card className="mx-auto w-full max-w-2xl border-border bg-card">
-        <CardHeader className="text-center">
-          <CardTitle className="flex items-center justify-center gap-2">
-            <Github className="h-6 w-6" />
-            Connect GitHub Account
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Alert>
-            <Github className="h-4 w-4" />
-            <AlertDescription>
-              Connect your GitHub account to browse and select your repositories for AI analysis.
-            </AlertDescription>
-          </Alert>
+      <div className="rounded-lg border border-dashed border-border bg-muted/40 px-5 py-8 text-center sm:px-8">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-soft">
+          <Github className="h-6 w-6" />
+        </div>
+        <h3 className="mt-4 text-base font-semibold">
+          Connect GitHub Account
+        </h3>
+        <div className="mx-auto mt-2 max-w-md space-y-5">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Connect your GitHub account to browse and select your repositories for AI analysis.
+          </p>
           <Button 
             onClick={onConnect} 
-            className="w-full"
+            className="w-full sm:w-auto"
             size="lg"
           >
-            <Github className="mr-2 h-5 w-5" />
+            <Github className="h-5 w-5" />
             Connect GitHub Account
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* User Info */}
       {user && (
-        <Card className="border-border bg-card">
-          <CardContent className="flex items-center gap-4 p-4">
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={user.avatarUrl} alt={user.name || user.login} />
-              <AvatarFallback>{user.name?.[0] || user.login?.[0]}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <h3 className="font-semibold">{user.name || user.login}</h3>
-              <p className="text-sm text-muted-foreground">@{user.login}</p>
-            </div>
-            <Badge variant="outline" className="gap-1">
-              <Github className="h-3 w-3" />
-              Connected
-            </Badge>
-          </CardContent>
-        </Card>
+        <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-3">
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={user.avatarUrl} alt={user.name || user.login} />
+            <AvatarFallback>{user.name?.[0] || user.login?.[0]}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold">{user.name || user.login}</h3>
+            <p className="truncate font-mono text-xs text-muted-foreground">@{user.login}</p>
+          </div>
+          <Badge variant="outline" className="gap-1 border-status-success/30 bg-status-success/[0.06] text-status-success">
+            <Github className="h-3 w-3" />
+            Connected
+          </Badge>
+        </div>
       )}
 
       {/* Repository Browser */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle>Select Repository</CardTitle>
-          <div className="flex flex-col sm:flex-row gap-4">
+      <div className="space-y-4">
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold">Select Repository</h3>
+          <div className="flex flex-col gap-3 sm:flex-row">
             {/* Search */}
             <div className="flex-1">
               <Label htmlFor="search" className="sr-only">Search repositories</Label>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="search"
                   placeholder="Search repositories..."
@@ -214,16 +213,19 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
 
             {/* Organization filter */}
             {organizations.length > 0 && (
-              <div className="w-full sm:w-64">
-                <Select value={selectedOrg} onValueChange={setSelectedOrg}>
+              <div className="w-full sm:w-56">
+                <Select
+                  value={selectedOrg || PERSONAL_REPOS_VALUE}
+                  onValueChange={(value) => setSelectedOrg(value === PERSONAL_REPOS_VALUE ? '' : value)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="All repositories" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">
+                    <SelectItem value={PERSONAL_REPOS_VALUE}>
                       <div className="flex items-center gap-2">
                         <User className="h-4 w-4" />
-                        Personal repositories
+                        All repositories
                       </div>
                     </SelectItem>
                     {organizations.map((org) => (
@@ -239,9 +241,9 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
               </div>
             )}
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent>
+        <div>
           {error && (
             <Alert className="mb-4" variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -249,54 +251,62 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
           )}
 
           {loading && repositories.length === 0 ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
-                <p className="text-muted-foreground">Loading repositories...</p>
+            <div className="space-y-2" aria-busy="true">
+              <div className="flex items-center gap-2 pb-1 text-sm text-muted-foreground">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
+                <p>Loading repositories...</p>
               </div>
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="animate-pulse rounded-md border border-border p-4">
+                  <div className="h-4 w-40 rounded bg-muted" />
+                  <div className="mt-3 h-3 w-3/4 rounded bg-muted" />
+                  <div className="mt-3 h-3 w-1/3 rounded bg-muted" />
+                </div>
+              ))}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {filteredRepositories.length === 0 ? (
-                <div className="text-center py-12">
-                  <Github className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
-                  <p className="text-muted-foreground">
+                <div className="rounded-md border border-dashed border-border px-4 py-12 text-center">
+                  <Github className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
+                  <p className="text-sm text-muted-foreground">
                     {searchTerm ? 'No repositories match your search.' : 'No repositories found.'}
                   </p>
                 </div>
               ) : (
                 <>
+                  <div className="scrollbar-slim max-h-[28rem] space-y-2 overflow-y-auto pr-1">
                   {filteredRepositories.map((repo) => (
                     <div
                       key={repo.id}
-                      className="cursor-pointer rounded-md border border-border bg-card p-4 transition-colors hover:bg-muted/50"
+                      className="cursor-pointer rounded-md border border-border bg-card p-4 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/40"
                       onClick={() => onRepositorySelect(repo)}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium truncate">{repo.name}</h4>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+                            <h4 className="min-w-0 max-w-full truncate font-mono text-sm font-medium">{repo.name}</h4>
                             {repo.private ? (
-                              <Badge variant="secondary" className="gap-1">
+                              <Badge variant="secondary" className="gap-1 border-status-warning/30 bg-status-warning/10 text-status-warning">
                                 <Lock className="h-3 w-3" />
                                 Private
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="gap-1">
+                              <Badge variant="outline" className="gap-1 text-muted-foreground">
                                 <Globe className="h-3 w-3" />
                                 Public
                               </Badge>
                             )}
                             {repo.language && (
-                              <Badge variant="outline">{repo.language}</Badge>
+                              <Badge variant="secondary">{repo.language}</Badge>
                             )}
                           </div>
                           {repo.description && (
-                            <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
+                            <p className="mb-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
                               {repo.description}
                             </p>
                           )}
-                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Star className="h-3 w-3" />
                               {repo.stargazersCount}
@@ -311,17 +321,19 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                             </span>
                           </div>
                         </div>
-                        <Button variant="ghost" size="sm" className="ml-4">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground">
                           <ExternalLink className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
                   ))}
+                  </div>
 
                   {hasMore && (
-                    <div className="text-center pt-4">
+                    <div className="pt-2 text-center">
                       <Button 
                         variant="outline" 
+                        size="sm"
                         onClick={loadMore} 
                         disabled={loading}
                       >
@@ -333,8 +345,8 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 };
