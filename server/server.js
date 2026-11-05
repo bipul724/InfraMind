@@ -1023,56 +1023,48 @@ app.get('/api/files/:sessionId', async (req, res) => {
 });
 
 // Download individual file endpoint
+// The three generated kinds (agents/index.js GENERATED_FILES) and the name each one is
+// downloaded under. Anything else is 404, including inherited Object.prototype members
+// (constructor, __proto__, toString) and other spellings of a kind.
+const DOWNLOAD_NAMES = new Map([
+  ['dockerfile', 'Dockerfile'],
+  ['githubActions', 'ci.yml'],
+  ['envExample', '.env.example']
+]);
+const FILE_NOT_FOUND_BODY = { error: 'File not found' };
+
 app.get('/api/files/:sessionId/:filename', async (req, res) => {
   try {
     const { sessionId, filename } = req.params;
-    
+
     const session = await getOwnedSession(req, sessionId);
     if (!session) {
       return sendSessionNotFound(res);
     }
-    
+
     if (session.status !== 'completed' || !session.analysisResult) {
       return res.status(400).json({ error: 'Analysis not completed' });
     }
-    
-    const { generatedFiles } = session.analysisResult;
-    
-    if (!generatedFiles[filename]) {
-      return res.status(404).json({ error: 'File not found' });
+
+    const downloadName = DOWNLOAD_NAMES.get(filename);
+    const generatedFiles = session.analysisResult.generatedFiles ?? {};
+    // Own properties only: a kind the generator omitted for this session is not found
+    if (!downloadName || !Object.hasOwn(generatedFiles, filename) || typeof generatedFiles[filename] !== 'string') {
+      return res.status(404).json(FILE_NOT_FOUND_BODY);
     }
-    
-    const fileContent = generatedFiles[filename];
-    const contentType = getContentType(filename);
-    
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', contentType);
-    res.send(fileContent);
-    
+
+    // res.attachment encodes the name and sets a Content-Type from its extension, so the
+    // Content-Type is set after it: every kind is served as plain text
+    res.attachment(downloadName);
+    res.set('Content-Type', 'text/plain; charset=utf-8');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.send(generatedFiles[filename]);
   } catch (error) {
     if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
     console.error(`File download error: ${redactSecrets(error)}`);
     res.status(500).json({ error: 'Failed to download file' });
   }
 });
-
-// Helper function to determine content type
-function getContentType(filename) {
-  const extension = filename.split('.').pop()?.toLowerCase();
-  switch (extension) {
-    case 'yml':
-    case 'yaml':
-      return 'application/x-yaml';
-    case 'json':
-      return 'application/json';
-    case 'md':
-      return 'text/markdown';
-    case 'dockerfile':
-      return 'text/plain';
-    default:
-      return 'text/plain';
-  }
-}
 
 // Get session status endpoint
 app.get('/api/status/:sessionId', async (req, res) => {

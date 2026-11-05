@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useReducer, useRef } from 'react';
 import { CardDescription, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -14,19 +14,29 @@ import {
   Search,
   Cog,
   Shield,
-  Download,
   Loader2,
   Save,
   FileCode,
-  ClipboardCheck
+  ClipboardCheck,
+  RefreshCw
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
-import { apiFetch } from '@/lib/apiClient';
 import { getAccessToken } from '@/lib/supabase';
 import { useSessionPoller } from '@/hooks/use-session-poller';
+import { GeneratedFilesView } from '@/components/GeneratedFilesView';
+import {
+  currentGeneration,
+  finishSaving,
+  getCachedResult,
+  isSaved,
+  isSaving,
+  loadResult,
+  markSaving,
+  storeResult
+} from '@/lib/resultCache';
 import type { PollUpdate } from '@/hooks/use-session-poller';
 import type { AgentMessage, ProgressPayload, SessionFilesResponse, SessionStatus, TechStack } from '@/lib/session';
 
@@ -42,9 +52,10 @@ interface AgentProgressProps {
   errors?: string[];
   techStack?: TechStack | null;
   generatedFiles?: string[];
-  // The verifier's review: a string, null when the session has none, undefined when not
-  // loaded yet (it is then fetched from GET /api/files/:sessionId once the run completes)
-  verificationResults?: string | null;
+  // GET /api/files/:sessionId for this session when the parent has already loaded it (the
+  // ?session= view of a completed analysis); otherwise it is loaded here once the run
+  // completes. It carries the file contents and the verifier's review.
+  loadedResult?: SessionFilesResponse;
   // Progress events from the socket, and from the status poller when events are missed
   onProgressUpdate?: (data: ProgressPayload) => void;
 }
@@ -105,8 +116,8 @@ const STEP_LABELS: Record<StepState, string> = {
   unknown: 'No details'
 };
 
-// Agent output keys -> saved-file name and type, and the name used for downloads.
-// Browsers do not accept a path in a download name, so the workflow downloads as ci.yml.
+// Agent output keys -> saved-file name and type, and the name shown on the badges (the
+// download name: a browser does not accept a path in one, so the workflow is ci.yml)
 const FILE_META: Record<string, { name: string; type: string; downloadName: string }> = {
   dockerfile: { name: 'Dockerfile', type: 'dockerfile', downloadName: 'Dockerfile' },
   githubActions: { name: '.github/workflows/ci.yml', type: 'github-actions', downloadName: 'ci.yml' },
@@ -139,14 +150,15 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   errors = [],
   techStack,
   generatedFiles = [],
-  verificationResults,
+  loadedResult,
   onProgressUpdate
 }) => {
   const [showDetails, setShowDetails] = useState(false);
-  // The review fetched by this component, for the session it was fetched for
-  const [fetchedReview, setFetchedReview] = useState<{ sessionId: string; text: string | null } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  // Re-renders after the result cache (lib/resultCache.ts) changes
+  const [, refresh] = useReducer((count: number) => count + 1, 0);
+  // The session whose files could not be loaded; cleared by "Try again"
+  const [resultErrorFor, setResultErrorFor] = useState<string | null>(null);
+  const [, setSaving] = useState(false);
   // The session whose status polling gave up after 30 minutes
   const [pollGaveUpFor, setPollGaveUpFor] = useState<string | null>(null);
   const { user } = useAuth();
@@ -162,8 +174,13 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   useEffect(() => {
     if (!sessionId) return;
 
-    // The auth callback runs on every (re)connect, so refreshed tokens are picked up
+    // The auth callback runs on every (re)connect, so refreshed tokens are picked up.
+    // forceNew: socket.io-client otherwise keeps the first Manager for a URL in a
+    // module-level cache for the life of the page, and with it this callback and the
+    // component state its closure reaches (a previous user's files after sign-out). Later
+    // mounts already got a new Manager, so this only stops the first one being cached.
     const socket = io(API_BASE_URL, {
+      forceNew: true,
       auth: (cb) => {
         getAccessToken().then((token) => cb({ token: token ?? '' }));
       }
@@ -199,51 +216,59 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     };
   }, [sessionId]);
 
+  // The result-cache generation this session was opened in: when the signed-in user
+  // changes, the cache is cleared and a session opened before that never writes into it
+  const sessionGenerationRef = useRef(currentGeneration());
+  useEffect(() => {
+    sessionGenerationRef.current = currentGeneration();
+  }, [sessionId]);
+
   // Backstop for missed socket events (B2.1): poll GET /api/status/:id while the session
-  // is in flight. On "completed" the poller loads GET /api/files once, so the review it
-  // carries is kept here and not fetched again.
+  // is in flight. On "completed" the poller loads GET /api/files once; that response is
+  // kept here, so it is not requested again.
   useSessionPoller({
     sessionId,
     active: Boolean(sessionId) && (status === 'cloning' || status === 'analyzing'),
     onUpdate: ({ payload, files }: PollUpdate) => {
-      if (files && sessionId) {
-        setFetchedReview({ sessionId, text: typeof files.verificationResults === 'string' ? files.verificationResults : null });
+      if (files && sessionId && storeResult(sessionId, files, sessionGenerationRef.current)) {
+        refresh();
       }
       onProgressUpdateRef.current?.(payload);
     },
     onGiveUp: () => setPollGaveUpFor(sessionId ?? null)
   });
 
-  // The review is not in progress events: once the run has completed, load it from
-  // GET /api/files/:sessionId unless the parent already passed it
+  // Neither the socket's completed event nor the status carries file contents or the
+  // review: once the run has completed, load GET /api/files/:sessionId, unless the parent
+  // or the poller already did. A load already in flight (from an earlier mount) is joined,
+  // not repeated.
+  const cachedResult = sessionId ? getCachedResult(sessionId) : undefined;
   useEffect(() => {
-    if (!sessionId || status !== 'completed' || verificationResults !== undefined) return;
-    if (fetchedReview?.sessionId === sessionId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await apiFetch(`/api/files/${sessionId}`);
-        if (!response.ok) return;
-        const data: SessionFilesResponse = await response.json();
-        if (!cancelled) {
-          setFetchedReview({ sessionId, text: typeof data.verificationResults === 'string' ? data.verificationResults : null });
-        }
-      } catch {
-        // No review shown; downloads still fetch the files on demand
+    if (!sessionId || status !== 'completed' || loadedResult || cachedResult) return;
+    if (resultErrorFor === sessionId) return;
+    const id = sessionId;
+    let active = true;
+    loadResult(id).then(
+      () => {
+        if (active) refresh();
+      },
+      (error) => {
+        console.warn(`The generated files of session ${id} could not be loaded:`, error);
+        if (active) setResultErrorFor(id);
       }
-    })();
+    );
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [sessionId, status, verificationResults, fetchedReview]);
+  }, [sessionId, status, loadedResult, cachedResult, resultErrorFor]);
 
-  const reviewText =
-    verificationResults !== undefined
-      ? verificationResults
-      : fetchedReview && fetchedReview.sessionId === sessionId
-        ? fetchedReview.text
-        : null;
-  const review = status === 'completed' && typeof reviewText === 'string' && reviewText.trim() !== '' ? reviewText : null;
+  const result = status === 'completed' ? loadedResult ?? cachedResult : undefined;
+  const resultFiles = result?.files && Object.keys(result.files).length > 0 ? result.files : null;
+  const resultFailed = status === 'completed' && !result && resultErrorFor !== null && resultErrorFor === sessionId;
+  const reviewText = result?.verificationResults;
+  const review = typeof reviewText === 'string' && reviewText.trim() !== '' ? reviewText : null;
+  const saved = Boolean(sessionId && isSaved(sessionId));
+  const saving = Boolean(sessionId && isSaving(sessionId));
 
   // Driven only by what the server reports. The server sends an event as each agent
   // finishes (B2.1), carrying the messages and errors so far. An agent with both a message
@@ -323,55 +348,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     }
   };
 
-  const fetchGeneratedFiles = async (): Promise<Record<string, string>> => {
-    const response = await apiFetch(`/api/files/${sessionId}`);
-
-    if (!response.ok) {
-      throw new Error('The generated files could not be loaded');
-    }
-
-    const data: { files?: Record<string, string> } = await response.json();
-    return data.files || {};
-  };
-
-  const handleDownloadFiles = async () => {
-    if (!sessionId) return;
-
-    setDownloading(true);
-    try {
-      const entries = Object.entries(await fetchGeneratedFiles()).filter(
-        ([, content]) => typeof content === 'string'
-      );
-      if (entries.length === 0) {
-        throw new Error('No generated files to download');
-      }
-      entries.forEach(([key, content]) => {
-        // octet-stream: with text/plain, Chrome appends ".txt" to a name without an
-        // extension (Dockerfile -> Dockerfile.txt)
-        const blob = new Blob([content], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = FILE_META[key]?.downloadName || key;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      });
-    } catch (error) {
-      console.error('Download error:', error);
-      toast({
-        title: 'Download failed',
-        description: error instanceof Error ? error.message : 'Failed to download files',
-        variant: 'destructive'
-      });
-    } finally {
-      setDownloading(false);
-    }
-  };
-
+  // Every non-empty file in one insert, once per session
   const handleSaveFiles = async () => {
-    if (!sessionId) return;
+    if (!sessionId || !resultFiles || saved || saving) return;
     if (!user?.id) {
       toast({
         title: 'Authentication required',
@@ -381,10 +360,13 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       return;
     }
 
+    const id = sessionId;
+    const startedIn = currentGeneration();
+    let succeeded = false;
+    markSaving(id);
     setSaving(true);
     try {
-      const files = await fetchGeneratedFiles();
-      const requests = Object.entries(files)
+      const requests = Object.entries(resultFiles)
         .filter(([, content]) => typeof content === 'string' && content.trim() !== '')
         .map(([key, content]) => ({
           userId: user.id,
@@ -399,9 +381,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       }
 
       await SavedFilesAPI.saveFiles(requests);
+      succeeded = true;
       toast({
         title: 'Files saved',
-        description: `${requests.length} file${requests.length === 1 ? '' : 's'} saved to your account.`,
+        description: `${requests.length} file${requests.length === 1 ? '' : 's'} saved to your account. They are listed under Saved Files.`,
       });
     } catch (error) {
       console.error('Save error:', error);
@@ -411,7 +394,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         variant: 'destructive'
       });
     } finally {
+      finishSaving(id, succeeded, startedIn);
       setSaving(false);
+      refresh();
     }
   };
 
@@ -616,25 +601,46 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           </div>
         )}
 
-        {/* Generated Files */}
+        {/* Generated Files: names while the contents load, then the viewer */}
         {generatedFiles.length > 0 && (
-          <div className="rounded-md border border-status-success/25 bg-status-success/[0.05] p-4">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-status-success">
+          <div className="min-w-0 space-y-3 rounded-md border border-status-success/25 bg-status-success/[0.05] p-4">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-status-success">
               <CheckCircle className="h-4 w-4" />
               <span>Generated Files</span>
             </h3>
-            <div className="flex flex-wrap gap-2">
-              {generatedFiles.map((file, index) => (
-                <Badge
-                  key={index}
-                  variant="outline"
-                  className="gap-1.5 rounded-md bg-card py-1.5 font-mono text-[11px] font-normal"
-                >
-                  <FileCode className="h-3.5 w-3.5 text-status-success" />
-                  {FILE_META[file]?.downloadName || file}
-                </Badge>
-              ))}
-            </div>
+            {resultFiles ? (
+              <GeneratedFilesView key={sessionId ?? ''} files={resultFiles} sessionId={sessionId} />
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {generatedFiles.map((file, index) => (
+                    <Badge
+                      key={index}
+                      variant="outline"
+                      className="gap-1.5 rounded-md bg-card py-1.5 font-mono text-[11px] font-normal"
+                    >
+                      <FileCode className="h-3.5 w-3.5 text-status-success" />
+                      {FILE_META[file]?.downloadName || file}
+                    </Badge>
+                  ))}
+                </div>
+                {resultFailed && (
+                  <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-status-error">The file contents could not be loaded.</span>
+                    <Button size="sm" variant="outline" onClick={() => setResultErrorFor(null)} className="w-fit">
+                      <RefreshCw className="h-4 w-4" />
+                      Try Again
+                    </Button>
+                  </div>
+                )}
+                {status === 'completed' && !resultFailed && (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground" aria-busy="true">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading file contents...
+                  </p>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -673,13 +679,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
           {status === 'completed' && !noFilesGenerated && (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={handleDownloadFiles} disabled={downloading}>
-                {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                {downloading ? 'Downloading...' : 'Download Files'}
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {saving ? 'Saving...' : 'Save to Account'}
+              <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving || saved || !resultFiles}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                {saving ? 'Saving...' : saved ? 'Saved' : 'Save to Account'}
               </Button>
             </div>
           )}

@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AuthService, User } from '@/lib/supabase';
+import { clearResultCache } from '@/lib/resultCache';
 
 interface AuthContextType {
   user: User | null;
@@ -32,22 +33,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    checkUserSession();
-    // Picks up OAuth redirects, token refreshes and sign-outs from other tabs
-    return AuthService.onAuthChange(setUser);
+  // Every change of the signed-in user goes through here. When the user id changes, to
+  // another user or to null (sign-out, SIGNED_OUT from another tab, an expired session),
+  // per-user client state is cleared first (T-133): sign-out does not reload the page.
+  // A token refresh keeps the id and clears nothing.
+  const userIdRef = useRef<string | null>(null);
+  const applyUser = useCallback((next: User | null) => {
+    const nextId = next?.id ?? null;
+    if (nextId !== userIdRef.current) {
+      userIdRef.current = nextId;
+      clearResultCache();
+    }
+    setUser(next);
   }, []);
 
-  const checkUserSession = async () => {
-    try {
-      const currentUser = await AuthService.getCurrentUser();
-      setUser(currentUser);
-    } catch (error) {
-      console.log('No active session');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const checkUserSession = async () => {
+      try {
+        const currentUser = await AuthService.getCurrentUser();
+        applyUser(currentUser);
+      } catch (error) {
+        console.log('No active session');
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkUserSession();
+    // Picks up OAuth redirects, token refreshes and sign-outs from other tabs
+    return AuthService.onAuthChange(applyUser);
+  }, [applyUser]);
 
   const loginWithGoogle = async () => {
     await AuthService.loginWithGoogle();
@@ -61,19 +75,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loginWithEmail = async (email: string, password: string) => {
     const user = await AuthService.loginWithEmail(email, password);
-    setUser(user);
+    applyUser(user);
     return user;
   };
 
   const register = async (email: string, password: string, name: string) => {
     const user = await AuthService.registerWithEmail(email, password, name);
-    setUser(user);
+    applyUser(user);
     return user;
   };
 
   const logout = async () => {
     await AuthService.logout();
-    setUser(null);
+    applyUser(null);
   };
 
   const value: AuthContextType = {

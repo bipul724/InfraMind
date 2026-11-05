@@ -57,7 +57,10 @@ The server exits at startup without these, listing every problem at once (`start
 - [ ] Sign up and sign in work with each enabled provider
 - [ ] Connect GitHub completes on `/auth/success` and the dashboard shows the GitHub login
 - [ ] A repository picked on `/select-repo` (Browse Repositories) clones and analyzes, including a private one
-- [ ] The generated files download, and "Save to Account" stores them in Saved Files
+- [ ] A completed run shows one tab per generated file (Dockerfile, `ci.yml`, `.env.example`) with its contents as plain text and its line count; long lines scroll inside the code block, never the page, also at phone width
+- [ ] Copy puts the file's exact text on the clipboard; with clipboard access blocked, "Copy failed" asks to select the text and copy it manually
+- [ ] Each Download button saves its file with the stored content: in Chrome as `Dockerfile`, `ci.yml` and `env.example` (Chrome drops the leading dot of `.env.example`, and the viewer tells the user to rename it), with no `.txt` appended. Safari and Firefox are owner checks (T-607)
+- [ ] "Save to Account" saves the files once (the button then reads "Saved") and they are listed in the Saved Files tab
 - [ ] Each downloaded file starts with the file itself (no prose before it), and a completed run shows the verifier's text under "Review"
 - [ ] `/dashboard?session=<id>` (where `/select-repo` lands as soon as an analysis has started, and the "View" button in Results from This Visit) shows the run live and then a completed session's files; an unknown id shows "This analysis was not found or has expired"
 - [ ] During a run the four step cards move one by one (Running, then Done); with the browser offline for a few seconds mid-run, the run still completes on screen within about 5 s of coming back (status polling)
@@ -72,6 +75,8 @@ Each item is a fact about the code today, for deciding what to fix before launch
 - The **Projects** tab lists only results from the current page visit; nothing is stored (`client/src/pages/ModernDashboard.tsx`).
 - Analyses run in an in-process job runner (`server/utils/jobs.js`): one backend instance only, since the queue is not shared between processes. A restart or deploy ends every running and queued analysis; with `SESSION_STORE=database` the next start marks them `failed` with the restart message, and the user starts again. Running analyses cannot be cancelled.
 - The step after an agent's event is that agent's own step name (for example "Analyzing codebase structure" while the generator runs), because the event is sent when the agent finishes (`runAnalysisJob` in `server/server.js`).
+- Chrome saves the `.env.example` download as `env.example`: it removes a leading dot from download names, so the user renames the file (`client/src/components/GeneratedFilesView.tsx` shows this under the file).
+- "Save to Account" is remembered for the page load only: after a reload, or when the same analysis is opened in a new tab with `/dashboard?session=<id>`, the button is enabled again and a second save inserts a second set of rows (`client/src/components/AgentProgress.tsx`).
 - Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
 - Rate-limit counters are kept in memory by each server process: a second instance counts separately, and a restart resets every count (`server/utils/security.js`).
 - `TRUST_PROXY` defaults to 0 and is not set in `render.yaml`: behind Render's proxy, every visitor shares one bucket for the per-IP limits until it is set (`server/utils/config.js`).
