@@ -7,6 +7,7 @@ import { Download, Trash2, RefreshCw, FilePlus, FileCode, AlertCircle, Loader2 }
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { downloadTextFile } from '@/lib/download';
+import { savedFileLabel } from '@/lib/savedFileLabel';
 
 export const SavedFiles: React.FC = () => {
   const { user } = useAuth();
@@ -200,7 +201,7 @@ export const SavedFiles: React.FC = () => {
                     className="h-10 w-10"
                     onClick={() => handleDownload(file)}
                     title="Download"
-                    aria-label={`Download ${file.name}`}
+                    aria-label={savedFileLabel('Download', file.name, file.repoUrl)}
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
                   </Button>
@@ -211,7 +212,7 @@ export const SavedFiles: React.FC = () => {
                     onClick={() => handleDelete(file)}
                     disabled={deletingId === file.id}
                     title="Delete"
-                    aria-label={`Delete ${file.name}`}
+                    aria-label={savedFileLabel('Delete', file.name, file.repoUrl)}
                   >
                     {deletingId === file.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
                   </Button>

@@ -33,10 +33,10 @@ React 18 + TypeScript app built with Vite and Tailwind CSS (`package.json`).
 ## Scripts
 
 - `npm run dev`: start the Vite development server
-- `npm run build`: `tsc && vite build`, output in `dist/`
-- `npm run lint`: ESLint with `--max-warnings 0`
+- `npm run build`: `tsc -b && vite build`, output in `dist/`. `tsc -b` type-checks every app file in `src/` in strict mode, with unused locals and parameters reported as errors (`tsconfig.app.json`) and `vite.config.ts` (`tsconfig.node.json`); a type error fails the build
+- `npm run lint`: ESLint with `--max-warnings 0`; it must pass with zero problems
 - `npm run preview`: serve the production build
-- `npm test`: `node --test src/lib/*.test.ts` (Node 22.18 or later, which runs TypeScript directly): the GitHub URL parser's parity with the server's (`src/lib/githubUrl.test.ts`) and the API error messages (`src/lib/apiError.test.ts`). These files are excluded from the app type-check (`tsconfig.app.json`) and are not in the bundle
+- `npm test`: `node --test src/lib/*.test.ts` (Node 22.18 or later, which runs TypeScript directly): the GitHub URL parser's parity with the server's (`src/lib/githubUrl.test.ts`), the API error messages (`src/lib/apiError.test.ts`), the sign-in return path (`src/lib/returnTo.test.ts`), sign-in error messages (`src/lib/oauthError.test.ts`), downloads (`src/lib/download.test.ts`) and the Saved Files button names (`src/lib/savedFileLabel.test.ts`). These files are excluded from the app type-check (`tsconfig.app.json`) and are not in the bundle
 
 ## Routes
 
@@ -63,4 +63,4 @@ Signed-in page components:
 - `pages/RepoSelection.tsx` and `components/RepositorySelector.tsx`: Browse Repositories and Manual URL
 - `components/ErrorBoundary.tsx`: the error screen around every page
 
-Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.
+Every file in `src/` is reachable from these routes: the files that were not were removed (listed in [ARCHITECTURE.md](../ARCHITECTURE.md)).

@@ -580,7 +580,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           </div>
         )}
 
-        {/* Tech Stack Detection */}
+        {/* Tech Stack Detection. The server may leave out frameworks, tools or databases: each defaults to [] */}
         {techStack && showDetails && (
           <div className="rounded-md border border-border bg-card p-4">
             <h3 className="mb-3 text-sm font-semibold">Detected Tech Stack</h3>
@@ -589,22 +589,22 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                 <dt className="text-xs font-medium text-muted-foreground">Primary:</dt>
                 <dd className="mt-0.5 font-medium">{techStack.primary}</dd>
               </div>
-              {techStack.frameworks?.length > 0 && (
+              {(techStack.frameworks ?? []).length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Frameworks:</dt>
-                  <dd className="mt-0.5">{techStack.frameworks.join(', ')}</dd>
+                  <dd className="mt-0.5">{(techStack.frameworks ?? []).join(', ')}</dd>
                 </div>
               )}
-              {techStack.tools?.length > 0 && (
+              {(techStack.tools ?? []).length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Tools:</dt>
-                  <dd className="mt-0.5">{techStack.tools.join(', ')}</dd>
+                  <dd className="mt-0.5">{(techStack.tools ?? []).join(', ')}</dd>
                 </div>
               )}
-              {techStack.databases?.length > 0 && (
+              {(techStack.databases ?? []).length > 0 && (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Databases:</dt>
-                  <dd className="mt-0.5">{techStack.databases.join(', ')}</dd>
+                  <dd className="mt-0.5">{(techStack.databases ?? []).join(', ')}</dd>
                 </div>
               )}
             </dl>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -273,13 +273,8 @@ export const ModernDashboard = () => {
     }
   };
 
-  const handleConnectGitHub = async () => {
-    try {
-      connectGitHub();
-    } catch (error) {
-      console.error('GitHub connection failed:', error);
-    }
-  };
+  // connectGitHub shows its own toast when the connection cannot be started
+  const handleConnectGitHub = () => void connectGitHub();
 
   const handleProjectComplete = useCallback((result: GenerationResult) => {
     setProjects((previous) => {

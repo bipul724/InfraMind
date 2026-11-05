@@ -25,5 +25,14 @@ export default tseslint.config(
       ],
       "@typescript-eslint/no-unused-vars": "off",
     },
+  },
+  {
+    // shadcn's ui files export their cva variants beside the component, and each context
+    // file exports its hook beside its provider. Fast refresh falls back to a full reload
+    // for these files, which is acceptable, so the rule is off for them only.
+    files: ["src/components/ui/**/*.{ts,tsx}", "src/contexts/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
   }
 );

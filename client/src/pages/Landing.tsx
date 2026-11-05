@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
-  Code2, 
   Shield, 
   GitBranch, 
   Container, 
@@ -14,14 +13,10 @@ import {
   Menu,
   X,
   Brain,
-  Database,
   Search,
-  Cloud,
   Bot,
-  Monitor,
   Lock,
   Workflow,
-  Layers,
   RefreshCw,
   Cpu,
   Network,

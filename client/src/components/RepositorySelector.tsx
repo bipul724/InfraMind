@@ -4,7 +4,6 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Alert, AlertDescription } from './ui/alert';
 import { apiFetch } from '@/lib/apiClient';
@@ -202,7 +201,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
       {user && (
         <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-3">
           <Avatar className="h-10 w-10">
-            <AvatarImage src={user.avatarUrl} alt={user.name || user.login} />
+            <AvatarImage src={user.avatarUrl ?? undefined} alt={user.name || user.login} />
             <AvatarFallback>{user.name?.[0] || user.login?.[0]}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">

@@ -11,12 +11,20 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// What the app reads about how the user signed in; both come from Supabase's own user record
+export interface UserPrefs {
+  // app_metadata.provider: 'email', 'github' or 'google'
+  loginProvider?: string;
+  // user_metadata.avatar_url, set by the OAuth providers
+  avatarUrl?: string;
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
   emailVerification: boolean;
-  prefs: Record<string, any>;
+  prefs: UserPrefs;
 }
 
 // Map a Supabase user onto the app's User shape
@@ -30,10 +38,8 @@ const toUser = (user: SupabaseUser): User => {
     email: user.email || '',
     emailVerification: !!user.email_confirmed_at,
     prefs: {
-      loginProvider: provider,
-      avatarUrl: metadata.avatar_url,
-      githubUsername: provider === 'github' ? metadata.user_name : undefined,
-      ...(metadata.prefs || {}),
+      loginProvider: typeof provider === 'string' ? provider : undefined,
+      avatarUrl: typeof metadata.avatar_url === 'string' ? metadata.avatar_url : undefined,
     },
   };
 };
@@ -124,31 +130,6 @@ export class AuthService {
       console.error('Logout failed:', error);
       throw error;
     }
-  }
-
-  // Delete all sessions (logout from all devices)
-  static async logoutAll(): Promise<void> {
-    const { error } = await supabase.auth.signOut({ scope: 'global' });
-    if (error) {
-      console.error('Logout all failed:', error);
-      throw error;
-    }
-  }
-
-  // Get user preferences
-  static async getPreferences(): Promise<Record<string, any>> {
-    const user = await this.getCurrentUser();
-    return user?.prefs || {};
-  }
-
-  // Update user preferences
-  static async updatePreferences(prefs: Record<string, any>): Promise<User> {
-    const { data, error } = await supabase.auth.updateUser({ data: { prefs } });
-    if (error) {
-      console.error('Failed to update preferences:', error);
-      throw error;
-    }
-    return toUser(data.user);
   }
 }
 

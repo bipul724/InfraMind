@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -28,9 +27,6 @@ import { useNavigate, Link } from 'react-router-dom';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
-  // Shown as a badge in the header, and as a heading with `subtitle`, only when passed
-  title?: string;
-  subtitle?: string;
 }
 
 // How the user signed in to InfraMind (Supabase), for the account menu only. This is not
@@ -43,7 +39,7 @@ const SIGN_IN_LINES: Readonly<Record<string, string>> = {
 
 // The signed-in pages' one header. Its GitHub status is the repository connection
 // (GitHubContext: GET /api/github/status), never the sign-in provider.
-export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, title, subtitle }) => {
+export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const { user, logout } = useAuth();
   const { isConnected, isLoading, user: githubUser, connectGitHub, disconnect } = useGitHub();
   const { toast } = useToast();
@@ -67,10 +63,10 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, titl
   };
 
   // Avatar from the Google/GitHub sign-in profile; empty for email sign-ups
-  const avatarUrl = user?.prefs?.avatarUrl || undefined;
+  const avatarUrl = user?.prefs.avatarUrl || undefined;
   const userName = user?.name || 'User';
   const userEmail = user?.email || '';
-  const signInLine = SIGN_IN_LINES[user?.prefs?.loginProvider as string] ?? SIGN_IN_LINES.email;
+  const signInLine = SIGN_IN_LINES[user?.prefs.loginProvider ?? 'email'] ?? SIGN_IN_LINES.email;
   const githubLogin = isConnected && githubUser?.login ? githubUser.login : null;
 
   return (
@@ -88,12 +84,6 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, titl
                 </div>
                 <h1 className="text-base font-semibold tracking-tight">InfraMind</h1>
               </Link>
-              {title && (
-                <>
-                  <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
-                  <Badge variant="secondary" className="hidden sm:inline-flex">{title}</Badge>
-                </>
-              )}
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
@@ -208,15 +198,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, titl
 
       <main className="container mx-auto px-4 py-8 sm:px-6 lg:py-10">
         <div className="mx-auto max-w-5xl space-y-10">
-          <div>
-            {subtitle && title && (
-              <div className="mb-8">
-                <h2 className="text-3xl font-semibold tracking-tight">{title}</h2>
-                <p className="mt-2 text-muted-foreground">{subtitle}</p>
-              </div>
-            )}
-            {children}
-          </div>
+          <div>{children}</div>
         </div>
       </main>
     </div>

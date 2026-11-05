@@ -410,4 +410,4 @@ The full variable list with comments is in `server/.env.example`.
 
 `server.js` registers no `/api/devpilot` route. Tavily, Mem0 and Keywords AI are not part of the analysis pipeline.
 
-On the client, `client/src/pages/EnhancedDashboard.tsx` and several components are not reachable from any route in `client/src/App.tsx`.
+On the client, the files that no route in `client/src/App.tsx` reached were removed: `pages/EnhancedDashboard.tsx`; the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard`, `TechStackSelector` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`; the `ui` files `dialog`, `form`, `separator`, `textarea`, `tooltip` and `use-toast`; `hooks/use-mobile.tsx` and `integrations/core.ts`. `lib/api.ts`'s `DevPilotAPI`, `ProjectsAPI`, `AnalyticsAPI` and `GitHubAPI` classes went with them. Nothing on the server changed: removing the server code that only those files called is a separate task.

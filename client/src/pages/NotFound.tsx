@@ -5,11 +5,10 @@ import { buttonVariants } from "@/components/ui/button";
 export const NotFound = () => {
   const location = useLocation();
 
+  // Development only (like the error boundary): an unknown path is not an app error, so
+  // production builds log nothing
   useEffect(() => {
-    console.error(
-      "404 Error: User attempted to access non-existent route:",
-      location.pathname
-    );
+    if (import.meta.env.DEV) console.error("404 Error: User attempted to access non-existent route:", location.pathname);
   }, [location.pathname]);
 
   return (

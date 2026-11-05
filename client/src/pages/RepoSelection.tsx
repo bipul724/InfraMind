@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { useGitHub } from '@/contexts/GitHubContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,7 +19,6 @@ import { isSessionId } from '@/lib/session';
 type SelectedRepository = Parameters<React.ComponentProps<typeof RepositorySelector>['onRepositorySelect']>[0];
 
 export const RepoSelection = () => {
-  const { user } = useAuth();
   const { isConnected, connectGitHub } = useGitHub();
   const navigate = useNavigate();
   const { toast } = useToast();

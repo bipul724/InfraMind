@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { API_BASE_URL } from '@/lib/api';
 import { apiFetch } from '@/lib/apiClient';
 import { useAuth } from '@/contexts/AuthContext';
+import { toast } from '@/hooks/use-toast';
 
 // GitHub tokens never reach the browser: the server stores them per Supabase user
 // and this context only knows whether the signed-in user has a connection.
@@ -15,7 +16,7 @@ interface GitHubContextType {
   isConnected: boolean;
   user: GitHubUser | null;
   isLoading: boolean;
-  error: string | null;
+  // Shows a toast when the connection cannot be started; on success the page navigates away
   connectGitHub: () => Promise<void>;
   // true when the connection is gone
   disconnect: () => Promise<boolean>;
@@ -33,10 +34,6 @@ const GitHubContext = createContext<GitHubContextType | undefined>(undefined);
 // Written by earlier versions of the app; removed on load and never read
 const LEGACY_STORAGE_KEYS = ['github_token', 'github_token_owner'];
 
-const STATUS_ERROR_MESSAGE = 'Could not check your GitHub connection. Please try again.';
-const CONNECT_ERROR_MESSAGE = 'Failed to connect to GitHub. Please try again.';
-const DISCONNECT_ERROR_MESSAGE = 'Failed to disconnect GitHub. Please try again.';
-
 interface GitHubProviderProps {
   children: ReactNode;
 }
@@ -46,7 +43,6 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Incremented by every status request and reset, so stale responses are ignored
   const generationRef = useRef(0);
@@ -63,7 +59,6 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
     generationRef.current++;
     setUser(null);
     setIsConnected(false);
-    setError(null);
     setIsLoading(false);
   }, []);
 
@@ -80,7 +75,6 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
         // Not signed in (401) or a server/store problem (5xx): not connected for now
         setUser(null);
         setIsConnected(false);
-        setError(response.status === 401 ? null : STATUS_ERROR_MESSAGE);
         return;
       }
       const data: GitHubStatusResponse = await response.json();
@@ -92,13 +86,11 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
         setUser(null);
         setIsConnected(false);
       }
-      setError(null);
     } catch {
       if (!isCurrent()) return;
       console.error('GitHub status check failed: server unreachable');
       setUser(null);
       setIsConnected(false);
-      setError(STATUS_ERROR_MESSAGE);
     } finally {
       if (isCurrent()) setIsLoading(false);
     }
@@ -116,9 +108,9 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
   }, [authLoading, authUserId, refresh, resetState]);
 
   // Ask the server for a one-time ticket, then navigate (not fetch) so the server's
-  // OAuth state cookie is set first-party before it redirects to GitHub
+  // OAuth state cookie is set first-party before it redirects to GitHub. Every Connect and
+  // Reconnect GitHub button calls this, so a failure is shown here, once, as a toast.
   const connectGitHub = useCallback(async () => {
-    setError(null);
     try {
       const response = await apiFetch('/api/github/connect', { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -127,14 +119,14 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
       window.location.assign(`${API_BASE_URL}/auth/github?ticket=${encodeURIComponent(data.ticket)}`);
     } catch {
       console.error('GitHub connection could not be started');
-      setError(CONNECT_ERROR_MESSAGE);
+      toast({ title: 'GitHub could not be connected', description: 'Please try again.', variant: 'destructive' });
     }
   }, []);
 
   // DELETE /api/github/connection: the server asks GitHub to revoke the token (best effort)
-  // and deletes the stored connection. Resolves true when the connection is gone.
+  // and deletes the stored connection. Resolves true when the connection is gone; the
+  // caller (DashboardLayout) shows the outcome, so there is no toast here.
   const disconnect = useCallback(async (): Promise<boolean> => {
-    setError(null);
     try {
       const response = await apiFetch('/api/github/connection', { method: 'DELETE' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -143,7 +135,6 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
     } catch {
       console.error('GitHub disconnect failed');
       await refresh();
-      setError(DISCONNECT_ERROR_MESSAGE);
       return false;
     }
   }, [refresh, resetState]);
@@ -152,11 +143,10 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
     isConnected,
     user,
     isLoading,
-    error,
     connectGitHub,
     disconnect,
     refresh
-  }), [isConnected, user, isLoading, error, connectGitHub, disconnect, refresh]);
+  }), [isConnected, user, isLoading, connectGitHub, disconnect, refresh]);
 
   return (
     <GitHubContext.Provider value={value}>

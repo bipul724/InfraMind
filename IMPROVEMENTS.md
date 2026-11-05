@@ -5,7 +5,7 @@
 > - `/api/metrics` and `/api/analytics` now answer 404 unless `METRICS_TOKEN` (32+ characters) is set and sent as the `X-Metrics-Token` header (`server/server.js`). `npm run test:system` (`server/test-system.js`) calls them without the header.
 > - Of the rate limiters listed below, only the clone and analysis limiters are applied to routes; `general` and `auth` are defined but unused. The Joi request validation, session validation and IP whitelist middleware in `server/utils/security.js` are not used by any route.
 > - `agents.log` and `websocket.log` are never written: nothing calls `logger.websocket`, and `logger.agent` is called only from `trackAgentSession`, which nothing calls. For the same reason session analytics stay empty (`server/utils/logger.js`, `server/utils/performance.js`).
-> - The `SystemMonitoringDashboard` component is not reachable from any route in `client/src/App.tsx`, and `ErrorBoundary` no longer sends errors anywhere: its `POST /api/errors` call, to an endpoint nothing served, was removed.
+> - The `SystemMonitoringDashboard` component, which no route in `client/src/App.tsx` reached, was removed, and `ErrorBoundary` no longer sends errors anywhere: its `POST /api/errors` call, to an endpoint nothing served, was removed.
 > - The response-time figures and percentages in this document ("~800ms", "~400ms", "50% faster") and the example metric values were not produced by any code or test in this repository.
 > - The agents now call the AI layer in `server/ai/`, which handles retries and provider fallback; see [README-AI-AGENTS.md](README-AI-AGENTS.md).
 >
@@ -74,12 +74,8 @@ This document outlines the comprehensive improvements made to the InfraMind syst
 - **Better UX flow** with tabbed interface
 - **Visual indicators** for form states
 
-### 3. System Monitoring Dashboard (`client/src/components/SystemMonitoringDashboard.tsx`)
-- **Real-time system metrics** display
-- **Performance analytics** with charts
-- **Memory usage visualization**
-- **Health status indicators**
-- **Auto-refresh** every 30 seconds
+### 3. System Monitoring Dashboard
+Removed: no route reached the component. The server's metrics endpoint (`/api/metrics`) is unchanged.
 
 ### 4. Error Boundary Component (`client/src/components/ErrorBoundary.tsx`)
 - **Comprehensive error handling** for React components
