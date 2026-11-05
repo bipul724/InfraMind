@@ -46,11 +46,12 @@ From `src/App.tsx`:
 |---|---|---|
 | `/` | `Landing` | public |
 | `/demo` | `Demo` (scripted sample, no server calls) | public |
-| `/auth`, `/sign-in/*`, `/sign-up/*` | `Auth` | public |
+| `/auth`, `/sign-in/*`, `/sign-up/*` | `Auth`; a signed-in visitor goes on to `?returnTo=` or `/dashboard` | public |
 | `/auth/success` | `AuthSuccess` (finishes a GitHub connection) | public |
 | `/dashboard` | `ModernDashboard`; `?session=<id>` opens one analysis | signed in |
 | `/select-repo` | `RepoSelection` | signed in |
-| `/auth/github/callback` | `GitHubCallback` (forwards to the server) | signed in |
-| `/profile`, `/login` | redirects | signed in |
+| `/auth/github/callback` | `GitHubCallback` (forwards to the server) | public |
+| `/login` | redirect to `/auth`, keeping the query string | public |
+| `/profile` | redirect to `/dashboard` | signed in |
 
 Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.

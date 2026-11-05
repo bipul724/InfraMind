@@ -49,7 +49,7 @@ The session tables (`analysis_sessions`, `generated_files`, `ai_calls`) are crea
 
 ### 1.3 URL configuration (redirects)
 
-After an OAuth sign-in, the app asks Supabase to send the user back to `<current origin>/dashboard` (see `client/src/lib/supabase.ts`). Supabase only redirects to URLs on its allow list. For any other URL it falls back to the Site URL.
+After an OAuth sign-in, the app asks Supabase to send the user back to `<current origin>/dashboard` (see `client/src/lib/supabase.ts`). Supabase only redirects to URLs on its allow list. For any other URL it falls back to the Site URL. A failed or cancelled Google or GitHub sign-in also comes back to `/dashboard`, and the app shows its error on `/auth`; `redirectTo` is still `/dashboard`, so no Supabase setting changes.
 
 In **Authentication → URL Configuration**:
 

@@ -1,19 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle, AlertTriangle, Github } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Loader2, AlertTriangle, Github } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGitHub } from '@/contexts/GitHubContext';
 import { API_BASE_URL } from '@/lib/api';
 
+// GitHub's ?error= value comes from the address bar: shown as a fixed message by code,
+// never as the raw value
+const errorMessageFor = (code: string): string =>
+  (code === 'access_denied' ? 'GitHub access was not granted.' : 'GitHub returned an error. Please try again.');
+
+// A public page: it only forwards GitHub's answer to the server, which works signed in or
+// not (the server's redirect to /auth/success discards a completion nobody can claim)
 export const GitHubCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { connectGitHub } = useGitHub();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'error'>('loading');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -22,7 +29,7 @@ export const GitHubCallback = () => {
 
     if (error) {
       setStatus('error');
-      setMessage(`GitHub OAuth error: ${error}`);
+      setMessage(errorMessageFor(error));
       return;
     }
 
@@ -65,15 +72,6 @@ export const GitHubCallback = () => {
             </div>
           )}
 
-          {status === 'success' && (
-              <Alert className="border-status-success/25 bg-status-success/[0.06]">
-              <CheckCircle className="h-4 w-4 text-status-success" />
-              <AlertDescription className="text-status-success">
-                {message}
-              </AlertDescription>
-            </Alert>
-          )}
-
           {status === 'error' && (
             <div className="space-y-4">
               <Alert variant="destructive">
@@ -83,18 +81,25 @@ export const GitHubCallback = () => {
                 </AlertDescription>
               </Alert>
               
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Button onClick={handleRetry} className="flex-1">
-                  Try Again
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => navigate('/dashboard')}
-                  className="flex-1"
-                >
-                  Skip for Now
-                </Button>
-              </div>
+              {/* Connecting again needs a signed-in user; signed out, sign in first */}
+              {user ? (
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button onClick={handleRetry} className="flex-1">
+                    Try Again
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate('/dashboard')}
+                    className="flex-1"
+                  >
+                    Skip for Now
+                  </Button>
+                </div>
+              ) : (
+                <Link to="/auth" className={buttonVariants({ className: 'w-full' })}>
+                  Sign in
+                </Link>
+              )}
             </div>
           )}
         </CardContent>

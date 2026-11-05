@@ -56,6 +56,9 @@ The server exits at startup without these, listing every problem at once (`start
 - [ ] `GET /health` returns 200 with `{ status: "ok", timestamp, uptime }` (liveness only: it checks no database or provider)
 - [ ] Sign up and sign in work with each enabled provider
 - [ ] Connect GitHub completes on `/auth/success` and the dashboard shows the GitHub login
+- [ ] Cancel a Google sign-in on Google's consent screen: the app lands on `/auth` with "Sign-in was cancelled or not allowed by the provider." and no error text from the provider in the address bar or on the page
+- [ ] Signed out, open a `/dashboard?session=<id>` link of your own analysis, then sign in with email: the app opens that analysis, not the plain dashboard
+- [ ] Signed in, open `/auth` (and `/sign-in`, `/login`): the app goes straight to the dashboard without showing the sign-in form
 - [ ] A repository picked on `/select-repo` (Browse Repositories) clones and analyzes, including a private one
 - [ ] A completed run shows one tab per generated file (Dockerfile, `ci.yml`, `.env.example`) with its contents as plain text and its line count; long lines scroll inside the code block, never the page, also at phone width
 - [ ] Copy puts the file's exact text on the clipboard; with clipboard access blocked, "Copy failed" asks to select the text and copy it manually

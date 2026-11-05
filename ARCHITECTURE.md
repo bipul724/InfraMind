@@ -98,7 +98,20 @@ Details:
 - The verifier caches a positive result for at most 60 s (never past the token's `exp`), holds at most 5,000 entries and runs at most 20 Supabase lookups at once; above that it answers `AUTH_UNAVAILABLE` (`server/utils/auth.js`).
 - Raw tokens are not cached or logged; the cache key is the token's SHA-256 hash (`server/utils/auth.js`).
 - Socket.IO: a socket joins a room `session:<id>` only with `subscribe` for a session its user owns, and at most 20 rooms per socket. A late subscriber receives the newest progress state: the latest payload emitted in this process (kept in memory) or, when there is none, the stored snapshot; never both (`server/utils/realtime.js`).
-- After an OAuth sign-in, Supabase sends the user back to `<app origin>/dashboard` (`redirectTo` in `client/src/lib/supabase.ts`).
+- After an OAuth sign-in, Supabase sends the user back to `<app origin>/dashboard` (`redirectTo` in `client/src/lib/supabase.ts`). A failed one comes back there too, with `error`, `error_code` and `error_description` in the URL (hash or query string; supabase-js leaves them there). With no user, `ProtectedRoute` sends that visit to `/auth?oauth_error=<code>`: the code is `error_code`, else `error`, kept only when it matches `^[a-z0-9_]{1,64}$` (otherwise `unknown`), and `/auth` shows a fixed message for it. `error_description` is never shown (`client/src/lib/oauthError.ts`, `client/src/App.tsx`, `client/src/pages/Auth.tsx`).
+- Client routes (`client/src/App.tsx`):
+
+  | Route | Access | Notes |
+  |---|---|---|
+  | `/`, `/demo` | public | |
+  | `/auth`, `/sign-in/*`, `/sign-up/*` | public | A signed-in visitor is sent to the validated `returnTo`, or `/dashboard`, without seeing the form |
+  | `/login` | public | Redirects to `/auth`, keeping the query string |
+  | `/auth/success` | public | Claims a GitHub connection when signed in, discards it when signed out |
+  | `/auth/github/callback` | public | Forwards GitHub's answer to the server's `/auth/github/callback`; errors are shown as fixed messages |
+  | `/dashboard`, `/select-repo`, `/profile` (a redirect to `/dashboard`) | signed in | A signed-out visitor goes to `/auth?returnTo=<path and query>` and returns there after signing in. An expired session that cannot be refreshed signs the user out the same way |
+
+  `returnTo` is used only when it is a path on this site: one leading `/` (not `//` or `/\`), no control characters or `\`, at most 2,048 characters, not a sign-in page (`/auth…`, `/sign-in`, `/sign-up`, `/login`), and the same after percent-decoding; anything else goes to `/dashboard` (`client/src/lib/returnTo.ts`). An explicit sign-out goes to `/auth` without it.
+- One error boundary wraps every page, keyed by the path, so moving to another page clears a caught error (`RoutesWithBoundary` in `client/src/App.tsx`; the dashboard keeps its own). Its screen shows a fixed text and an error ID; the message and stacks appear only in development builds. "Copy error details" copies the ID, message, stack and time; nothing is sent anywhere (`client/src/components/ErrorBoundary.tsx`).
 
 ## 3. GitHub connection
 

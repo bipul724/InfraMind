@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,8 @@ import {
   User
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { oauthErrorMessage } from '@/lib/oauthError';
+import { safeReturnTo } from '@/lib/returnTo';
 
 interface SignInFormData {
   email: string;
@@ -42,8 +44,11 @@ const messageOf = (err: unknown, fallback: string): string => {
 
 export const Auth = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { login, register } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { login, register, user, loading: authLoading } = useAuth();
+  // Where a successful sign-in goes: the page that sent the user here, when it is a safe
+  // same-site path (lib/returnTo.ts), otherwise the dashboard
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
   
   // Determine initial tab from URL params
   const initialTab = searchParams.get('sign-up') === 'true' ? 'signup' : 'signin';
@@ -64,7 +69,11 @@ export const Auth = () => {
   
   // UI states
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  // A failed Google or GitHub sign-in arrives as ?oauth_error=<code> (ProtectedRoute): a
+  // fixed message by code, never the provider's own text
+  const [error, setError] = useState(() =>
+    (searchParams.has('oauth_error') ? oauthErrorMessage(searchParams.get('oauth_error')) : ''));
+  const hadOAuthErrorParam = searchParams.has('oauth_error');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -80,7 +89,7 @@ export const Auth = () => {
       }
 
       await login.withEmail(signInForm.email, signInForm.password);
-      navigate('/dashboard');
+      navigate(returnTo, { replace: true });
     } catch (err) {
       setError(messageOf(err, 'Failed to sign in'));
     } finally {
@@ -108,7 +117,7 @@ export const Auth = () => {
       }
 
       await register(signUpForm.email, signUpForm.password, signUpForm.name);
-      navigate('/dashboard');
+      navigate(returnTo, { replace: true });
     } catch (err) {
       setError(messageOf(err, 'Failed to create account'));
     } finally {
@@ -150,6 +159,27 @@ export const Auth = () => {
     const newUrl = `${window.location.pathname}?${newSearchParams.toString()}`;
     window.history.replaceState({}, '', newUrl);
   };
+
+  // The message has been read: take the code out of the address bar, so a reload or a
+  // shared link does not show it again
+  useEffect(() => {
+    if (!hadOAuthErrorParam) return;
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('oauth_error');
+      return next;
+    }, { replace: true });
+  }, [hadOAuthErrorParam, setSearchParams]);
+
+  // A signed-in visitor never sees the form: wait for the session, then move on
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background" aria-busy="true">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/20 border-t-primary"></div>
+      </div>
+    );
+  }
+  if (user) return <Navigate to={returnTo} replace />;
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-background text-foreground">
