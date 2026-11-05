@@ -7,6 +7,7 @@ import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiFetch } from '@/lib/apiClient';
+import { startAnalysis } from '@/lib/analysis';
 import {
   Bot,
   GitBranch,
@@ -17,7 +18,8 @@ import {
   AlertCircle,
   CheckCircle,
   Github,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { AgentProgress } from './AgentProgress';
 import type {
@@ -36,19 +38,10 @@ interface AgentGenerationFormProps {
   className?: string;
 }
 
-// Response bodies of POST /api/clone-repo and POST /api/analyze (server/server.js)
+// Response body of POST /api/clone-repo (server/server.js)
 interface CloneResponse {
   success?: boolean;
   sessionId?: string;
-  error?: string;
-}
-
-interface AnalyzeResponse {
-  success?: boolean;
-  techStack?: TechStack | null;
-  generatedFiles?: string[];
-  messages?: AgentMessage[];
-  errors?: string[];
   error?: string;
 }
 
@@ -58,14 +51,6 @@ async function cloneRepository(repoUrl: string): Promise<CloneResponse> {
   const response = await apiFetch('/api/clone-repo', {
     method: 'POST',
     body: JSON.stringify({ repoUrl })
-  });
-  return response.json();
-}
-
-async function runAnalysis(sessionId: string): Promise<AnalyzeResponse> {
-  const response = await apiFetch('/api/analyze', {
-    method: 'POST',
-    body: JSON.stringify({ sessionId })
   });
   return response.json();
 }
@@ -85,8 +70,13 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl);
   const [activeTab, setActiveTab] = useState('setup');
 
-  // Agent workflow state
-  const [isRunning, setIsRunning] = useState(false);
+  // Agent workflow state. isStarting covers the clone and analyze requests; the run itself
+  // is in progress while the session is cloning or analyzing
+  const [isStarting, setIsStarting] = useState(false);
+  // The message of a 503 ANALYSIS_BUSY; the cloned session can be retried as it is
+  const [busyMessage, setBusyMessage] = useState<string | null>(null);
+  // Counts the runs started from this form, so each failure is reported once
+  const runRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [analyzedUrl, setAnalyzedUrl] = useState('');
   const [currentStep, setCurrentStep] = useState('Ready to analyze');
@@ -98,7 +88,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
     statusRef.current = next;
     setStatusState(next);
   }, []);
-  // undefined until the pipeline's result event arrives (see AgentProgress)
+  // undefined until the first per-agent event arrives (see AgentProgress)
   const [messages, setMessages] = useState<AgentMessage[] | undefined>(undefined);
   const [errors, setErrors] = useState<string[]>([]);
   const [techStack, setTechStack] = useState<TechStack | null>(null);
@@ -137,6 +127,50 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
     if (Array.isArray(data.generatedFiles)) setGeneratedFiles(data.generatedFiles);
   }, [setStatus]);
 
+  const isRunning = isStarting || (sessionId !== null && (status === 'cloning' || status === 'analyzing'));
+
+  const reportFailure = useCallback((message: string) => {
+    setStatus('failed');
+    setErrors([message]);
+    setCurrentStep('Analysis failed');
+    setProgress(0);
+  }, [setStatus]);
+
+  // POST /api/analyze for a cloned session. 202: started, and the progress events and
+  // the status poller (AgentProgress) take it from there. 503 ANALYSIS_BUSY: the session
+  // stays cloned, so it can be retried without cloning again.
+  const beginAnalysis = useCallback(async (id: string) => {
+    setBusyMessage(null);
+    const outcome = await startAnalysis(id);
+    if (outcome.kind === 'started') {
+      // A "Starting" or later event may already have arrived; never move back from it
+      if (statusRef.current === 'cloned') {
+        setStatus('analyzing');
+        setCurrentStep('Starting AI agent analysis...');
+        setProgress(30);
+      }
+      return;
+    }
+    if (outcome.kind === 'busy') {
+      // Shown above the progress panel, with a Retry button for this session
+      setBusyMessage(outcome.message);
+      return;
+    }
+    throw new Error(outcome.message);
+  }, [setStatus]);
+
+  const handleRetryAnalysis = async () => {
+    if (!sessionId) return;
+    setIsStarting(true);
+    try {
+      await beginAnalysis(sessionId);
+    } catch (error) {
+      reportFailure(error instanceof Error ? error.message : 'Failed to start the analysis');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
   const handleStartAnalysis = async () => {
     if (!isValidUrl) {
       setUrlError('Please enter a valid GitHub repository URL');
@@ -144,7 +178,9 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
     }
 
     const url = repoUrl;
-    setIsRunning(true);
+    runRef.current += 1;
+    setIsStarting(true);
+    setBusyMessage(null);
     setActiveTab('progress');
     setAnalyzedUrl(url);
     setSessionId(null);
@@ -169,34 +205,14 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
       setProgress(25);
       setStatus('cloned');
 
-      // Step 2: Run the agents. The server answers once the analysis has finished.
-      setCurrentStep('Starting AI agent analysis...');
-      setProgress(30);
-      setStatus('analyzing');
-
-      const analysisResult = await runAnalysis(cloneResult.sessionId);
-      if (!analysisResult.success) {
-        throw new Error(analysisResult.error || 'Analysis failed');
-      }
-
-      setCurrentStep('Analysis complete!');
-      setProgress(100);
-      setStatus('completed');
-      setTechStack(analysisResult.techStack ?? null);
-      setGeneratedFiles(Array.isArray(analysisResult.generatedFiles) ? analysisResult.generatedFiles : []);
-      // The same per-agent results the progress events carry, for a client that missed them
-      if (Array.isArray(analysisResult.messages)) setMessages(analysisResult.messages);
-      if (Array.isArray(analysisResult.errors)) setErrors(analysisResult.errors);
+      // Step 2: start the agents. The server answers 202 at once and runs them in the
+      // background; completion arrives as a progress event or through the status poller.
+      await beginAnalysis(cloneResult.sessionId);
     } catch (error) {
       console.error('Agent workflow error:', error);
-      const message = error instanceof Error ? error.message : 'Unknown error occurred';
-      setStatus('failed');
-      setErrors([message]);
-      setCurrentStep('Analysis failed');
-      setProgress(0);
-      onError?.(message);
+      reportFailure(error instanceof Error ? error.message : 'Unknown error occurred');
     } finally {
-      setIsRunning(false);
+      setIsStarting(false);
     }
   };
 
@@ -211,6 +227,18 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
     reportedSessionRef.current = sessionId;
     onCompleteRef.current?.({ sessionId, repoUrl: analyzedUrl, techStack, generatedFiles });
   }, [status, sessionId, analyzedUrl, techStack, generatedFiles]);
+
+  // Report each failed run once: a request that failed, or a failure the server reported
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  });
+  const reportedFailureRunRef = useRef(0);
+  useEffect(() => {
+    if (status !== 'failed' || reportedFailureRunRef.current === runRef.current) return;
+    reportedFailureRunRef.current = runRef.current;
+    onErrorRef.current?.(errors[errors.length - 1] || 'Analysis failed');
+  }, [status, errors]);
 
   return (
     <div className={`space-y-6 ${className}`}>
@@ -351,6 +379,18 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
             </TabsContent>
 
             <TabsContent value="progress" className="mt-6 space-y-4">
+              {busyMessage && sessionId && status === 'cloned' && (
+                <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
+                  <AlertTriangle className="h-4 w-4 text-status-warning" />
+                  <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{busyMessage} The repository is already cloned, so retrying starts the analysis without cloning it again.</span>
+                    <Button size="sm" variant="outline" onClick={handleRetryAnalysis} disabled={isStarting} className="w-fit shrink-0">
+                      {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      Retry Analysis
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
               <AgentProgress
                 sessionId={sessionId}
                 repoUrl={analyzedUrl}

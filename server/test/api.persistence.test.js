@@ -56,7 +56,7 @@ async function prismaFor(db) {
   return createPrismaClient({ DATABASE_URL: db.url });
 }
 
-async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresAt = new Date(Date.now() + 3600 * 1000), lastProgress } = {}) {
+async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresAt = new Date(Date.now() + 3600 * 1000), lastProgress, clonedAt } = {}) {
   const id = crypto.randomUUID();
   const completed = status === 'completed';
   await prisma.analysisSession.create({
@@ -71,7 +71,7 @@ async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresA
       status,
       createdAt: T0,
       updatedAt: T0,
-      clonedAt: status === 'cloning' ? null : at(5),
+      clonedAt: clonedAt ?? (status === 'cloning' ? null : at(5)),
       analysisStartedAt: ['analyzing', 'completed'].includes(status) ? at(10) : null,
       completedAt: completed ? at(60) : null,
       expiresAt,
@@ -116,12 +116,14 @@ describe('database sessions: restart, ownership, recovery and cleanup', { skip: 
     ids.analyzing = await seed(client.prisma, { status: 'analyzing' });
     ids.cloning = await seed(client.prisma, { status: 'cloning' });
     ids.expired = await seed(client.prisma, { expiresAt: new Date(Date.now() - 1000) });
+    // B2.1: a session cloned 5 minutes ago and not analyzed yet still needs its clone
+    ids.freshCloned = await seed(client.prisma, { status: 'cloned', clonedAt: new Date(Date.now() - 5 * 60 * 1000) });
 
     // temp/ layout before startup
     cwd = await makeTempDir();
     ids.orphan = crypto.randomUUID();
     ids.outsideTemp = crypto.randomUUID();
-    for (const name of [ids.completed, ids.expired, ids.orphan, 'keep-me-not-a-uuid']) {
+    for (const name of [ids.completed, ids.expired, ids.orphan, ids.freshCloned, 'keep-me-not-a-uuid']) {
       await fs.mkdir(path.join(cwd, 'temp', name, 'repo'), { recursive: true });
       await fs.writeFile(path.join(cwd, 'temp', name, 'repo', 'marker.txt'), 'x');
     }
@@ -207,12 +209,14 @@ describe('database sessions: restart, ownership, recovery and cleanup', { skip: 
     assert.ok(server.logs().includes('Interrupted sessions marked failed: 2'));
   });
 
-  test('4. expired sessions and orphaned temp directories are removed; nothing else is touched', async () => {
+  test('4. expired, orphaned and (B2.1) finished sessions\' temp directories are removed; nothing else is touched', async () => {
     assert.equal(await client.prisma.analysisSession.count({ where: { id: ids.expired } }), 0, 'expired row deleted');
     assert.equal(await client.prisma.generatedFile.count({ where: { sessionId: ids.expired } }), 0, 'its files cascade');
     assert.equal(await pathExists(path.join(cwd, 'temp', ids.expired)), false, 'expired directory removed');
     assert.equal(await pathExists(path.join(cwd, 'temp', ids.orphan)), false, 'orphan directory removed');
-    assert.equal(await pathExists(path.join(cwd, 'temp', ids.completed, 'repo', 'marker.txt')), true, 'a live session keeps its directory');
+    // B2.1: a completed session's clone is no longer needed (results are in the database)
+    assert.equal(await pathExists(path.join(cwd, 'temp', ids.completed)), false, 'a completed session\'s directory is removed');
+    assert.equal(await pathExists(path.join(cwd, 'temp', ids.freshCloned, 'repo', 'marker.txt')), true, 'a session waiting for analysis keeps its directory');
     assert.equal(await pathExists(path.join(cwd, 'temp', 'keep-me-not-a-uuid', 'repo', 'marker.txt')), true, 'non-UUID names are never removed');
     assert.equal(await pathExists(path.join(cwd, ids.outsideTemp)), true, 'nothing outside temp/ is touched');
     assert.equal(await pathExists(path.join(cwd, 'temp', ids.symlinked)), true, 'a UUID-named symlink is left alone');

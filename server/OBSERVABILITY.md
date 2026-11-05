@@ -56,7 +56,7 @@ Most other server messages, including clone failures, session cleanup and progre
 | Endpoint | Access | Returns |
 |---|---|---|
 | `GET /health` | public | Exactly `{ status: "ok", timestamp, uptime }`, always 200 while the process serves requests. A liveness check: it queries no database or service |
-| `GET /api/metrics` | `X-Metrics-Token` equal to `METRICS_TOKEN` (32+ characters), otherwise 404 | Uptime, Node `version`, `environment`, request totals, error count, success rate, average response time, memory, CPU usage, `unhandledRejections` (promise rejections nobody handled since the start; the process keeps serving), `trackedSessions` (entries in the analytics map, not active sessions) |
+| `GET /api/metrics` | `X-Metrics-Token` equal to `METRICS_TOKEN` (32+ characters), otherwise 404 | Uptime, Node `version`, `environment`, request totals, error count, success rate, average response time, memory, CPU usage, `unhandledRejections` (promise rejections nobody handled since the start; the process keeps serving), `trackedSessions` (entries in the analytics map, not active sessions), `analysisJobs` (`running` and `queued` analyses in the job runner right now, `server/utils/jobs.js`) |
 | `GET /api/analytics` | same as `/api/metrics` | `total` sessions, `avgDuration`, and per phase (`clone`, `analysis`) `count`, `totalDuration`, `avgDuration` and `outcomes` (`ok` / `failed` counts), plus the last 10 sessions |
 
 Source: `server/server.js`, `server/utils/performance.js`.
@@ -65,7 +65,7 @@ Limits of these numbers:
 
 - They are in-process counters, reset on every restart.
 - A request counts as an error when its status is 400 or higher, so 401 and 404 answers count too (`trackRequest`).
-- Analytics record one `clone` phase per clone request (from session creation to clone success or failure) and one `analysis` phase per analysis (from `analyzing` to `completed` or `failed`) (`server/server.js`).
+- Analytics record one `clone` phase per clone request (from session creation to clone success or failure) and one `analysis` phase per analysis job (from the job's start to `completed` or `failed`; time spent queued is not included) (`server/server.js`).
 - Analytics keep sessions for one hour and at most 1,000, oldest dropped first. Expired entries are pruned on every insert and read and by the hourly session cleanup (`server/utils/performance.js`).
 - `/health` does not check the database, Supabase, GitHub or the AI providers.
 
@@ -78,16 +78,27 @@ curl -s -H "X-Metrics-Token: $METRICS_TOKEN" http://localhost:<port>/api/metrics
 
 Session state is the main record of what happened to an analysis: `status`, `error`, timestamps and the last progress snapshot (`analysis_sessions` with `SESSION_STORE=database`). The owner can read it from `GET /api/status/:sessionId` (`server/server.js`, `server/utils/sessionView.js`).
 
-Startup prints how many interrupted sessions were marked failed and how many expired sessions and temp directories were removed (`🧹 ...` lines in `server/server.js`).
+Startup prints how many interrupted sessions were marked failed, how many sessions cloned over 1 hour ago without an analysis were marked failed, and how many expired sessions and temp directories were removed (`🧹 ...` lines in `server/server.js`).
+
+## Analysis jobs
+
+Analyses run in the background job runner (`server/utils/jobs.js`). Its console lines carry the session id only, never a repository name or a user:
+
+- `analysis job queued: session=<id> position=<n>` when every slot is busy;
+- `analysis job started: session=<id>`;
+- `analysis job finished: session=<id> outcome=ok ms=<n>`;
+- `analysis job finished: session=<id> outcome=failed ms=<n>: <error>`, with the error passed through `redactSecrets`. A failed job is never an unhandled rejection.
+
+A request refused because the runner is full answers 503 `ANALYSIS_BUSY` and logs nothing extra; `analysisJobs` in `/api/metrics` shows the counts. At startup: `🧵 Analysis jobs: <n> at once, <m> queued at most`.
 
 ## Startup, process errors and shutdown
 
 All console lines from `server/server.js`:
 
 - A configuration problem stops the server: `❌ Configuration problems (N):` and one `❌ <problem>` line each, naming variables, never values.
-- On a clean start: `🌐 Allowed origins: ...`, `🌐 Trust proxy: <0-3>` and `🚦 Rate limits: preAuth 300 per 5 min, ...` (names and numbers only).
+- On a clean start: `🌐 Allowed origins: ...`, `🌐 Trust proxy: <0-3>`, `🚦 Rate limits: preAuth 300 per 5 min, ...` and `🧵 Analysis jobs: 2 at once, 20 queued at most` (names and numbers only).
 - `❌ Unhandled rejection: <class>: <message>` and `❌ Uncaught exception: <class>: <message>`, each one line, passed through `redactSecrets`; never the promise object or a stack.
-- `🛑 Shutting down: <SIGTERM | SIGINT | uncaught exception>`, then `🛑 Pending GitHub connect tokens: <n> revoked, <m> failed`. No token is ever logged.
+- `🛑 Shutting down: <SIGTERM | SIGINT | uncaught exception>`, then `🛑 Pending GitHub connect tokens: <n> revoked, <m> failed` and `🛑 Analysis jobs: <n> still running, <m> queued dropped` (the runner waits at most 1 s for running jobs and does not finish them). No token is ever logged.
 - `GitHub rate limit reached: <route>` and `GitHub did not respond: <route>` when a GitHub-backed route answers 503 `GITHUB_RATE_LIMITED` or 504 `GITHUB_UNAVAILABLE`.
 
 ## Legacy: Keywords AI tracking

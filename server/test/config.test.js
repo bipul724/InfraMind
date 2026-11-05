@@ -10,6 +10,7 @@ import {
   describeRateLimits,
   describeServerConfigProblems,
   readAllowedOrigins,
+  readAnalysisLimits,
   readGitHubTimeoutMs,
   readRateLimits,
   readTrustProxy
@@ -70,7 +71,13 @@ describe('describeServerConfigProblems', () => {
     ['a short METRICS_TOKEN', { METRICS_TOKEN: `short${MARKER}` }, 'METRICS_TOKEN must be at least 32 characters'],
     ['TEST_FAULT_INJECTION in production', { TEST_FAULT_INJECTION: 'uncaught-exception', NODE_ENV: 'production', CLIENT_URL: 'https://a.example', GITHUB_REDIRECT_URI: 'https://a.example/auth/github/callback' }, 'TEST_FAULT_INJECTION is a test-only setting and is refused unless NODE_ENV=test'],
     ['TEST_FAULT_INJECTION in development', { TEST_FAULT_INJECTION: 'uncaught-exception', NODE_ENV: 'development' }, 'TEST_FAULT_INJECTION is a test-only setting'],
-    ['an unknown TEST_FAULT_INJECTION mode', { TEST_FAULT_INJECTION: 'explode' }, 'TEST_FAULT_INJECTION must be one of']
+    ['an unknown TEST_FAULT_INJECTION mode', { TEST_FAULT_INJECTION: 'explode' }, 'TEST_FAULT_INJECTION must be one of'],
+    // B2.1
+    ['ANALYSIS_CONCURRENCY zero', { ANALYSIS_CONCURRENCY: '0' }, 'ANALYSIS_CONCURRENCY must be an integer from 1 to 8'],
+    ['ANALYSIS_CONCURRENCY too large', { ANALYSIS_CONCURRENCY: '9' }, 'ANALYSIS_CONCURRENCY must be an integer from 1 to 8'],
+    ['ANALYSIS_CONCURRENCY not a number', { ANALYSIS_CONCURRENCY: `2${MARKER}` }, 'ANALYSIS_CONCURRENCY must be an integer from 1 to 8'],
+    ['ANALYSIS_QUEUE_MAX too large', { ANALYSIS_QUEUE_MAX: '101' }, 'ANALYSIS_QUEUE_MAX must be an integer from 0 to 100'],
+    ['ANALYSIS_QUEUE_MAX negative', { ANALYSIS_QUEUE_MAX: '-1' }, 'ANALYSIS_QUEUE_MAX must be an integer from 0 to 100']
   ];
   for (const [name, overrides, expected] of cases) {
     test(`${name}: one clear problem, without the value`, () => {
@@ -84,8 +91,22 @@ describe('describeServerConfigProblems', () => {
   }
 
   test('every problem is reported at once', () => {
-    const problems = problemsFor({ PORT: 'x', CLIENT_URL: 'ftp://a', TRUST_PROXY: 'true', GITHUB_TIMEOUT_MS: '1', METRICS_TOKEN: 'short' });
-    assert.equal(problems.length, 5);
+    const problems = problemsFor({ PORT: 'x', CLIENT_URL: 'ftp://a', TRUST_PROXY: 'true', GITHUB_TIMEOUT_MS: '1', METRICS_TOKEN: 'short', ANALYSIS_CONCURRENCY: '0', ANALYSIS_QUEUE_MAX: 'x' });
+    assert.equal(problems.length, 7);
+  });
+});
+
+describe('readAnalysisLimits (B2.1)', () => {
+  test('defaults 2 and 20; the ends of each range are accepted', () => {
+    assert.deepEqual(readAnalysisLimits({}), { concurrency: 2, queueMax: 20, problems: [] });
+    assert.deepEqual(readAnalysisLimits({ ANALYSIS_CONCURRENCY: '1', ANALYSIS_QUEUE_MAX: '0' }), { concurrency: 1, queueMax: 0, problems: [] });
+    assert.deepEqual(readAnalysisLimits({ ANALYSIS_CONCURRENCY: '8', ANALYSIS_QUEUE_MAX: '100' }), { concurrency: 8, queueMax: 100, problems: [] });
+  });
+  test('invalid values fall back to the defaults and are reported', () => {
+    const read = readAnalysisLimits({ ANALYSIS_CONCURRENCY: '2.5', ANALYSIS_QUEUE_MAX: ' 5' });
+    assert.equal(read.concurrency, 2);
+    assert.equal(read.queueMax, 20);
+    assert.equal(read.problems.length, 2);
   });
 });
 

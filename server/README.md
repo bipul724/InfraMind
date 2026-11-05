@@ -45,7 +45,7 @@ From `package.json`:
 ## Layout
 
 ```
-server.js               Routes, startup checks, cleanup
+server.js               Routes, the background analysis job, startup checks, cleanup
 agents/index.js         Planner, analyzer, generator, verifier
 agents/files.js         Extraction of one raw file from an AI reply, and the file validators
 agents/grounding.js     Manifests, existing configuration and evidence flags read from the clone
@@ -60,14 +60,15 @@ utils/git.js            git clone runner
 utils/repository.js     Repository URL parsing, clone paths, secret redaction
 utils/sessionStore.js   Session store: memory or database
 utils/sessionView.js    Allow-list serializers for responses and progress events
-utils/realtime.js       Authenticated Socket.IO rooms
-utils/config.js         TRUST_PROXY, allowed origins, rate limits, GITHUB_TIMEOUT_MS and the startup checks of the required settings
+utils/realtime.js       Authenticated Socket.IO rooms; the newest progress payload per session, in memory
+utils/jobs.js           In-process analysis job runner: ANALYSIS_CONCURRENCY at once, ANALYSIS_QUEUE_MAX waiting
+utils/config.js         TRUST_PROXY, allowed origins, rate limits, GITHUB_TIMEOUT_MS, the analysis limits and the startup checks of the required settings
 utils/security.js       helmet headers, the rate limiters (HTTP and Socket.IO handshakes), request logger
 utils/logger.js         Console and logs/ files
 utils/performance.js    Request metrics, session analytics, /health data
 utils/port.js           Default port (10000) for server.js, healthcheck.js and test-system.js
 scripts/                ai-smoke.js, assert-local-db.js
-test/                   node --test suite and fakes; test/faultInjection.js is loaded only with TEST_FAULT_INJECTION, which the server refuses unless NODE_ENV=test
+test/                   node --test suite and fakes (test/fakeGit.js: a stand-in git for offline clones); test/faultInjection.js is loaded only with TEST_FAULT_INJECTION, which the server refuses unless NODE_ENV=test
 ```
 
 ## Legacy and mock entry points

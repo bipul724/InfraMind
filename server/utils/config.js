@@ -168,6 +168,33 @@ export function readGitHubTimeoutMs(env = process.env) {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis job runner (B2.1, utils/jobs.js): analyses running at once, and analyses
+// waiting for a slot. Both are per server process.
+
+export const ANALYSIS_LIMITS = Object.freeze({
+  concurrency: { env: 'ANALYSIS_CONCURRENCY', min: 1, max: 8, default: 2 },
+  queueMax: { env: 'ANALYSIS_QUEUE_MAX', min: 0, max: 100, default: 20 }
+});
+
+// { concurrency, queueMax, problems }
+export function readAnalysisLimits(env = process.env) {
+  const values = {};
+  const problems = [];
+  for (const [key, limit] of Object.entries(ANALYSIS_LIMITS)) {
+    const raw = env[limit.env];
+    values[key] = limit.default;
+    if (raw === undefined || raw === '') continue;
+    const value = parseInteger(raw);
+    if (value === null || value < limit.min || value > limit.max) {
+      problems.push(`${limit.env} must be an integer from ${limit.min} to ${limit.max}`);
+    } else {
+      values[key] = value;
+    }
+  }
+  return { ...values, problems };
+}
+
+// ---------------------------------------------------------------------------
 // Required settings
 
 // An absolute http(s) URL; https in production
@@ -227,7 +254,7 @@ export function describeMetricsTokenProblem(env = process.env) {
 
 // Test-only fault injection (test/faultInjection.js): accepted only under NODE_ENV=test,
 // which only the test harness sets
-export const FAULT_INJECTION_MODES = Object.freeze(['unhandled-rejection', 'uncaught-exception']);
+export const FAULT_INJECTION_MODES = Object.freeze(['unhandled-rejection', 'uncaught-exception', 'analysis-failure']);
 export function describeFaultInjectionProblem(env = process.env) {
   const value = env.TEST_FAULT_INJECTION;
   if (value === undefined || value === '') return null;
@@ -254,6 +281,7 @@ export function describeServerConfigProblems(env = process.env) {
   problems.push(...readAllowedOrigins(env).problems);
   problems.push(...readRateLimits(env).problems);
   push(readGitHubTimeoutMs(env).problem);
+  problems.push(...readAnalysisLimits(env).problems);
   push(describeMetricsTokenProblem(env));
   push(describeFaultInjectionProblem(env));
   return problems;

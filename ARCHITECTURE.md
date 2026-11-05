@@ -97,7 +97,7 @@ Details:
 - Socket.IO order: the origin check (`allowRequest`), the per-IP `socketHandshake` limit, then the token check. The handshake IP comes from Express's own `req.ip` logic, so `TRUST_PROXY` applies the same way (`socketIpOf` in `server/server.js`).
 - The verifier caches a positive result for at most 60 s (never past the token's `exp`), holds at most 5,000 entries and runs at most 20 Supabase lookups at once; above that it answers `AUTH_UNAVAILABLE` (`server/utils/auth.js`).
 - Raw tokens are not cached or logged; the cache key is the token's SHA-256 hash (`server/utils/auth.js`).
-- Socket.IO: a socket joins a room `session:<id>` only with `subscribe` for a session its user owns, and at most 20 rooms per socket. A late subscriber receives the last stored progress snapshot (`server/utils/realtime.js`).
+- Socket.IO: a socket joins a room `session:<id>` only with `subscribe` for a session its user owns, and at most 20 rooms per socket. A late subscriber receives the newest progress state: the latest payload emitted in this process (kept in memory) or, when there is none, the stored snapshot; never both (`server/utils/realtime.js`).
 - After an OAuth sign-in, Supabase sends the user back to `<app origin>/dashboard` (`redirectTo` in `client/src/lib/supabase.ts`).
 
 ## 3. GitHub connection
@@ -139,7 +139,7 @@ Details:
 
 ## 4. Analysis flow
 
-There are two ways to start: a repository chosen from the user's connected GitHub account (`repositoryData`), or a URL typed by the user (`repoUrl`). The HTTP calls are `POST /api/clone-repo`, then `POST /api/analyze`, then `GET /api/files/:sessionId`.
+There are two ways to start: a repository chosen from the user's connected GitHub account (`repositoryData`), or a URL typed by the user (`repoUrl`). The HTTP calls are `POST /api/clone-repo`, then `POST /api/analyze` (answered with 202 at once; the agents run in the background), then `GET /api/files/:sessionId` once the session is `completed`.
 
 ### 4a. Clone
 
@@ -165,41 +165,56 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant S as Server
+    participant S as Server route
     participant St as Session store
+    participant J as Job runner
     participant P as Agent pipeline
     participant AI as AI layer
 
     B->>S: POST /api/analyze with sessionId
-    S->>St: status analyzing
-    S->>B: progress 30%, analyzing
-    S->>P: runAgentPipeline(owner/repo, clone path)
-    P->>AI: generateText: planner x1, generator x3 to x6, verifier x1 or x0
-    P-->>S: result
-    S->>B: progress 100% or 95%, analyzing, with messages and errors
-    S->>St: saveResult: status completed plus generated files
-    S->>B: progress 100%, completed, file names, messages, errors
-    S-->>B: 200 with techStack, codebaseAnalysis, file names, messages, errors
+    S->>St: owned lookup, status must be cloned
+    S->>J: reserve a slot (none free: 503 ANALYSIS_BUSY, session stays cloned)
+    S->>St: claimForAnalysis: cloned to analyzing, atomic
+    S->>J: enqueue the job
+    S-->>B: 202 success, sessionId, status analyzing
+    Note over J: at most ANALYSIS_CONCURRENCY jobs run and at most ANALYSIS_QUEUE_MAX wait. A queued job first sends progress 30%, Waiting for an analysis slot
+    J->>B: progress 30%, Starting AI agent analysis
+    J->>P: runAgentPipeline(owner/repo, clone path, onAgentDone)
+    loop after each of planner, analyzer, generator, verifier
+        P->>AI: generateText (planner x1, generator x3 to x6, verifier x1 or x0)
+        P-->>J: onAgentDone: step, messages and errors so far
+        J->>B: progress 30%, 50%, 80%, 95%, analyzing, messages, errors
+    end
+    P-->>J: result
+    J->>J: remove temp/session-id
+    J->>St: saveResult: status completed plus generated files
+    J->>B: progress 100%, completed, file names, messages, errors
+    loop every 5 s while analyzing (30 s after 10 min), the backstop for missed events
+        B->>S: GET /api/status/sessionId
+    end
     B->>S: GET /api/files/sessionId
     S-->>B: files, techStack, codebaseAnalysis, verificationResults, messages, errors
 ```
 
-Source: `server/server.js` (`handleCloneRequest`, `/api/analyze`, `/api/files/:sessionId`), `server/utils/git.js`, `server/utils/repository.js`, `server/utils/sessionStore.js`, `server/utils/realtime.js`, `server/agents/index.js`, `client/src/pages/RepoSelection.tsx`, `client/src/components/AgentGenerationForm.tsx`, `client/src/components/AgentProgress.tsx`.
+Source: `server/server.js` (`handleCloneRequest`, `/api/analyze`, `runAnalysisJob`, `/api/files/:sessionId`), `server/utils/jobs.js`, `server/utils/git.js`, `server/utils/repository.js`, `server/utils/sessionStore.js` (`claimForAnalysis`), `server/utils/realtime.js`, `server/agents/index.js`, `client/src/pages/RepoSelection.tsx`, `client/src/components/AgentGenerationForm.tsx`, `client/src/components/AgentProgress.tsx`, `client/src/hooks/use-session-poller.ts`.
 
 Details:
 
-- Progress events go only to the Socket.IO room `session:<id>` and the latest one is stored with the session (`server/utils/realtime.js`). The browser learns the session id only from the clone response, so it is not subscribed when the 10% and 25% events are sent; when it subscribes it receives the latest stored snapshot.
-- The agents report progress once, after all four have run. That event carries 100% when the verifier's AI call succeeded or the verifier was skipped (no generated file), and 95% when its call failed (`server/agents/index.js`).
-- The final `completed` event, the `POST /api/analyze` response and `GET /api/files/:sessionId` all carry the run's `messages` and `errors`, copied through an allow-list (`toAgentMessages`, `toErrorList` in `server/utils/sessionView.js`). The final event is the stored snapshot, so a late subscriber and a reopened session see which agents finished and why files are missing (`server/server.js`).
-- `POST /api/analyze` answers only after the pipeline has finished and the result is saved (`server/server.js`).
+- Progress events go only to the Socket.IO room `session:<id>`. The latest one is kept in memory (set before it is emitted) and stored with the session (`server/utils/realtime.js`). The browser learns the session id only from the clone response, so it is not subscribed when the 10% and 25% events are sent; when it subscribes it receives the newest state.
+- `POST /api/analyze` answers 202 `{ success, sessionId, status: "analyzing" }` as soon as the session is claimed. The pipeline runs in an in-process job runner: at most `ANALYSIS_CONCURRENCY` (1-8, default 2) at once and at most `ANALYSIS_QUEUE_MAX` (0-100, default 20) waiting. When both are full the answer is 503 `{ error, code: "ANALYSIS_BUSY" }` with `Retry-After: 30`, given before the claim, so the session stays `cloned` and the same session can be retried without cloning again (`server/server.js`, `server/utils/jobs.js`).
+- The claim moves `cloned` to `analyzing` in one store operation that matches the id, the owner and `status = 'cloned'` (`claimForAnalysis` in `server/utils/sessionStore.js`). Of concurrent requests for one session, one gets 202 and the others 400 "Repository not ready for analysis"; the pipeline runs once.
+- The agents report progress after each agent: planner, analyzer, generator and verifier events carry 30%, 50%, 80% and 95% (the planner's 20% is shown as 30%, so progress never goes back), the step of the agent that finished, and the `messages` and `errors` so far (`onAgentDone` in `server/agents/index.js`, `runAnalysisJob` in `server/server.js`).
+- The final `completed` event and `GET /api/files/:sessionId` carry the run's `messages` and `errors`, copied through an allow-list (`toAgentMessages`, `toErrorList` in `server/utils/sessionView.js`). The final event is the stored snapshot, so a late subscriber and a reopened session see which agents finished and why files are missing (`server/server.js`).
+- The browser completes a run from the `completed` event or, when events are missed (a dropped socket, a phone that slept), from polling `GET /api/status/:sessionId` every 5 s while the session is in flight, every 30 s after 10 minutes, stopping after 30 minutes with a message to reload. On `completed` the poller loads `GET /api/files/:sessionId` once (`client/src/hooks/use-session-poller.ts`, `client/src/components/AgentProgress.tsx`).
 - An AI failure inside an agent does not fail the session. The agent adds a fixed message to `errors` and the pipeline continues. The three files are generated independently: a failed AI call adds one `Generator Agent Error:` entry and the other files are kept. Only when all three fail does the session complete with no generated files, and then the verifier makes no AI call (`server/agents/index.js`).
 - Each generator reply is reduced to one raw file and validated before it is saved: a Dockerfile must consist of Dockerfile instructions, the workflow must parse as YAML and follow a fixed CI-only policy (read-only `permissions`, major-version action refs, no registry login or push), and `.env.example` must hold only comments and `KEY=value` lines without real-looking credentials. An invalid reply gets one repair call; if that fails too, the file is left out and `errors` gets `Generator Agent Error: <label>: the AI output did not pass validation` (`server/agents/files.js`, `server/agents/index.js`). Details in [README-AI-AGENTS.md](README-AI-AGENTS.md#generated-files-extraction-validation-repair).
 - The generator prompts carry the repository's top-level manifests (up to 8 KB each, 32 KB in total), an excerpt of an existing Dockerfile and workflows, evidence flags (entry points, tests, linters) and at most 300 file paths, within 24,000 characters per prompt. `.env` files are never read (`server/agents/grounding.js`, `server/agents/prompts.js`).
 - The verifier sees each saved file up to 4,000 characters. Its review (`verificationResults`) is shown in the browser under "Review", as plain text, when a run completes and when a completed session is reopened (`client/src/components/AgentProgress.tsx`).
-- A failed clone or analysis sets the session to `failed` and emits a progress event with 0% and status `failed` (`server/server.js`).
+- A failed clone or analysis sets the session to `failed` and emits a progress event with 0% and status `failed`. A failed analysis job is logged by the job runner, redacted; it is never an unhandled rejection (`server/server.js`, `server/utils/jobs.js`).
 - Clone safety: HTTPS only, `--depth 1 --single-branch --no-tags`, `core.symlinks=false`, no shell, no credential prompts. A token is passed to git as an HTTP header through the child process environment, never in the URL or the arguments. Defaults: 120 s timeout (`CLONE_TIMEOUT_MS`) and 200 MB (`MAX_REPO_SIZE_MB`) (`server/utils/git.js`).
-- The clone stays on disk after the analysis; it is removed when its session is deleted at expiry, or at startup if it has no session (`server/server.js`).
-- The dashboard opens one session with `/dashboard?session=<id>`: it calls `GET /api/status/:sessionId` and, for a completed session, `GET /api/files/:sessionId`, and subscribes to progress while the session is in flight. `/select-repo` lands there after an analysis (`client/src/pages/ModernDashboard.tsx`, `client/src/pages/RepoSelection.tsx`).
+- The clone `temp/<id>` is removed as soon as the pipeline is done with it, on success and on failure; results are served from the session store. A session `cloned` more than 1 hour ago and never analyzed is marked `failed` ("The repository was cloned but analysis was not started within 1 hour. Please start again.") and its clone removed, at startup and hourly. At startup and hourly the directories of `completed` and `failed` sessions, of expired sessions and of directories without a session are removed too (`removeSessionDirectory`, `removeSessionDirectories`, `failStaleClonedSessions` in `server/server.js`).
+- The dashboard opens one session with `/dashboard?session=<id>`: it calls `GET /api/status/:sessionId` and, for a completed session, `GET /api/files/:sessionId`, and while the session is in flight it shows the step cards live from progress events, with the status poller as backstop. `/select-repo` lands there right after the 202, while the analysis runs (`client/src/pages/ModernDashboard.tsx`, `client/src/pages/RepoSelection.tsx`).
+- The job runner is in-process: one server instance only. Queued and running analyses are lost on a restart; with `SESSION_STORE=database` the next start marks them `failed` (below).
 - `GET /api/files/:sessionId/:filename` returns one file as a download; `filename` is one of the generated file keys (`dockerfile`, `githubActions`, `envExample`) (`server/server.js`, `server/agents/index.js`).
 
 ## 5. Session lifecycle
@@ -209,25 +224,36 @@ stateDiagram-v2
     [*] --> cloning: POST /api/clone-repo creates the session
     cloning --> cloned: git clone succeeded
     cloning --> failed: clone error
-    cloned --> analyzing: POST /api/analyze
+    cloned --> analyzing: POST /api/analyze claimed it (202), job running or queued
+    cloned --> failed: not analyzed within 1 hour (startup and hourly)
     analyzing --> completed: saveResult
-    analyzing --> failed: pipeline threw, or the result could not be saved
+    analyzing --> failed: the job failed, or the result could not be saved
     cloning --> failed: server restart (startup recovery)
     analyzing --> failed: server restart (startup recovery)
     cloned --> [*]: expires_at reached
     completed --> [*]: expires_at reached
     failed --> [*]: expires_at reached
+    note left of cloned
+        POST /api/analyze answered 503 ANALYSIS_BUSY:
+        the session stays cloned and can be retried
+    end note
+    note right of analyzing
+        Clone directory temp/id: removed when the job ends
+        (success or failure), when a stale cloned session
+        fails, and at startup and hourly for completed,
+        failed, expired and orphaned sessions
+    end note
     note right of failed
         Expiry: deleteExpired removes sessions of any status
-        24 h after creation, at startup and then hourly,
-        together with their temp directories
+        24 h after creation, at startup and then hourly
     end note
 ```
 
-Source: `server/utils/sessionStore.js` (`STATUSES`, `IN_FLIGHT`, `SESSION_TTL_MS`, `markInFlightFailed`, `deleteExpired`), `server/server.js` (`handleCloneRequest`, `/api/analyze`, `startServer`, `cleanupExpiredSessions`), `server/prisma/migrations/20261103200038_init/migration.sql` (status check constraint).
+Source: `server/utils/sessionStore.js` (`STATUSES`, `IN_FLIGHT`, `SESSION_TTL_MS`, `claimForAnalysis`, `failStaleCloned`, `markInFlightFailed`, `deleteExpired`), `server/server.js` (`handleCloneRequest`, `/api/analyze`, `runAnalysisJob`, `startServer`, `cleanupExpiredSessions`, `failStaleClonedSessions`), `server/utils/jobs.js`, `server/prisma/migrations/20261103200038_init/migration.sql` (status check constraint).
 
-- At startup, sessions still in `cloning` or `analyzing` are marked `failed` with the message "The server restarted before this analysis finished. Please run it again." A `cloned` session is not touched (`server/server.js`, `server/utils/sessionStore.js`). This recovery only has an effect with `SESSION_STORE=database`: with `memory` the store starts empty after a restart, so every session is already gone and there is nothing to recover.
-- `POST /api/analyze` accepts only a session in `cloned` status; others get 400 "Repository not ready for analysis" (`server/server.js`).
+- At startup, sessions still in `cloning` or `analyzing` are marked `failed` with the message "The server restarted before this analysis finished. Please run it again." This covers analyses that were running or queued in the job runner when the server stopped: a shutdown waits at most 1 s for running jobs and does not try to finish them (`server/server.js`, `server/utils/sessionStore.js`). This recovery only has an effect with `SESSION_STORE=database`: with `memory` the store starts empty after a restart, so every session is already gone and there is nothing to recover.
+- A `cloned` session is not touched by that recovery, but one cloned more than 1 hour ago is marked `failed` ("The repository was cloned but analysis was not started within 1 hour. Please start again."), at startup and in the hourly cleanup (`failStaleCloned`).
+- `POST /api/analyze` accepts only a session in `cloned` status; others get 400 "Repository not ready for analysis", and so does every request but one of several concurrent ones for the same session (`server/server.js`).
 - Results can be fetched only while the session is `completed` (`server/server.js`).
 
 ### Where sessions live
@@ -237,7 +263,7 @@ Source: `server/utils/sessionStore.js` (`STATUSES`, `IN_FLIGHT`, `SESSION_TTL_MS
 | Mode | Storage | On restart |
 |---|---|---|
 | `memory` | Process memory; at most 1,000 AI call records | Every session and result is lost; in production the server logs a warning |
-| `database` | Postgres through Prisma: `analysis_sessions`, `generated_files`, `ai_calls` | Completed sessions survive until they expire; in-flight ones are marked `failed` |
+| `database` | Postgres through Prisma: `analysis_sessions`, `generated_files`, `ai_calls` | Completed sessions survive until they expire; in-flight ones (including queued analyses) are marked `failed` |
 
 ## 6. Data model
 

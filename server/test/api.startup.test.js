@@ -25,7 +25,10 @@ describe('all problems at once', () => {
       CORS_ALLOWED_ORIGINS: `https://${marker(9)}.example/path,*`,
       RATE_LIMIT_USER_MAX: `0${marker(10)}`,
       GITHUB_TIMEOUT_MS: `5${marker(11)}`,
-      METRICS_TOKEN: `short${marker(12)}`
+      METRICS_TOKEN: `short${marker(12)}`,
+      // B2.1 checks
+      ANALYSIS_CONCURRENCY: `0${marker(13)}`,
+      ANALYSIS_QUEUE_MAX: `${marker(14)}`
     };
     const started = Date.now();
     const result = await runServerExpectingExit({ envOverrides, timeoutMs: 10000 });
@@ -38,14 +41,15 @@ describe('all problems at once', () => {
       'PORT must be an integer', 'CLIENT_URL must use http or https', 'GITHUB_CLIENT_ID is not set',
       'GITHUB_CLIENT_SECRET is still the placeholder', 'GITHUB_REDIRECT_URI must end in /auth/github/callback',
       'TRUST_PROXY must be an integer', 'CORS_ALLOWED_ORIGINS entry 1', 'CORS_ALLOWED_ORIGINS entry 2 must not contain a wildcard',
-      'RATE_LIMIT_USER_MAX must be an integer', 'GITHUB_TIMEOUT_MS must be an integer', 'METRICS_TOKEN must be at least 32 characters'
+      'RATE_LIMIT_USER_MAX must be an integer', 'GITHUB_TIMEOUT_MS must be an integer', 'METRICS_TOKEN must be at least 32 characters',
+      'ANALYSIS_CONCURRENCY must be an integer from 1 to 8', 'ANALYSIS_QUEUE_MAX must be an integer from 0 to 100'
     ];
     for (const text of expected) assert.ok(result.stderr.includes(text), `stderr should include "${text}":\n${result.stderr}`);
     const header = result.stderr.match(/Configuration problems \((\d+)\):/);
     assert.ok(header, result.stderr);
     assert.ok(Number(header[1]) >= expected.length);
     const output = `${result.stdout}\n${result.stderr}`;
-    for (let n = 1; n <= 12; n++) assert.ok(!output.includes(marker(n)), `${marker(n)} must not be printed`);
+    for (let n = 1; n <= 14; n++) assert.ok(!output.includes(marker(n)), `${marker(n)} must not be printed`);
     assert.ok(!output.includes('your-github-client-secret'), 'not even the placeholder value');
     assert.ok(!output.includes('Starting InfraMind Server'), 'nothing starts');
   });
@@ -68,7 +72,9 @@ describe('each new check alone gives one clear message', () => {
     [{ RATE_LIMIT_OAUTH_MAX: '100001' }, 'RATE_LIMIT_OAUTH_MAX must be an integer from 1 to 100000'],
     [{ GITHUB_TIMEOUT_MS: '500' }, 'GITHUB_TIMEOUT_MS must be an integer from 1000 to 60000'],
     [{ METRICS_TOKEN: 'too-short' }, 'METRICS_TOKEN must be at least 32 characters'],
-    [{ ...PRODUCTION, TEST_FAULT_INJECTION: 'uncaught-exception' }, 'TEST_FAULT_INJECTION is a test-only setting and is refused unless NODE_ENV=test']
+    [{ ...PRODUCTION, TEST_FAULT_INJECTION: 'uncaught-exception' }, 'TEST_FAULT_INJECTION is a test-only setting and is refused unless NODE_ENV=test'],
+    [{ ANALYSIS_CONCURRENCY: '9' }, 'ANALYSIS_CONCURRENCY must be an integer from 1 to 8'],
+    [{ ANALYSIS_QUEUE_MAX: '101' }, 'ANALYSIS_QUEUE_MAX must be an integer from 0 to 100']
   ];
   for (const [envOverrides, message] of cases) {
     test(message, async () => {

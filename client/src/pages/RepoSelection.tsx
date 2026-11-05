@@ -11,6 +11,10 @@ import { TechStackSelector } from '@/components/TechStackSelector';
 import { RepositorySelector } from '@/components/RepositorySelector';
 import { useToast } from '@/hooks/use-toast';
 import { apiFetch } from '@/lib/apiClient';
+import { startAnalysis } from '@/lib/analysis';
+
+// The repository object RepositorySelector passes to onRepositorySelect
+type SelectedRepository = Parameters<React.ComponentProps<typeof RepositorySelector>['onRepositorySelect']>[0];
 
 export const RepoSelection = () => {
   const { user } = useAuth();
@@ -18,17 +22,20 @@ export const RepoSelection = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [repoUrl, setRepoUrl] = useState('');
-  const [selectedRepository, setSelectedRepository] = useState<any>(null);
+  const [selectedRepository, setSelectedRepository] = useState<SelectedRepository | null>(null);
   const [selectedTechStack, setSelectedTechStack] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('browse');
+  // A session that was cloned but got 503 ANALYSIS_BUSY: starting the same repository
+  // again retries its analysis without cloning again
+  const [pendingSession, setPendingSession] = useState<{ source: string; sessionId: string } | null>(null);
 
   const validateGitHubUrl = (url: string) => {
-    const githubRegex = /^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+\/?$/;
+    const githubRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
     return githubRegex.test(url);
   };
 
-  const handleRepositorySelect = (repository: any) => {
+  const handleRepositorySelect = (repository: SelectedRepository) => {
     setSelectedRepository(repository);
     toast({
       title: 'Repository Selected',
@@ -63,42 +70,57 @@ export const RepoSelection = () => {
       return;
     }
 
+    const source = repositoryData ? `repo:${repositoryData.fullName}` : `url:${finalRepoUrl}`;
+
     setLoading(true);
     try {
-      // Clone repository; for repositoryData the server uses this user's stored GitHub connection
-      const cloneResponse = await apiFetch('/api/clone-repo', {
-        method: 'POST',
-        body: JSON.stringify({
-          repoUrl: finalRepoUrl,
-          repositoryData
-        }),
-      });
+      let sessionId: string;
+      if (pendingSession && pendingSession.source === source) {
+        // Retry after ANALYSIS_BUSY: the repository is already cloned
+        sessionId = pendingSession.sessionId;
+      } else {
+        // Clone repository; for repositoryData the server uses this user's stored GitHub connection
+        const cloneResponse = await apiFetch('/api/clone-repo', {
+          method: 'POST',
+          body: JSON.stringify({
+            repoUrl: finalRepoUrl,
+            repositoryData
+          }),
+        });
 
-      if (!cloneResponse.ok) {
-        throw new Error('Failed to clone repository');
+        if (!cloneResponse.ok) {
+          throw new Error('Failed to clone repository');
+        }
+
+        const cloneData = await cloneResponse.json();
+        sessionId = cloneData.sessionId;
       }
 
-      const cloneData = await cloneResponse.json();
-      
-      // Start analysis
-      const analyzeResponse = await apiFetch('/api/analyze', {
-        method: 'POST',
-        body: JSON.stringify({
-          sessionId: cloneData.sessionId
-        }),
-      });
-
-      if (!analyzeResponse.ok) {
-        throw new Error('Failed to start analysis');
+      // Start the analysis. The server answers 202 at once and runs it in the background;
+      // the dashboard shows its progress live.
+      const outcome = await startAnalysis(sessionId);
+      if (outcome.kind === 'busy') {
+        setPendingSession({ source, sessionId });
+        toast({
+          title: 'Analysis service busy',
+          description: `${outcome.message} The repository is cloned: select Start AI Analysis again to retry without cloning it again.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (outcome.kind === 'error') {
+        setPendingSession(null);
+        throw new Error(outcome.message);
       }
 
+      setPendingSession(null);
       toast({
-        title: 'Success',
-        description: 'Analysis finished. Redirecting to the dashboard...',
+        title: 'Analysis started',
+        description: 'Opening the dashboard, where the progress is shown live.',
       });
 
       // Redirect to dashboard with session ID
-      navigate(`/dashboard?session=${cloneData.sessionId}`);
+      navigate(`/dashboard?session=${sessionId}`);
       
     } catch (error) {
       console.error('Error generating CI/CD:', error);

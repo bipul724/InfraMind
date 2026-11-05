@@ -6,7 +6,7 @@ import http from 'node:http';
 import { Server } from 'socket.io';
 import { io as connectClient } from 'socket.io-client';
 import { createSupabaseVerifier } from '../utils/auth.js';
-import { attachRealtime, MAX_ROOMS_PER_SOCKET } from '../utils/realtime.js';
+import { attachRealtime, MAX_LATEST_SESSIONS, MAX_ROOMS_PER_SOCKET, newestSnapshot } from '../utils/realtime.js';
 import { startFakeSupabase, USER_A, USER_B } from './fakeSupabase.js';
 
 let fake;
@@ -25,6 +25,7 @@ let clockOffsetMs = 0;
 let storeDown = false;
 let persistFails = false;
 const persistDelays = [];
+const lookupDelays = [];
 
 before(async () => {
   fake = await startFakeSupabase();
@@ -40,8 +41,12 @@ before(async () => {
     verifier,
     getOwnedSession: async (id, userId) => {
       if (storeDown) throw new Error('store down');
+      // A copy, as the real store returns: what was stored when the lookup ran
       const session = sessions.get(id);
-      return session && session.userId === userId ? session : null;
+      const found = session && session.userId === userId ? structuredClone(session) : null;
+      const delay = lookupDelays.shift() ?? 0;
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      return found;
     },
     saveProgress: async (id, payload) => {
       const delay = persistDelays.shift() ?? 0;
@@ -361,5 +366,108 @@ describe('B2.0b: async session store', () => {
       console.warn = original;
     }
     assert.deepEqual(warnings, [`progress persist failed session=${S1}`]);
+  });
+});
+
+describe('B2.1 (T-207): late subscribers get the newest state', () => {
+  test('newestSnapshot: the in-memory entry when there is one, else the stored snapshot; never both', () => {
+    const stored = { sessionId: S1, step: 'stored' };
+    const entry = { seq: 7, payload: { sessionId: S1, step: 'memory' } };
+    assert.equal(newestSnapshot(entry, stored), entry.payload);
+    assert.equal(newestSnapshot(entry, undefined), entry.payload);
+    assert.equal(newestSnapshot(undefined, stored), stored);
+    assert.equal(newestSnapshot(undefined, undefined), null);
+  });
+
+  test('while the newest write is still pending, a subscriber gets the in-memory payload, not the older stored one', async () => {
+    const target = extraSessionsOfA[1];
+    await realtime.emitProgress(target, { step: 'agent 1 done', progress: 20, status: 'analyzing', messages: [{ agent: 'planner', message: 'm1' }] });
+    assert.equal(sessions.get(target).lastProgress.step, 'agent 1 done', 'stored: the older event');
+
+    persistDelays.push(600); // the newer write lands late
+    const pending = realtime.emitProgress(target, {
+      step: 'agent 2 done', progress: 50, status: 'analyzing',
+      messages: [{ agent: 'planner', message: 'm1' }, { agent: 'analyzer', message: 'm2' }]
+    });
+    const late = await connect({ token: fake.issueToken(USER_A) });
+    const events = record(late);
+    assert.deepEqual(await subscribe(late, target), { ok: true });
+    await waitFor(() => events.length >= 1);
+    await settle(150);
+    assert.equal(sessions.get(target).lastProgress.step, 'agent 1 done', 'the newer write had not landed');
+    assert.equal(events.length, 1, 'exactly one snapshot');
+    assert.equal(events[0].step, 'agent 2 done');
+    assert.equal(events[0].messages.length, 2);
+    await pending;
+    late.close();
+  });
+
+  test('an event emitted during the ownership lookup is not lost', async () => {
+    const target = extraSessionsOfA[2];
+    await realtime.emitProgress(target, { step: 'before the lookup', progress: 30, status: 'analyzing' });
+    const late = await connect({ token: fake.issueToken(USER_A) });
+    const events = record(late);
+    lookupDelays.push(300);
+    persistDelays.push(800);
+    const ack = subscribe(late, target);
+    await settle(100); // the lookup is in flight
+    const pending = realtime.emitProgress(target, { step: 'during the lookup', progress: 50, status: 'analyzing' });
+    assert.deepEqual(await ack, { ok: true });
+    await waitFor(() => events.length >= 1);
+    await settle(150);
+    assert.deepEqual(events.map((e) => e.step), ['during the lookup']);
+    await pending;
+    late.close();
+  });
+
+  test('a non-owner still gets nothing, even with an in-memory payload present', async () => {
+    const target = extraSessionsOfA[3];
+    realtime.emitProgress(target, { step: 'private', progress: 50, status: 'analyzing' });
+    const b = await connect({ token: fake.issueToken(USER_B) });
+    const events = record(b);
+    assert.deepEqual(await subscribe(b, target), { ok: false, error: 'Session not found' });
+    await settle(200);
+    assert.equal(events.length, 0);
+    b.close();
+  });
+});
+
+describe('B2.1: the in-memory payloads are bounded', () => {
+  let ownIo;
+  let own;
+  const store = new Map();
+  before(async () => {
+    const server = http.createServer();
+    ownIo = new Server(server);
+    own = attachRealtime(ownIo, {
+      verifier: { verify: async () => { throw new Error('unused'); } },
+      getOwnedSession: async () => null,
+      saveProgress: async (id, payload) => { store.set(id, payload); },
+      terminalRetentionMs: 50
+    });
+  });
+  after(async () => { await new Promise((resolve) => ownIo.close(() => resolve())); });
+
+  test('a completed or failed payload is dropped after it is persisted; others stay', async () => {
+    const done = crypto.randomUUID();
+    const failed = crypto.randomUUID();
+    const running = crypto.randomUUID();
+    const before = own.latestCount();
+    own.emitProgress(done, { step: 'Analysis complete!', progress: 100, status: 'completed' });
+    own.emitProgress(failed, { step: 'Analysis failed', progress: 0, status: 'failed' });
+    await own.emitProgress(running, { step: 'working', progress: 50, status: 'analyzing' });
+    assert.equal(own.latestCount(), before + 3);
+    await settle(150);
+    assert.equal(own.latestCount(), before + 1, 'only the analyzing one remains');
+    assert.equal(store.get(done).status, 'completed', 'and the terminal ones were persisted first');
+  });
+
+  test(`at most ${MAX_LATEST_SESSIONS} sessions are kept`, async () => {
+    const writes = [];
+    for (let i = 0; i < MAX_LATEST_SESSIONS + 50; i++) {
+      writes.push(own.emitProgress(crypto.randomUUID(), { step: 'x', progress: 50, status: 'analyzing' }));
+    }
+    await Promise.all(writes);
+    assert.equal(own.latestCount(), MAX_LATEST_SESSIONS);
   });
 });

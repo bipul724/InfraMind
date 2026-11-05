@@ -68,7 +68,8 @@ interface SessionView {
 }
 
 // The step and percentage the server emits when a session enters each status
-// (server/server.js handleCloneRequest and /api/analyze); the socket snapshot replaces them
+// (server/server.js handleCloneRequest and runAnalysisJob); the socket snapshot, the
+// per-agent events and the status poller in AgentProgress replace them
 const STATUS_START: Record<SessionStatus, { step: string; progress: number }> = {
   cloning: { step: 'Cloning repository...', progress: 10 },
   cloned: { step: 'Repository cloned successfully', progress: 25 },
@@ -220,7 +221,8 @@ export const ModernDashboard = () => {
     };
   }, [sessionParam, reloadKey, clearSessionParam, toast]);
 
-  // Live updates for an opened session that is still in progress
+  // Live updates for an opened session that is still in progress: socket events, and
+  // the status poller's updates when events are missed (AgentProgress)
   const handleSessionProgress = useCallback((data: ProgressPayload) => {
     setSessionView((previous) => {
       if (!previous || previous.id !== data.sessionId || !previous.status) return previous;

@@ -201,6 +201,61 @@ function contractSuite(label, setup, { skip = false } = {}) {
       assert.equal(await store().markInFlightFailed('again'), 0);
     });
 
+    // B2.1 (T-206): the claim is the only way into "analyzing" for an analysis request
+    test('claimForAnalysis moves cloned -> analyzing for the owner only, once', async () => {
+      const { id } = await store().create(FIELDS);
+      assert.equal(await store().claimForAnalysis(id, USER_A), false, 'still cloning: not claimable');
+      await store().update(id, { status: 'cloned', clonedAt: new Date(clock.t) });
+      assert.equal(await store().claimForAnalysis(id, USER_B), false, 'another user cannot claim');
+      assert.equal(await store().claimForAnalysis(crypto.randomUUID(), USER_A), false, 'unknown id');
+      assert.equal(await store().claimForAnalysis('not-a-uuid', USER_A), false);
+      assert.equal(await store().claimForAnalysis(id, 'not-a-uuid'), false);
+      assert.equal((await store().get(id)).status, 'cloned', 'refused claims change nothing');
+
+      assert.equal(await store().claimForAnalysis(id, USER_A), true);
+      const session = await store().get(id);
+      assert.equal(session.status, 'analyzing');
+      assert.equal(session.analysisStartedAt.getTime(), clock.t);
+      assert.equal(await store().claimForAnalysis(id, USER_A), false, 'a second claim loses');
+    });
+
+    test('concurrent claims of one session: exactly one wins', async () => {
+      for (let round = 0; round < 5; round++) {
+        const { id } = await store().create(FIELDS);
+        await store().update(id, { status: 'cloned', clonedAt: new Date(clock.t) });
+        const results = await Promise.all(Array.from({ length: 8 }, () => store().claimForAnalysis(id, USER_A)));
+        assert.equal(results.filter(Boolean).length, 1, JSON.stringify(results));
+        assert.equal((await store().get(id)).status, 'analyzing');
+      }
+    });
+
+    // B2.1 (T-204)
+    test('failStaleCloned fails only cloned sessions cloned before the cutoff, and returns their ids', async () => {
+      const hour = 60 * 60 * 1000;
+      const make = async (status, clonedAt) => {
+        const { id } = await store().create(FIELDS);
+        if (status !== 'cloning') await store().update(id, { status, ...(clonedAt ? { clonedAt } : {}) });
+        return id;
+      };
+      const stale = await make('cloned', new Date(clock.t - 2 * hour));
+      const fresh = await make('cloned', new Date(clock.t - 10 * 60 * 1000));
+      const exactlyAtCutoff = await make('cloned', new Date(clock.t - hour));
+      const staleButAnalyzing = await make('analyzing', new Date(clock.t - 2 * hour));
+      const staleButCompleted = await make('cloned', new Date(clock.t - 2 * hour));
+      await store().saveResult(staleButCompleted, RESULT);
+
+      const ids = await store().failStaleCloned(new Date(clock.t - hour), 'not started');
+      assert.ok(ids.includes(stale));
+      for (const id of [fresh, exactlyAtCutoff, staleButAnalyzing, staleButCompleted]) assert.ok(!ids.includes(id), id);
+      const failed = await store().get(stale);
+      assert.equal(failed.status, 'failed');
+      assert.equal(failed.error, 'not started');
+      assert.equal((await store().get(fresh)).status, 'cloned');
+      assert.equal((await store().get(staleButAnalyzing)).status, 'analyzing');
+      assert.equal((await store().get(staleButCompleted)).status, 'completed');
+      assert.deepEqual(await store().failStaleCloned(new Date(clock.t - hour), 'not started'), [], 'already failed');
+    });
+
     test('deleteExpired removes expired sessions with their files, and ai_calls older than 30 days', async () => {
       const start = clock.t;
       const old = await store().create(FIELDS);

@@ -17,16 +17,20 @@ The server stores these with the session (`saveResult` in `server/utils/sessionS
 
 ```mermaid
 flowchart TD
-    Start["runAgentPipeline(owner/repo, clone path, progressCallback, meta)"]
+    Start["runAgentPipeline(owner/repo, clone path, onAgentDone, meta)"]
     Planner["plannerAgent: AI task planner, 1 call. Sees only owner/repo. Writes analysisplan and a message"]
     Analyzer["analyzerAgent: no AI call. Scans files, reads top-level manifests. Writes projectStructure, techStack, codebaseAnalysis, evidence"]
     Generator["generatorAgent: AI task generator, 3 to 6 calls. Each validated file writes its own generatedFiles key"]
     Verifier["verifierAgent: AI task verifier, 1 call, or none when no file was generated. Writes verificationResults"]
-    Report["progressCallback once: final step, progress, messages, errors"]
+    Report["onAgentDone after each agent: agent, progress 20/50/80/95, step, messages and errors so far"]
     AI["server/ai generateText"]
     Files[("temp/session-id/repo")]
 
-    Start --> Planner --> Analyzer --> Generator --> Verifier --> Report
+    Start --> Planner --> Analyzer --> Generator --> Verifier
+    Planner -.-> Report
+    Analyzer -.-> Report
+    Generator -.-> Report
+    Verifier -.-> Report
     Planner -.-> AI
     Generator -.-> AI
     Verifier -.-> AI
@@ -48,7 +52,7 @@ Facts worth knowing:
 
 - The agents run strictly in sequence, in a fixed order, sharing one `AgentState` object. No orchestration library is used (`createAgentWorkflow`).
 - The planner's output (`analysisplan`) is not passed to any later agent and is not saved with the session (`server/agents/index.js`, `saveResult` in `server/utils/sessionStore.js`).
-- The individual agents do not emit progress. `runAgentPipeline` calls `progressCallback` once, after the verifier (`server/agents/index.js`).
+- After each agent, `runAgentPipeline` calls `onAgentDone` with the agent's name, its progress value (20, 50, 80, 95), the current step and copies of `messages` and `errors` so far. The server turns each into a progress event; the planner's 20 is sent as 30 because the "Starting" event before it already showed 30 (`AGENT_SEQUENCE`, `createAgentWorkflow` in `server/agents/index.js`; `runAnalysisJob` in `server/server.js`). It replaces the single callback that ran once after the verifier.
 - Each agent catches its own errors. An AI failure adds `"<Agent> Agent Error: AI providers are unavailable"` to `errors`; any other error adds `"<Agent> Agent Error: Internal error"` and is logged server-side with secrets redacted. The next agent still runs (`publicErrorMessage` in `server/agents/index.js`, `AI_UNAVAILABLE_MESSAGE` in `server/ai/errors.js`).
 - The three files are generated independently, in the order Dockerfile, GitHub Actions workflow, `.env.example`. A failed AI call adds one entry such as `"Generator Agent Error: Dockerfile: AI providers are unavailable"` and is not repaired (the AI layer already retried). A file whose reply fails validation twice adds `"Generator Agent Error: <label>: the AI output did not pass validation"`. In both cases the other files are kept (`generatorAgent`).
 - AI calls per run: planner 1, generator 3 to 6, verifier 0 or 1, so 4 to 8 calls. Each call can make several attempts across providers (see [AI provider fallback](#ai-provider-fallback)).
@@ -111,26 +115,37 @@ The HTTP and Socket.IO sequence around the pipeline:
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant S as Server
+    participant S as Server route
     participant St as Session store
+    participant J as Background job
     participant P as Agent pipeline
     participant AI as AI layer
 
     B->>S: POST /api/analyze with sessionId (session must be cloned)
-    S->>St: status analyzing
-    S->>B: progress 30%, analyzing
-    S->>P: runAgentPipeline(owner/repo, clone path)
-    P->>AI: generateText: planner x1, generator x3 to x6, verifier x1 or x0
-    P-->>S: result
-    S->>B: progress 100% or 95%, analyzing, with messages and errors
-    S->>St: saveResult: status completed plus generated files
-    S->>B: progress 100%, completed, file names, messages, errors
-    S-->>B: 200 with techStack, codebaseAnalysis, file names, messages, errors
+    S->>St: claimForAnalysis: cloned to analyzing, atomic
+    S-->>B: 202 success, sessionId, status analyzing (or 503 ANALYSIS_BUSY, session stays cloned)
+    J->>B: progress 30%, Starting AI agent analysis
+    J->>P: runAgentPipeline(owner/repo, clone path, onAgentDone)
+    P->>AI: planner x1
+    P-->>J: onAgentDone planner
+    J->>B: progress 30%, analyzing, 1 message
+    P-->>J: onAgentDone analyzer (no AI call)
+    J->>B: progress 50%, analyzing, 2 messages
+    P->>AI: generator x3 to x6
+    P-->>J: onAgentDone generator
+    J->>B: progress 80%, analyzing, messages and errors so far
+    P->>AI: verifier x1 or x0
+    P-->>J: onAgentDone verifier
+    J->>B: progress 95%, analyzing, messages and errors
+    J->>St: saveResult: status completed plus generated files (clone directory already removed)
+    J->>B: progress 100%, completed, file names, messages, errors
     B->>S: GET /api/files/sessionId
     S-->>B: files, techStack, codebaseAnalysis, verificationResults, messages, errors
 ```
 
-Source: `server/server.js` (`/api/analyze`, `/api/files/:sessionId`), `server/agents/index.js`, `server/utils/sessionStore.js`, `server/utils/realtime.js`.
+Source: `server/server.js` (`/api/analyze`, `runAnalysisJob`, `/api/files/:sessionId`), `server/utils/jobs.js`, `server/agents/index.js`, `server/utils/sessionStore.js`, `server/utils/realtime.js`.
+
+The step cards follow these events: while analyzing, an agent with a message is Done, with a message and an error Partial, with an error only Failed; the first agent with neither is Running and the rest Waiting. If the browser misses events, it polls `GET /api/status/:sessionId` every 5 s and loads the result once the session is `completed` (`client/src/components/AgentProgress.tsx`, `client/src/hooks/use-session-poller.ts`).
 
 The browser shows the review: when a run completes, and when a completed session is opened with `/dashboard?session=<id>`, `AgentProgress` shows `verificationResults` under a "Review" heading as plain text (no Markdown or HTML rendering), and nothing when there is no review (`client/src/components/AgentProgress.tsx`, `client/src/pages/ModernDashboard.tsx`).
 

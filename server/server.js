@@ -24,9 +24,11 @@ import {
   describeRateLimits,
   describeServerConfigProblems,
   readAllowedOrigins,
+  readAnalysisLimits,
   readRateLimits,
   readTrustProxy
 } from './utils/config.js';
+import { createJobRunner } from './utils/jobs.js';
 import { performanceMonitor, getHealthStatus } from './utils/performance.js';
 import {
   parseGitHubRepoUrl,
@@ -55,6 +57,11 @@ const TRUST_PROXY = readTrustProxy(process.env).value;
 const ALLOWED_ORIGINS = readAllowedOrigins(process.env).origins;
 const RATE_LIMITS = readRateLimits(process.env).limits;
 const limiters = createRateLimiters(RATE_LIMITS);
+const ANALYSIS_LIMITS = readAnalysisLimits(process.env);
+
+// B2.1: analyses run in the background, at most ANALYSIS_CONCURRENCY at once and at most
+// ANALYSIS_QUEUE_MAX waiting (utils/jobs.js). In this process only: one server instance.
+const analysisJobs = createJobRunner({ concurrency: ANALYSIS_LIMITS.concurrency, queueMax: ANALYSIS_LIMITS.queueMax });
 
 const app = express();
 // The number of proxies in front of the server (TRUST_PROXY, 0-3). Never `true`, which
@@ -193,7 +200,7 @@ app.get('/api/metrics', (req, res) => {
   if (!hasMetricsAccess(req)) return sendNotFound(res);
   try {
     const metrics = performanceMonitor.getMetrics();
-    res.json(metrics);
+    res.json({ ...metrics, analysisJobs: analysisJobs.stats() });
   } catch (error) {
     logger.error('Metrics retrieval failed', error);
     res.status(500).json({ error: 'Failed to retrieve metrics' });
@@ -848,12 +855,22 @@ app.post('/api/clone-repo', limiters.clone, async (req, res) => {
   }
 });
 
-// Analyze repository endpoint
+// Analyze repository endpoint (B2.1). Answers 202 as soon as the session is claimed; the
+// pipeline runs in the background job runner, and progress, completion and failure reach
+// the browser as Socket.IO events and through GET /api/status/:sessionId.
+const ANALYSIS_BUSY_BODY = { error: 'The analysis service is busy. Please try again shortly.', code: 'ANALYSIS_BUSY' };
+const ANALYSIS_BUSY_RETRY_AFTER_SECONDS = 30;
+const NOT_READY_BODY = { error: 'Repository not ready for analysis' };
+const ANALYSIS_FAILED_MESSAGE = 'Analysis failed';
+
+// Test-only hooks (test/faultInjection.js), set by startServer under NODE_ENV=test only
+let testHooks = {};
+
 app.post('/api/analyze', limiters.analysis, async (req, res) => {
   const { sessionId } = req.body || {};
   let session = null;
   try {
-    // Ownership first, so a non-owner never learns the session's status
+    // 1. Ownership first, so a non-owner never learns the session's status
     session = await getOwnedSession(req, sessionId);
   } catch (error) {
     if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
@@ -863,107 +880,124 @@ app.post('/api/analyze', limiters.analysis, async (req, res) => {
   if (!session) {
     return sendSessionNotFound(res);
   }
+  // 2. Status
   if (session.status !== 'cloned') {
-    return res.status(400).json({ error: 'Repository not ready for analysis' });
+    return res.status(400).json(NOT_READY_BODY);
   }
 
-  let analysisStartedAt = null;
-  const trackAnalysis = (outcome, files) => {
-    if (analysisStartedAt === null) return;
-    performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - analysisStartedAt, { outcome, files });
-    analysisStartedAt = null;
-  };
+  // 3. Capacity, before the claim: a busy answer leaves the session "cloned", so the same
+  // session can be retried without cloning again. The slot counts against capacity from
+  // here, so requests arriving during the claim below cannot overfill the queue.
+  const slot = analysisJobs.reserve();
+  if (!slot) {
+    res.set('Retry-After', String(ANALYSIS_BUSY_RETRY_AFTER_SECONDS));
+    return res.status(503).json(ANALYSIS_BUSY_BODY);
+  }
 
-  const markFailed = async () => {
-    trackAnalysis('failed', 0);
-    try {
-      await sessionStore.update(sessionId, { status: 'failed', error: 'Analysis failed' });
-    } catch {
-      console.error(`Could not mark the session failed: session=${sessionId}`);
-    }
-    emitProgress(sessionId, {
-      step: 'Analysis failed',
-      progress: 0,
-      status: 'failed',
-      error: 'Analysis failed'
-    });
+  // 4. Atomic claim: cloned -> analyzing, only for this owner and only once
+  let claimed = false;
+  try {
+    claimed = await sessionStore.claimForAnalysis(sessionId, req.user.id);
+  } catch (error) {
+    slot.release();
+    if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
+    console.error(`Analysis error: ${redactSecrets(error)}`);
+    return res.status(500).json({ error: 'Analysis failed' });
+  }
+  if (!claimed) {
+    slot.release();
+    return res.status(400).json(NOT_READY_BODY);
+  }
+
+  const job = { sessionId, fullName: session.fullName, userId: req.user.id };
+  const { queued, dropped } = slot.enqueue(sessionId, () => runAnalysisJob(job));
+  if (dropped) {
+    // The server began shutting down during the claim; the next start marks it failed
+    console.warn(`Analysis not started (shutting down): session=${sessionId}`);
+  } else if (queued) {
+    emitProgress(sessionId, { step: 'Waiting for an analysis slot', progress: 30, status: 'analyzing' });
+  }
+
+  res.status(202).json({ success: true, sessionId, status: 'analyzing' });
+});
+
+// The background part of an analysis: the pipeline, the stored result and the final
+// event. The clone directory is removed as soon as the pipeline is done with it, on
+// success and on failure. Any failure marks the session failed and is rethrown, so the
+// job runner logs it (redacted).
+async function runAnalysisJob({ sessionId, fullName, userId }) {
+  const startedAt = Date.now();
+  let lastProgress = 30;
+  const emitAnalyzing = (data) => {
+    // Never backwards: the planner's 20 follows the 30 of "Starting"
+    lastProgress = Math.max(lastProgress, data.progress);
+    emitProgress(sessionId, { ...data, progress: lastProgress, status: 'analyzing' });
   };
 
   try {
+    emitAnalyzing({ step: 'Starting AI agent analysis...', progress: 30 });
+
+    let result;
     try {
-      await sessionStore.update(sessionId, { status: 'analyzing', analysisStartedAt: new Date() });
-    } catch (error) {
-      if (isSessionStoreDown(error)) return sendSessionStoreUnavailable(res);
-      throw error;
+      // One event per finished agent (B2.1)
+      result = await runAgentPipeline(
+        fullName,
+        resolveSessionClonePath(TEMP_DIR, sessionId),
+        (report) => emitAnalyzing({
+          step: report.currentStep,
+          progress: report.progress,
+          messages: toAgentMessages(report.messages),
+          errors: toErrorList(report.errors)
+        }),
+        { sessionId, userId }
+      );
+      testHooks.afterPipeline?.();
+    } finally {
+      // Nothing reads temp/<id> after the pipeline: results are served from the store
+      await removeSessionDirectory(sessionId);
     }
-    analysisStartedAt = Date.now();
-    
-    emitProgress(sessionId, {
-      step: 'Starting AI agent analysis...',
-      progress: 30,
-      status: 'analyzing'
-    });
-    
-    // Run the AI agent pipeline
-    const progressCallback = (data) => {
-      emitProgress(sessionId, {
-        step: data.step,
-        progress: data.progress,
-        messages: toAgentMessages(data.messages),
-        errors: toErrorList(data.errors),
-        status: 'analyzing'
-      });
-    };
-    
-    const result = await runAgentPipeline(
-      session.fullName,
-      resolveSessionClonePath(TEMP_DIR, sessionId),
-      progressCallback,
-      { sessionId, userId: req.user.id }
-    );
-    
+
     // Store analysis results: the session and its files, in one transaction
     try {
       await sessionStore.saveResult(sessionId, result);
     } catch (error) {
-      if (!isSessionStoreDown(error)) throw error;
-      console.error(`Analysis results could not be saved: session=${sessionId}`);
-      await markFailed();
-      return sendSessionStoreUnavailable(res);
+      if (isSessionStoreDown(error)) console.error(`Analysis results could not be saved: session=${sessionId}`);
+      throw error;
     }
-    
+
     const generatedFileNames = Object.keys(result.generatedFiles);
-    trackAnalysis('ok', generatedFileNames.length);
+    performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - startedAt, { outcome: 'ok', files: generatedFileNames.length });
     // messages and errors ride on the final event too, so the stored snapshot that late
     // subscribers receive carries them
-    const messages = toAgentMessages(result.messages);
-    const errors = toErrorList(result.errors);
     emitProgress(sessionId, {
       step: 'Analysis complete!',
       progress: 100,
       status: 'completed',
       techStack: result.techStack,
       generatedFiles: generatedFileNames,
-      messages,
-      errors
+      messages: toAgentMessages(result.messages),
+      errors: toErrorList(result.errors)
     });
-    
-    res.json({
-      success: true,
-      sessionId,
-      techStack: result.techStack,
-      codebaseAnalysis: result.codebaseAnalysis,
-      generatedFiles: generatedFileNames,
-      messages,
-      errors
-    });
-    
   } catch (error) {
-    console.error(`Analysis error: ${redactSecrets(error)}`);
-    await markFailed();
-    res.status(500).json({ error: 'Analysis failed' });
+    performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - startedAt, { outcome: 'failed', files: 0 });
+    await markAnalysisFailed(sessionId);
+    throw error;
   }
-});
+}
+
+async function markAnalysisFailed(sessionId) {
+  try {
+    await sessionStore.update(sessionId, { status: 'failed', error: ANALYSIS_FAILED_MESSAGE });
+  } catch {
+    console.error(`Could not mark the session failed: session=${sessionId}`);
+  }
+  emitProgress(sessionId, {
+    step: 'Analysis failed',
+    progress: 0,
+    status: 'failed',
+    error: ANALYSIS_FAILED_MESSAGE
+  });
+}
 
 // Get generated files endpoint
 app.get('/api/files/:sessionId', async (req, res) => {
@@ -1059,10 +1093,26 @@ app.get('/api/status/:sessionId', async (req, res) => {
   }
 });
 
-// Removes temp/<id> directories of deleted sessions and orphans (no session row, e.g.
-// left by a crash). Only directories directly under TEMP_DIR whose names are UUID v4
-// are considered; symlinks and anything else are never touched. A directory whose
-// session cannot be looked up (store unavailable) is kept.
+// Removes temp/<id> for one session: only a real directory (not a symlink) directly
+// under TEMP_DIR whose name is a UUID v4. Never throws.
+async function removeSessionDirectory(sessionId) {
+  if (!isUuidV4(sessionId)) return false;
+  const target = path.join(TEMP_DIR, sessionId);
+  try {
+    if (!(await fs.lstat(target)).isDirectory()) return false;
+    await fs.remove(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Removes temp/<id> directories that are no longer needed: deleted sessions, orphans (no
+// session row, e.g. left by a crash) and, since B2.1, finished sessions (completed or
+// failed), which nothing reads from disk. Only directories directly under TEMP_DIR whose
+// names are UUID v4 are considered; symlinks and anything else are never touched. A
+// directory whose session cannot be looked up (store unavailable) is kept.
+const FINISHED_STATUSES = new Set(['completed', 'failed']);
 async function removeSessionDirectories(deletedIds = []) {
   let entries;
   try {
@@ -1077,23 +1127,36 @@ async function removeSessionDirectories(deletedIds = []) {
     let remove = deleted.has(entry.name);
     if (!remove) {
       try {
-        remove = !(await sessionStore.get(entry.name));
+        const session = await sessionStore.get(entry.name);
+        remove = !session || FINISHED_STATUSES.has(session.status);
       } catch {
         continue;
       }
     }
-    if (remove) {
-      await fs.remove(path.join(TEMP_DIR, entry.name)).then(() => { removed++; }, () => {});
-    }
+    if (remove && await removeSessionDirectory(entry.name)) removed++;
   }
   return removed;
 }
 
+// B2.1: a session cloned but never analyzed within this time is failed and its clone removed
+const STALE_CLONED_MS = 60 * 60 * 1000;
+const STALE_CLONED_MESSAGE = 'The repository was cloned but analysis was not started within 1 hour. Please start again.';
+
+async function failStaleClonedSessions() {
+  const ids = await sessionStore.failStaleCloned(new Date(Date.now() - STALE_CLONED_MS), STALE_CLONED_MESSAGE);
+  for (const id of ids) {
+    await removeSessionDirectory(id);
+    emitProgress(id, { step: 'Analysis not started', progress: 0, status: 'failed', error: STALE_CLONED_MESSAGE });
+  }
+  return ids.length;
+}
+
 async function cleanupExpiredSessions() {
   performanceMonitor.cleanupSessions();
+  const staleCloned = await failStaleClonedSessions();
   const deletedIds = await sessionStore.deleteExpired(new Date());
   const removedDirectories = await removeSessionDirectories(deletedIds);
-  return { deletedSessions: deletedIds.length, removedDirectories };
+  return { staleCloned, deletedSessions: deletedIds.length, removedDirectories };
 }
 
 // Error handling middleware
@@ -1131,8 +1194,13 @@ process.on('uncaughtException', (error) => {
 // Shutdown sequence (B1.4), at most once: stop accepting connections, revoke the GitHub
 // tokens still parked in pending connect completions (at most 2 s), disconnect the
 // database, exit. A 3 s hard cap covers everything.
+// B2.1: at the same time as the revocations, the job runner stops accepting analyses,
+// drops queued ones and waits at most 1 s for running ones, without trying to finish
+// them. Their sessions stay "analyzing"; the next start marks them failed
+// (markInFlightFailed). In memory mode they are lost with the process.
 const SHUTDOWN_HARD_CAP_MS = 3000;
 const SHUTDOWN_REVOKE_CAP_MS = 2000;
+const SHUTDOWN_JOBS_CAP_MS = 1000;
 let shutdownStarted = false;
 
 async function shutdown(exitCode, reason) {
@@ -1142,6 +1210,7 @@ async function shutdown(exitCode, reason) {
   console.log(`🛑 Shutting down: ${reason}`);
 
   server.close(() => {});
+  const jobsDrained = analysisJobs.drain(SHUTDOWN_JOBS_CAP_MS);
 
   const tokens = pendingCompletions.drain()
     .map((entry) => entry.payload?.record?.accessToken)
@@ -1156,6 +1225,8 @@ async function shutdown(exitCode, reason) {
   }
   const revoked = outcomes.filter(Boolean).length;
   console.log(`🛑 Pending GitHub connect tokens: ${revoked} revoked, ${tokens.length - revoked} failed`);
+  const jobs = await jobsDrained;
+  console.log(`🛑 Analysis jobs: ${jobs.stillRunning} still running, ${jobs.dropped} queued dropped`);
 
   await disconnectDatabase?.().catch(() => {});
   process.exit(exitCode);
@@ -1196,7 +1267,8 @@ async function startServer() {
   }
 
   // B1.4: PORT, CLIENT_URL, GitHub OAuth App, TRUST_PROXY, CORS_ALLOWED_ORIGINS,
-  // RATE_LIMIT_*_MAX, GITHUB_TIMEOUT_MS, METRICS_TOKEN, TEST_FAULT_INJECTION
+  // RATE_LIMIT_*_MAX, GITHUB_TIMEOUT_MS, METRICS_TOKEN, TEST_FAULT_INJECTION;
+  // B2.1: ANALYSIS_CONCURRENCY, ANALYSIS_QUEUE_MAX
   problems.push(...describeServerConfigProblems(process.env));
 
   if (problems.length > 0) {
@@ -1214,12 +1286,13 @@ async function startServer() {
   console.log(`🌐 Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   console.log(`🌐 Trust proxy: ${TRUST_PROXY}`);
   console.log(`🚦 Rate limits: ${describeRateLimits(RATE_LIMITS)}`);
+  console.log(`🧵 Analysis jobs: ${ANALYSIS_LIMITS.concurrency} at once, ${ANALYSIS_LIMITS.queueMax} queued at most`);
 
   // Test-only fault injection (test/faultInjection.js); the configuration check above
   // refuses TEST_FAULT_INJECTION unless NODE_ENV=test
   if (process.env.TEST_FAULT_INJECTION) {
     const { installFaultInjection } = await import('./test/faultInjection.js');
-    installFaultInjection(process.env.TEST_FAULT_INJECTION);
+    testHooks = installFaultInjection(process.env.TEST_FAULT_INJECTION);
   }
 
   // 2. Connectivity, in the existing order: database connection, schema, store reachability
@@ -1278,10 +1351,11 @@ async function startServer() {
     const failed = await sessionStore.markInFlightFailed('The server restarted before this analysis finished. Please run it again.');
     console.log(`🧹 Interrupted sessions marked failed: ${failed}`);
 
-    // 4. Expired sessions, their temp directories and orphaned temp directories
+    // 4. Sessions cloned over 1 hour ago and never analyzed (failed), expired sessions,
+    // and the temp directories of finished, deleted and orphaned sessions
     await initializeTempDir();
     const cleaned = await cleanupExpiredSessions();
-    console.log(`🧹 Expired sessions removed: ${cleaned.deletedSessions}; temp directories removed: ${cleaned.removedDirectories}`);
+    console.log(`🧹 Stale cloned sessions failed: ${cleaned.staleCloned}; expired sessions removed: ${cleaned.deletedSessions}; temp directories removed: ${cleaned.removedDirectories}`);
   } catch (error) {
     if (!isSessionStoreDown(error)) throw error;
     console.error('❌ Database unreachable (DATABASE_URL)');

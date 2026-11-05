@@ -393,18 +393,37 @@ async function performDetailedAnalysis(repoPath, projectFiles) {
   return analysis;
 }
 
-// Simplified workflow implementation without langgraph
+// The four agents, in order, with the progress value each one reports when it finishes
+// (B2.1: the same 20/50/80/95 the agents set on state.progress when they start)
+const AGENT_SEQUENCE = [
+  { agent: 'planner', run: (state) => plannerAgent(state), progress: 20 },
+  { agent: 'analyzer', run: (state) => analyzerAgent(state), progress: 50 },
+  { agent: 'generator', run: (state) => generatorAgent(state), progress: 80 },
+  { agent: 'verifier', run: (state) => verifierAgent(state), progress: 95 }
+];
+
+// Simplified workflow implementation without langgraph. onAgentDone(report) is called
+// after each agent with { agent, progress, currentStep, messages, errors }: copies of
+// the state's arrays, never the state itself. A throwing callback stops the pipeline.
 export function createAgentWorkflow() {
   return {
-    async invoke(initialState) {
+    async invoke(initialState, { onAgentDone = null } = {}) {
       let state = initialState;
-      
+
       // Run agents in sequence
-      state = await plannerAgent(state);
-      state = await analyzerAgent(state);
-      state = await generatorAgent(state);
-      state = await verifierAgent(state);
-      
+      for (const { agent, run, progress } of AGENT_SEQUENCE) {
+        state = await run(state);
+        if (onAgentDone) {
+          await onAgentDone({
+            agent,
+            progress,
+            currentStep: state.currentStep,
+            messages: [...state.messages],
+            errors: [...state.errors]
+          });
+        }
+      }
+
       return state;
     }
   };
@@ -412,8 +431,10 @@ export function createAgentWorkflow() {
 
 // Main function to run the agent pipeline
 // repoName is the "owner/repo" label shown to the LLM; repoPath is only used locally;
-// meta ({ sessionId, userId }) reaches only the AI call records
-export async function runAgentPipeline(repoName, repoPath, progressCallback = null, meta = {}) {
+// onAgentDone (optional) gets a report after each of the four agents (B2.1; it replaces
+// the single callback that ran once after all four); meta ({ sessionId, userId })
+// reaches only the AI call records
+export async function runAgentPipeline(repoName, repoPath, onAgentDone = null, meta = {}) {
   console.log('🚀 Starting AI Agent Pipeline...');
   
   const workflow = createAgentWorkflow();
@@ -423,25 +444,13 @@ export async function runAgentPipeline(repoName, repoPath, progressCallback = nu
   initialState.meta = { sessionId: meta?.sessionId ?? null, userId: meta?.userId ?? null };
   
   try {
-    const result = await workflow.invoke(initialState);
-    
-    if (progressCallback) {
-      progressCallback({
-        step: result.currentStep,
-        progress: result.progress,
-        messages: result.messages,
-        techStack: result.techStack,
-        generatedFiles: result.generatedFiles,
-        errors: result.errors
-      });
-    }
-    
+    const result = await workflow.invoke(initialState, { onAgentDone });
     console.log('✅ AI Agent Pipeline completed successfully');
     return result;
   } catch (error) {
-    console.error('❌ AI Agent Pipeline failed:', error);
+    console.error(`❌ AI Agent Pipeline failed: ${redactSecrets(error)}`);
     throw error;
   }
 }
 
-export { AgentState, GENERATED_FILES, scanProjectStructure, analyzeTechStack }; 
+export { AgentState, AGENT_SEQUENCE, GENERATED_FILES, scanProjectStructure, analyzeTechStack };

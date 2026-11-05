@@ -57,6 +57,25 @@ export interface SessionFilesResponse {
   metadata?: { repoUrl: string; repoName: string; completedAt: string };
 }
 
+// 202 body of POST /api/analyze (server/server.js, B2.1): the analysis has started in the
+// background; its progress and result arrive as progress events and through
+// GET /api/status/:sessionId
+export interface AnalyzeStartedResponse {
+  success: true;
+  sessionId: string;
+  status: 'analyzing';
+}
+
+// Error bodies of the /api routes: a message, and a machine-readable code on some
+export interface ApiErrorBody {
+  error?: string;
+  code?: string;
+}
+
+// 503 from POST /api/analyze when every analysis slot and queue place is taken. The
+// session stays "cloned": the same session id can be retried without cloning again.
+export const ANALYSIS_BUSY = 'ANALYSIS_BUSY';
+
 // What a finished generation reports to the page that started it
 export interface GenerationResult {
   sessionId: string;

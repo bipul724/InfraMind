@@ -103,6 +103,8 @@ The server refuses to start when a required setting is missing or invalid, and l
 | `RATE_LIMIT_<NAME>_MAX` | optional | Count of one rate limit, 1-100,000 (see [API](#api)) |
 | `GITHUB_TIMEOUT_MS` | optional | Timeout of GitHub API calls, 1000-60000; default 10000 |
 | `METRICS_TOKEN` | optional | Enables `/api/metrics` and `/api/analytics`; 32+ characters, a shorter value is a startup error |
+| `ANALYSIS_CONCURRENCY` | optional | Analyses running at once in this server process, 1-8; default 2 |
+| `ANALYSIS_QUEUE_MAX` | optional | Analyses waiting for a slot, 0-100; default 20. When both are full, `POST /api/analyze` answers 503 `ANALYSIS_BUSY` |
 
 Every variable is listed with comments in `server/.env.example`. The client reads `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (`client/src/lib/api.ts`, `client/src/lib/supabase.ts`). Only the anon key belongs in the client: Vite bundles every `VITE_` variable into browser code.
 
@@ -115,7 +117,7 @@ Every route registered in `server/server.js`:
 | Method and path | Access | Purpose |
 |---|---|---|
 | `GET /health` | public | Liveness only: exactly `status: "ok"`, `timestamp`, `uptime`; queries no database or service |
-| `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions` |
+| `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions`, `analysisJobs` (`running`, `queued`) |
 | `GET /api/analytics` | same as `/api/metrics` | Clone and analysis timings and outcomes of the last hour (at most 1,000 sessions) |
 | `POST /api/github/connect` | Bearer | Issues a one-time ticket (2 minutes) to start a GitHub connection |
 | `GET /auth/github` | public, needs a valid `ticket`; `oauth` limit | Sets the OAuth state cookie and redirects to GitHub |
@@ -128,10 +130,10 @@ Every route registered in `server/server.js`:
 | `GET /api/github/organizations/:org/repositories` | Bearer and a GitHub connection; `githubProxy` limit | An organization's repositories |
 | `POST /api/github/verify-repo` | Bearer and a GitHub connection; `githubProxy` limit | Checks access to `owner`/`repo` |
 | `POST /api/clone-repo` | Bearer; `clone` limit | Creates a session and clones `repositoryData` (connected repository) or `repoUrl` |
-| `POST /api/analyze` | Bearer; `analysis` limit | Runs the agents on a `cloned` session; answers when they finish |
+| `POST /api/analyze` | Bearer; `analysis` limit | Starts the agents on a `cloned` session and answers 202 `{ success, sessionId, status: "analyzing" }` at once; they run in the background, with a progress event after each agent. 400 when the session is not `cloned` (or another request claimed it first); 503 `{ error, code: "ANALYSIS_BUSY" }` with `Retry-After: 30` when every analysis slot and queue place is taken, and the session stays `cloned` for a retry |
 | `GET /api/files/:sessionId` | Bearer, session owner | Generated files, tech stack, analysis, verification results |
 | `GET /api/files/:sessionId/:filename` | Bearer, session owner | One generated file as a download (`dockerfile`, `githubActions`, `envExample`) |
-| `GET /api/status/:sessionId` | Bearer, session owner | Status, timestamps and error of a session |
+| `GET /api/status/:sessionId` | Bearer, session owner | Status, timestamps and error of a session; the client polls it every 5 s while an analysis runs, in case progress events are missed |
 
 "Bearer" means `Authorization: Bearer <Supabase access token>`: `app.use('/api', requireUser(verifier))` is registered after `/api/metrics` and `/api/analytics` and before every other `/api` route. Without a valid token these answer 401 `AUTH_REQUIRED`, or 503 `AUTH_UNAVAILABLE` when Supabase cannot be reached (`server/utils/auth.js`). A session that does not exist or belongs to someone else answers 404 "Session not found".
 

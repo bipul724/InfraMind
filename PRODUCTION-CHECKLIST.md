@@ -23,7 +23,7 @@ The server exits at startup without these, listing every problem at once (`start
 - [ ] The default rate limits suit your traffic, or `RATE_LIMIT_<NAME>_MAX` is set ([README.md](README.md#api))
 - [ ] `METRICS_TOKEN` (32+ characters) if you want `/api/metrics` and `/api/analytics`; without it both answer 404, and a shorter value stops the server from starting (`server/utils/config.js`)
 - [ ] `GITHUB_TIMEOUT_MS` (default 10000) if GitHub calls need a different timeout (`server/github.js`)
-- [ ] Optional limits: `CLONE_TIMEOUT_MS` (default 120000), `MAX_REPO_SIZE_MB` (default 200) (`server/utils/git.js`); `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` (`server/ai/config.js`); `DATABASE_POOL_MAX` (`server/db/config.js`)
+- [ ] Optional limits: `CLONE_TIMEOUT_MS` (default 120000), `MAX_REPO_SIZE_MB` (default 200) (`server/utils/git.js`); `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` (`server/ai/config.js`); `DATABASE_POOL_MAX` (`server/db/config.js`); `ANALYSIS_CONCURRENCY` (default 2) and `ANALYSIS_QUEUE_MAX` (default 20) (`server/utils/config.js`)
 
 ## Client build
 
@@ -59,7 +59,8 @@ The server exits at startup without these, listing every problem at once (`start
 - [ ] A repository picked on `/select-repo` (Browse Repositories) clones and analyzes, including a private one
 - [ ] The generated files download, and "Save to Account" stores them in Saved Files
 - [ ] Each downloaded file starts with the file itself (no prose before it), and a completed run shows the verifier's text under "Review"
-- [ ] `/dashboard?session=<id>` (where `/select-repo` lands after an analysis, and the "View" button in Results from This Visit) shows a completed session's files; an unknown id shows "This analysis was not found or has expired"
+- [ ] `/dashboard?session=<id>` (where `/select-repo` lands as soon as an analysis has started, and the "View" button in Results from This Visit) shows the run live and then a completed session's files; an unknown id shows "This analysis was not found or has expired"
+- [ ] During a run the four step cards move one by one (Running, then Done); with the browser offline for a few seconds mid-run, the run still completes on screen within about 5 s of coming back (status polling)
 - [ ] A second account can see neither the first account's sessions (404 on `/api/status/:sessionId`) nor its saved files
 - [ ] After a backend restart, a completed session's files are still returned by `GET /api/files/:sessionId` (`SESSION_STORE=database`)
 - [ ] `server/logs/` and the `ai_call` lines contain no tokens or prompt text ([server/OBSERVABILITY.md](server/OBSERVABILITY.md))
@@ -69,7 +70,8 @@ The server exits at startup without these, listing every problem at once (`start
 Each item is a fact about the code today, for deciding what to fix before launch:
 
 - The **Projects** tab lists only results from the current page visit; nothing is stored (`client/src/pages/ModernDashboard.tsx`).
-- The agents report progress only after all four have run. Until then the step cards show one shared "In sequence" state; after the result event they show Done, Failed or Not run for each agent (`server/agents/index.js`, `client/src/components/AgentProgress.tsx`).
+- Analyses run in an in-process job runner (`server/utils/jobs.js`): one backend instance only, since the queue is not shared between processes. A restart or deploy ends every running and queued analysis; with `SESSION_STORE=database` the next start marks them `failed` with the restart message, and the user starts again. Running analyses cannot be cancelled.
+- The step after an agent's event is that agent's own step name (for example "Analyzing codebase structure" while the generator runs), because the event is sent when the agent finishes (`runAnalysisJob` in `server/server.js`).
 - Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
 - Rate-limit counters are kept in memory by each server process: a second instance counts separately, and a restart resets every count (`server/utils/security.js`).
 - `TRUST_PROXY` defaults to 0 and is not set in `render.yaml`: behind Render's proxy, every visitor shares one bucket for the per-IP limits until it is set (`server/utils/config.js`).
@@ -77,4 +79,4 @@ Each item is a fact about the code today, for deciding what to fix before launch
 - The generated workflow triggers on `main`, with a comment to change it: the analyzer does not know the repository's default branch (`server/agents/prompts.js`).
 - Java `spring` detection still uses a file-path substring; Python frameworks come from the dependency names (`server/agents/index.js` `analyzeTechStack`).
 - The verifier's review is AI text shown as advice; nothing checks it (`client/src/components/AgentProgress.tsx`).
-- A clone stays on the server's disk until its session expires, 24 hours after creation (`server/server.js`, `server/utils/sessionStore.js`).
+- A clone stays on the server's disk while its session is `cloned` (at most 1 hour, then the session fails and the clone is removed) or `analyzing`; it is removed when the analysis ends (`server/server.js`).

@@ -223,6 +223,8 @@ AI_PROVIDERS=...
 SESSION_STORE=database
 DATABASE_URL=...
 METRICS_TOKEN=...                      # optional, 32+ characters
+ANALYSIS_CONCURRENCY=2                 # optional, analyses at once (1-8)
+ANALYSIS_QUEUE_MAX=20                  # optional, analyses waiting (0-100)
 CORS_ALLOWED_ORIGINS=...               # optional, more frontend origins
 TRUST_PROXY=...                        # optional, after checking the client IP (below)
 ```
@@ -232,6 +234,8 @@ TRUST_PROXY=...                        # optional, after checking the client IP 
 With `TRUST_PROXY` unset, make a request to the backend and read its access-log line in Render's logs: `requestLogger` logs the `ip` of every request (`server/utils/security.js`). If it is a Render-internal address that does not change between your devices, try `TRUST_PROXY=1`, redeploy, and compare again with a second device or network: the logged `ip` should then be each device's public address (for example the one `curl https://ifconfig.me` shows). If it still is not, try 2, then 3. The value is a startup error outside 0-3, and `true` is never accepted.
 
 In production the server warns at startup when `GITHUB_TOKEN_STORE=memory` or `SESSION_STORE=memory`, because both lose their data on every restart (`server/server.js`).
+
+Analyses run in the background inside the server process (`server/utils/jobs.js`): `POST /api/analyze` answers 202 at once, so no request is held open for the minutes an analysis can take, and the browser follows progress through Socket.IO, with status polling as the backstop. Run **one** backend instance: the job queue is in memory and not shared. A deploy or restart ends the analyses that are running or queued; with `SESSION_STORE=database` the next start marks them `failed` ("The server restarted before this analysis finished. Please run it again."), and the user starts them again. Each running analysis holds a clone in `temp/`; it is deleted when the analysis ends, and an unanalyzed clone after 1 hour.
 
 ### Other frontend hosts
 
@@ -261,6 +265,7 @@ The client is a static build (`cd client && npm run build`, output `client/dist`
 | `RATE_LIMIT_<NAME>_MAX must be an integer from 1 to 100000` / `is not a known rate limit` | Fix the value or the variable name |
 | `GITHUB_TIMEOUT_MS must be an integer from 1000 to 60000` | Fix or unset it |
 | `METRICS_TOKEN must be at least 32 characters` | Use 32+ random characters, or leave it empty |
+| `ANALYSIS_CONCURRENCY must be an integer from 1 to 8` / `ANALYSIS_QUEUE_MAX must be an integer from 0 to 100` | Fix or unset it |
 | `Prisma client not generated: run npm run db:generate` | Run it in `server/` |
 | `Database unreachable (DATABASE_URL)` | Check the URL, network and TLS settings |
 | `Database schema missing: run npm run db:deploy` | Apply the migration |
@@ -277,6 +282,8 @@ The client is a static build (`cd client && npm run build`, output `client/dist`
 | 429 `RATE_LIMITED` for many users at once | Behind Render without `TRUST_PROXY`, every visitor shares one IP bucket; see [Checking the client IP](#checking-the-client-ip) |
 | 503 `GITHUB_RATE_LIMITED` | GitHub rate-limited this user's token; `Retry-After` says when to retry (`server/github.js`) |
 | 504 `GITHUB_UNAVAILABLE` | GitHub did not answer within `GITHUB_TIMEOUT_MS` (default 10 s) or could not be reached |
+| 503 `ANALYSIS_BUSY` on "Start AI Analysis" | `ANALYSIS_CONCURRENCY` analyses are running and `ANALYSIS_QUEUE_MAX` are waiting; `analysisJobs` in `/api/metrics` shows the counts. The cloned session can be retried (`server/server.js`) |
+| An analysis shows `failed` with "The server restarted before this analysis finished" | The backend restarted or redeployed while it ran or waited (`markInFlightFailed`) |
 | The browser gets no CORS headers, or the socket does not connect | The page's origin is not `CLIENT_URL`'s origin or in `CORS_ALLOWED_ORIGINS`; the startup line `🌐 Allowed origins:` shows the list |
 | Clone fails with 404 "Repository not found or access denied" | The repository is private and was entered as a URL without a token, or the GitHub connection cannot see it (`server/utils/git.js`, `server/server.js`) |
 | Saved files list is empty or an insert fails | The `saved_files` table or its policies are missing, or the user has no session |

@@ -49,6 +49,8 @@ describe('GET /api/metrics', () => {
     assert.equal(json.environment, 'test');
     assert.equal(typeof json.trackedSessions, 'number');
     assert.ok(!('activeSessions' in json));
+    // B2.1: the analysis job runner's counts
+    assert.deepEqual(json.analysisJobs, { running: 0, queued: 0 });
   });
 });
 

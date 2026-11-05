@@ -24,6 +24,7 @@ describe('per-agent results after a run with one failed generator call', { skip:
   const metricsToken = randomAlphanumeric(48);
   const liveEvents = [];
   let analyze;
+  let completedEvent;
 
   const subscribe = (token, id, onProgress) => new Promise((resolve, reject) => {
     const socket = connectClient(server.baseUrl, { auth: { token }, transports: ['websocket'], reconnection: false });
@@ -76,8 +77,14 @@ describe('per-agent results after a run with one failed generator call', { skip:
 
     const live = await subscribe(fakes.tokens.A, sessionId, (event) => liveEvents.push(event));
     analyze = await postJson(server.baseUrl, '/api/analyze', { sessionId }, authHeaders(fakes.tokens.A));
+    // B2.1: the run finishes in the background; wait for its completed event
+    const deadline = Date.now() + 20000;
+    while (!liveEvents.some((event) => event.status === 'completed') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await new Promise((resolve) => setTimeout(resolve, 300));
     live.close();
+    completedEvent = liveEvents.find((event) => event.status === 'completed');
   });
 
   after(async () => {
@@ -86,13 +93,24 @@ describe('per-agent results after a run with one failed generator call', { skip:
     await closeFakes();
   });
 
-  test('the analyze response carries sanitized messages and errors', () => {
-    assert.equal(analyze.status, 200, analyze.text);
-    assert.deepEqual(analyze.json.generatedFiles, ['githubActions', 'envExample']);
-    assert.deepEqual(analyze.json.errors, [DOCKERFILE_ERROR]);
-    assert.deepEqual(analyze.json.messages.map((m) => m.agent), ['planner', 'analyzer', 'generator', 'verifier']);
-    assert.equal(analyze.json.messages.find((m) => m.agent === 'generator').message, 'Generated 2 of 3 files');
-    for (const message of analyze.json.messages) assert.deepEqual(Object.keys(message).sort(), ['agent', 'message', 'timestamp']);
+  // B2.1: the analyze response only reports the start; the results that it carried
+  // before are asserted on the completed event (and the stored session) instead
+  test('the analyze response is 202; the completed event carries sanitized messages and errors', () => {
+    assert.equal(analyze.status, 202, analyze.text);
+    assert.deepEqual(analyze.json, { success: true, sessionId, status: 'analyzing' });
+    assert.ok(completedEvent, JSON.stringify(liveEvents.map((e) => e.status)));
+    assert.deepEqual(completedEvent.generatedFiles, ['githubActions', 'envExample']);
+    assert.deepEqual(completedEvent.errors, [DOCKERFILE_ERROR]);
+    assert.deepEqual(completedEvent.messages.map((m) => m.agent), ['planner', 'analyzer', 'generator', 'verifier']);
+    assert.equal(completedEvent.messages.find((m) => m.agent === 'generator').message, 'Generated 2 of 3 files');
+    for (const message of completedEvent.messages) assert.deepEqual(Object.keys(message).sort(), ['agent', 'message', 'timestamp']);
+  });
+
+  test('B2.1: the per-agent event after the generator already reports its error', () => {
+    const afterGenerator = liveEvents.find((event) => event.status === 'analyzing' && event.messages?.length === 3);
+    assert.ok(afterGenerator);
+    assert.deepEqual(afterGenerator.errors, [DOCKERFILE_ERROR]);
+    assert.equal(afterGenerator.messages[2].message, 'Generated 2 of 3 files');
   });
 
   test('GET /api/files returns the messages and errors of the stored session', async () => {
@@ -101,7 +119,7 @@ describe('per-agent results after a run with one failed generator call', { skip:
     const body = JSON.parse(files.text);
     assert.deepEqual(Object.keys(body.files), ['githubActions', 'envExample']);
     assert.deepEqual(body.errors, [DOCKERFILE_ERROR]);
-    assert.deepEqual(body.messages, analyze.json.messages);
+    assert.deepEqual(body.messages, completedEvent.messages);
   });
 
   test('B2.5: GET /api/files returns the review and only validated, raw files', async () => {
@@ -121,7 +139,6 @@ describe('per-agent results after a run with one failed generator call', { skip:
     const completed = liveEvents.filter((event) => event.status === 'completed');
     assert.equal(completed.length, 1, JSON.stringify(liveEvents.map((e) => e.status)));
     assert.deepEqual(completed[0].errors, [DOCKERFILE_ERROR]);
-    assert.deepEqual(completed[0].messages, analyze.json.messages);
     assert.deepEqual(completed[0].generatedFiles, ['githubActions', 'envExample']);
   });
 
@@ -133,7 +150,7 @@ describe('per-agent results after a run with one failed generator call', { skip:
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0].status, 'completed');
     assert.deepEqual(snapshots[0].errors, [DOCKERFILE_ERROR]);
-    assert.deepEqual(snapshots[0].messages, analyze.json.messages);
+    assert.deepEqual(snapshots[0].messages, completedEvent.messages);
   });
 
   test('a non-owner gets the same 404 as an unknown id', async () => {

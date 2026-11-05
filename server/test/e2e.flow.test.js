@@ -1,6 +1,8 @@
 // End-to-end: spawned server + fake Supabase + fake LLM + real clone of a public repo.
 // Runs only with RUN_NETWORK_TESTS=1 because the clone needs github.com. The database
 // variant (B2.0b) also needs TEST_DATABASE_URL (a throwaway local Postgres).
+// B2.1: the same flow also runs offline, with the fake `git` (test/fakeGit.js) in place
+// of the github.com clone, against both stores.
 
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,6 +10,7 @@ import { io as connectClient } from 'socket.io-client';
 import { authHeaders, closeFakes, getFakes, postJson, startServer } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
 import { DB_SKIP, createTestDatabase } from './db.js';
+import { createFakeGit } from './fakeGit.js';
 
 const RUN_NETWORK = process.env.RUN_NETWORK_TESTS === '1';
 
@@ -57,11 +60,12 @@ describe(label, { skip }, () => {
     // B tries to subscribe to A's session and is refused
     assert.deepEqual(await socketB.timeout(3000).emitWithAck('subscribe', { sessionId }), { ok: false, error: 'Session not found' });
 
-    // 2. A runs the analysis against the fake LLM
+    // 2. A starts the analysis against the fake LLM; B2.1: it runs in the background
     const analyze = await postJson(server.baseUrl, '/api/analyze', { sessionId }, authA);
-    assert.equal(analyze.status, 200, analyze.text);
+    assert.equal(analyze.status, 202, analyze.text);
+    assert.deepEqual(analyze.json, { success: true, sessionId, status: 'analyzing' });
 
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 20000;
     while (!eventsA.some((e) => e.status === 'completed') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -108,43 +112,56 @@ twoUserFlow('two users, one analysis', { skip: !RUN_NETWORK && 'set RUN_NETWORK_
 
 // B2.0b: the same flow persisted in Postgres
 let database;
+const checkDatabaseRows = async (sessionId) => {
+  const { createPrismaClient } = await import('../db/client.js');
+  const client = createPrismaClient({ DATABASE_URL: database.url });
+  try {
+    const session = await client.prisma.analysisSession.findUnique({ where: { id: sessionId }, include: { files: true } });
+    assert.equal(session.status, 'completed');
+    assert.equal(session.userId, USER_A.id);
+    assert.deepEqual(session.files.map((f) => f.kind).sort(), ['dockerfile', 'envExample', 'githubActions']);
+
+    // Call records are persisted shortly after each attempt
+    let calls = [];
+    for (let i = 0; i < 40; i++) {
+      calls = await client.prisma.aiCall.findMany({ where: { sessionId } });
+      if (['planner', 'generator', 'verifier'].every((task) => calls.some((c) => c.task === task && c.outcome === 'ok'))) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    for (const task of ['planner', 'generator', 'verifier']) {
+      assert.ok(calls.some((c) => c.task === task && c.outcome === 'ok' && c.userId === USER_A.id), `an ok ${task} call record`);
+    }
+    assert.equal(calls.filter((c) => c.task === 'generator').length, 3);
+
+    // No content leaked into the records: no text value longer than 100 characters
+    const all = await client.prisma.aiCall.findMany();
+    for (const row of all) {
+      for (const value of Object.values(row)) {
+        if (typeof value === 'string') assert.ok(value.length <= 100, 'a long text value in ai_calls');
+      }
+    }
+  } finally {
+    await client.close();
+    await database.drop();
+  }
+};
 twoUserFlow('two users, one analysis (SESSION_STORE=database)', {
   skip: (!RUN_NETWORK && 'set RUN_NETWORK_TESTS=1') || DB_SKIP,
   envOverrides: async () => {
     database = await createTestDatabase();
     return { SESSION_STORE: 'database', DATABASE_URL: database.url };
   },
-  afterFlow: async (sessionId) => {
-    const { createPrismaClient } = await import('../db/client.js');
-    const client = createPrismaClient({ DATABASE_URL: database.url });
-    try {
-      const session = await client.prisma.analysisSession.findUnique({ where: { id: sessionId }, include: { files: true } });
-      assert.equal(session.status, 'completed');
-      assert.equal(session.userId, USER_A.id);
-      assert.deepEqual(session.files.map((f) => f.kind).sort(), ['dockerfile', 'envExample', 'githubActions']);
+  afterFlow: checkDatabaseRows
+});
 
-      // Call records are persisted shortly after each attempt
-      let calls = [];
-      for (let i = 0; i < 40; i++) {
-        calls = await client.prisma.aiCall.findMany({ where: { sessionId } });
-        if (['planner', 'generator', 'verifier'].every((task) => calls.some((c) => c.task === task && c.outcome === 'ok'))) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      for (const task of ['planner', 'generator', 'verifier']) {
-        assert.ok(calls.some((c) => c.task === task && c.outcome === 'ok' && c.userId === USER_A.id), `an ok ${task} call record`);
-      }
-      assert.equal(calls.filter((c) => c.task === 'generator').length, 3);
-
-      // No content leaked into the records: no text value longer than 100 characters
-      const all = await client.prisma.aiCall.findMany();
-      for (const row of all) {
-        for (const value of Object.values(row)) {
-          if (typeof value === 'string') assert.ok(value.length <= 100, 'a long text value in ai_calls');
-        }
-      }
-    } finally {
-      await client.close();
-      await database.drop();
-    }
-  }
+// B2.1: offline, with the fake git
+const offlineGit = async () => ({ PATH: (await createFakeGit()).pathEnv });
+twoUserFlow('two users, one analysis (offline: fake git)', { skip: false, envOverrides: offlineGit });
+twoUserFlow('two users, one analysis (offline: fake git, SESSION_STORE=database)', {
+  skip: DB_SKIP,
+  envOverrides: async () => {
+    database = await createTestDatabase();
+    return { ...(await offlineGit()), SESSION_STORE: 'database', DATABASE_URL: database.url };
+  },
+  afterFlow: checkDatabaseRows
 });

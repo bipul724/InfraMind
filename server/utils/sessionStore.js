@@ -159,6 +159,17 @@ function createMemoryStore({ now }) {
       return true;
     },
 
+    // B2.1: cloned -> analyzing for the owner, as one synchronous check-and-set (no
+    // await between the check and the write), so concurrent claims cannot both win
+    async claimForAnalysis(id, userId) {
+      if (!isId(id) || !isId(userId)) return false;
+      const session = sessions.get(id);
+      if (!session || session.userId !== userId || session.status !== 'cloned') return false;
+      const at = new Date(now());
+      Object.assign(session, { status: 'analyzing', analysisStartedAt: at, updatedAt: at });
+      return true;
+    },
+
     async setLastProgress(id, payload) {
       if (!isId(id)) return false;
       const session = sessions.get(id);
@@ -205,6 +216,20 @@ function createMemoryStore({ now }) {
         }
       }
       return count;
+    },
+
+    // B2.1: sessions still "cloned" with clonedAt before `before` (never analyzed) become
+    // failed with `message`; returns their ids
+    async failStaleCloned(before, message) {
+      const cutoff = before.getTime();
+      const ids = [];
+      for (const session of sessions.values()) {
+        if (session.status === 'cloned' && session.clonedAt instanceof Date && session.clonedAt.getTime() < cutoff) {
+          Object.assign(session, { status: 'failed', error: String(message), updatedAt: new Date(now()) });
+          ids.push(session.id);
+        }
+      }
+      return ids;
     },
 
     async deleteExpired(at = new Date(now())) {
@@ -344,6 +369,18 @@ function createDatabaseStore({ prisma, jsonNull, now }) {
       return count > 0;
     },
 
+    // B2.1: one conditional UPDATE (id, owner and status in the WHERE clause), so
+    // concurrent claims cannot both win
+    async claimForAnalysis(id, userId) {
+      if (!isId(id) || !isId(userId)) return false;
+      const at = new Date(now());
+      const { count } = await guarded(() => prisma.analysisSession.updateMany({
+        where: { id, userId, status: 'cloned' },
+        data: { status: 'analyzing', analysisStartedAt: at, updatedAt: at }
+      }));
+      return count === 1;
+    },
+
     async setLastProgress(id, payload) {
       if (!isId(id)) return false;
       const { count } = await guarded(() => prisma.analysisSession.updateMany({
@@ -390,6 +427,17 @@ function createDatabaseStore({ prisma, jsonNull, now }) {
         data: { status: 'failed', error: String(message), updatedAt: new Date(now()) }
       }));
       return count;
+    },
+
+    // One UPDATE ... RETURNING: only the rows this statement changed are returned, so a
+    // session claimed for analysis in the meantime is neither failed nor reported
+    async failStaleCloned(before, message) {
+      const rows = await guarded(() => prisma.analysisSession.updateManyAndReturn({
+        where: { status: 'cloned', clonedAt: { lt: before } },
+        data: { status: 'failed', error: String(message), updatedAt: new Date(now()) },
+        select: { id: true }
+      }));
+      return rows.map((row) => row.id);
     },
 
     async deleteExpired(at = new Date(now())) {

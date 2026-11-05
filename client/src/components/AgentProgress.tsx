@@ -26,6 +26,8 @@ import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
 import { apiFetch } from '@/lib/apiClient';
 import { getAccessToken } from '@/lib/supabase';
+import { useSessionPoller } from '@/hooks/use-session-poller';
+import type { PollUpdate } from '@/hooks/use-session-poller';
 import type { AgentMessage, ProgressPayload, SessionFilesResponse, SessionStatus, TechStack } from '@/lib/session';
 
 interface AgentProgressProps {
@@ -34,7 +36,8 @@ interface AgentProgressProps {
   currentStep: string;
   progress: number;
   status: SessionStatus;
-  // undefined until the pipeline's result event (the only event that carries messages) arrives
+  // undefined until the first per-agent event (after the planner) arrives; then the
+  // messages of the agents that have finished so far
   messages?: AgentMessage[];
   errors?: string[];
   techStack?: TechStack | null;
@@ -42,6 +45,7 @@ interface AgentProgressProps {
   // The verifier's review: a string, null when the session has none, undefined when not
   // loaded yet (it is then fetched from GET /api/files/:sessionId once the run completes)
   verificationResults?: string | null;
+  // Progress events from the socket, and from the status poller when events are missed
   onProgressUpdate?: (data: ProgressPayload) => void;
 }
 
@@ -87,11 +91,13 @@ const WORKFLOW_STEPS = [
   }
 ];
 
-type StepState = 'waiting' | 'running' | 'done' | 'partial' | 'failed' | 'not-run' | 'unknown';
+type StepState = 'waiting' | 'in-sequence' | 'running' | 'done' | 'partial' | 'failed' | 'not-run' | 'unknown';
 
 const STEP_LABELS: Record<StepState, string> = {
   waiting: 'Waiting',
-  running: 'In sequence',
+  // Analyzing, before the first agent has reported: no per-agent claim yet
+  'in-sequence': 'In sequence',
+  running: 'Running',
   done: 'Done',
   partial: 'Partial',
   failed: 'Failed',
@@ -141,6 +147,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const [fetchedReview, setFetchedReview] = useState<{ sessionId: string; text: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // The session whose status polling gave up after 30 minutes
+  const [pollGaveUpFor, setPollGaveUpFor] = useState<string | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -191,6 +199,21 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     };
   }, [sessionId]);
 
+  // Backstop for missed socket events (B2.1): poll GET /api/status/:id while the session
+  // is in flight. On "completed" the poller loads GET /api/files once, so the review it
+  // carries is kept here and not fetched again.
+  useSessionPoller({
+    sessionId,
+    active: Boolean(sessionId) && (status === 'cloning' || status === 'analyzing'),
+    onUpdate: ({ payload, files }: PollUpdate) => {
+      if (files && sessionId) {
+        setFetchedReview({ sessionId, text: typeof files.verificationResults === 'string' ? files.verificationResults : null });
+      }
+      onProgressUpdateRef.current?.(payload);
+    },
+    onGiveUp: () => setPollGaveUpFor(sessionId ?? null)
+  });
+
   // The review is not in progress events: once the run has completed, load it from
   // GET /api/files/:sessionId unless the parent already passed it
   useEffect(() => {
@@ -222,21 +245,32 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         : null;
   const review = status === 'completed' && typeof reviewText === 'string' && reviewText.trim() !== '' ? reviewText : null;
 
-  // Driven only by what the server reports: no per-agent events exist, so before the
-  // result event the cards make no per-agent claim. An agent with both a message and an
-  // error (e.g. 2 of 3 files generated) is Partial; errors only is Failed.
+  // Driven only by what the server reports. The server sends an event as each agent
+  // finishes (B2.1), carrying the messages and errors so far. An agent with both a message
+  // and an error (e.g. 2 of 3 files generated) is Partial; an error only is Failed; a
+  // message only is Done. While analyzing, the first agent with neither is Running and
+  // the ones after it are Waiting; once the run has ended, an agent with neither did not
+  // run. Before the first agent's event, the cards make no per-agent claim.
   const hasAgentReport = Array.isArray(messages);
-  const getStepState = (step: typeof WORKFLOW_STEPS[number]): StepState => {
+  const reportOf = (step: typeof WORKFLOW_STEPS[number]) => ({
+    failed: errors.some((error) => error.startsWith(step.errorPrefix)),
+    finished: (messages ?? []).some((message) => message.agent === step.agent)
+  });
+  const firstPendingIndex = WORKFLOW_STEPS.findIndex((step) => {
+    const report = reportOf(step);
+    return !report.failed && !report.finished;
+  });
+  const getStepState = (step: typeof WORKFLOW_STEPS[number], index: number): StepState => {
     if (hasAgentReport) {
-      const failed = errors.some((error) => error.startsWith(step.errorPrefix));
-      const finished = messages.some((message) => message.agent === step.agent);
+      const { failed, finished } = reportOf(step);
       if (failed && finished) return 'partial';
       if (failed) return 'failed';
       if (finished) return 'done';
+      if (status === 'analyzing') return index === firstPendingIndex ? 'running' : 'waiting';
       return 'not-run';
     }
     if (status === 'cloning' || status === 'cloned') return 'waiting';
-    if (status === 'analyzing') return 'running';
+    if (status === 'analyzing') return 'in-sequence';
     if (status === 'completed') return 'unknown';
     return 'not-run';
   };
@@ -246,6 +280,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       case 'done':
         return <CheckCircle className="h-4 w-4 text-status-success" />;
       case 'running':
+      case 'in-sequence':
         return <Loader2 className="h-4 w-4 animate-spin text-status-running" />;
       case 'partial':
         return <AlertTriangle className="h-4 w-4 text-status-warning" />;
@@ -261,6 +296,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       case 'done':
         return 'border-status-success/25 bg-card';
       case 'running':
+      case 'in-sequence':
         return 'border-primary/30 bg-primary/[0.03]';
       case 'partial':
         return 'border-status-warning/30 bg-status-warning/[0.05]';
@@ -276,6 +312,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       case 'done':
         return 'border-status-success/30 bg-status-success/[0.06] text-status-success';
       case 'running':
+      case 'in-sequence':
         return 'border-primary/30 bg-primary/[0.06] text-primary';
       case 'partial':
         return 'border-status-warning/30 bg-status-warning/[0.06] text-status-warning';
@@ -397,7 +434,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             )}
           </CardTitle>
           <CardDescription>
-            Progress arrives at milestones: clone, analysis start, and once all four agents have finished
+            Progress arrives after the clone, when the analysis starts and as each of the four agents finishes
           </CardDescription>
         </div>
         <Button
@@ -427,14 +464,23 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {showSharedRunning && (
           <p className="text-sm leading-6 text-muted-foreground">
-            The four agents run one after another. The server reports their results together, once all four have finished.
+            The four agents run one after another. Each card updates when its agent finishes.
           </p>
+        )}
+
+        {pollGaveUpFor !== null && pollGaveUpFor === sessionId && (status === 'cloning' || status === 'analyzing') && (
+          <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
+            <AlertTriangle className="h-4 w-4 text-status-warning" />
+            <AlertDescription>
+              No update for this analysis after 30 minutes. Reload the page to check it again.
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Workflow Steps */}
         <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {WORKFLOW_STEPS.map((step, index) => {
-            const stepState = getStepState(step);
+            const stepState = getStepState(step, index);
             const Icon = step.icon;
 
             return (

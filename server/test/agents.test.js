@@ -215,6 +215,40 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
   });
 });
 
+describe('B2.1: onAgentDone after each agent', () => {
+  test('called four times, in order, with the agent\'s progress value and copies of the arrays', { timeout: 60000 }, async () => {
+    resetDefaultAiClient();
+    const reports = [];
+    let firstMessagesRef = null;
+    const result = await runAgentPipeline('octocat/Hello-World', fixtureDir, (report) => {
+      if (!firstMessagesRef) firstMessagesRef = report.messages;
+      reports.push(structuredClone(report));
+    });
+    assert.deepEqual(reports.map((r) => [r.agent, r.progress, r.messages.length]), [
+      ['planner', 20, 1], ['analyzer', 50, 2], ['generator', 80, 3], ['verifier', 95, 4]
+    ]);
+    assert.deepEqual(Object.keys(reports[0]).sort(), ['agent', 'currentStep', 'errors', 'messages', 'progress']);
+    assert.equal(reports[0].currentStep, 'Planning project analysis');
+    assert.equal(reports[3].currentStep, 'Complete');
+    assert.deepEqual(reports[3].messages, result.messages);
+    assert.notEqual(firstMessagesRef, result.messages, 'a copy, not the state\'s own array');
+    assert.equal(firstMessagesRef.length, 1, 'later agents do not change an earlier report');
+  });
+
+  test('a throwing callback stops the pipeline with that error', { timeout: 60000 }, async () => {
+    resetDefaultAiClient();
+    const seen = [];
+    await assert.rejects(
+      runAgentPipeline('octocat/Hello-World', fixtureDir, (report) => {
+        seen.push(report.agent);
+        if (report.agent === 'analyzer') throw new Error('callback failed');
+      }),
+      /callback failed/
+    );
+    assert.deepEqual(seen, ['planner', 'analyzer']);
+  });
+});
+
 describe('generator and verifier (SERVER-FIX)', () => {
   const run = async (predicate) => {
     resetDefaultAiClient();

@@ -129,7 +129,7 @@ describe('toFilesResponse', () => {
 });
 
 describe('toAgentMessages and toErrorList', () => {
-  test('are the sanitizers used for the files response, the final event and the analyze response', () => {
+  test('are the sanitizers used for the files response, the per-agent events and the final event', () => {
     assert.deepEqual(toAgentMessages(undefined), []);
     assert.deepEqual(toErrorList(undefined), []);
     assert.deepEqual(toAgentMessages([{ agent: 'a', message: 'b', timestamp: 'c', extra: 'MARKER_TOKEN' }]), [{ agent: 'a', message: 'b', timestamp: 'c' }]);
