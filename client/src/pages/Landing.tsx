@@ -78,7 +78,7 @@ export const Landing = () => {
     {
       icon: <Lock className="h-6 w-6" />,
       title: "GitHub Connection",
-      description: "Connect GitHub to list your repositories and analyze private ones you can access. The token stays on the server, encrypted, and disconnecting revokes it.",
+      description: "Connect GitHub to list your repositories and analyze private ones you can access. The token stays on the server, encrypted; Disconnect GitHub in the account menu asks GitHub to revoke it and deletes it.",
       tech: "GitHub OAuth · AES-256-GCM",
       highlight: "PRIVATE REPOS"
     },

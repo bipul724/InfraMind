@@ -131,14 +131,14 @@ export const SavedFiles: React.FC = () => {
           <CardDescription>Files you've saved to your account</CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={fetchSavedFiles} disabled={loading} className="shrink-0">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </CardHeader>
       <CardContent>
         {error && (
           <div className="mb-4 flex items-start gap-2.5 rounded-md border border-status-error/30 bg-status-error/[0.05] px-4 py-3 text-sm text-status-error">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
@@ -146,7 +146,7 @@ export const SavedFiles: React.FC = () => {
         {files.length === 0 && !loading ? (
           <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
-               <FilePlus className="h-6 w-6 text-muted-foreground" />
+               <FilePlus aria-hidden="true" className="h-6 w-6 text-muted-foreground" />
              </div>
              <p className="font-medium text-foreground">No saved files found</p>
              <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-muted-foreground">
@@ -174,7 +174,7 @@ export const SavedFiles: React.FC = () => {
               >
                 <div className="flex min-w-0 items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60">
-                    <FileCode className="h-5 w-5 text-muted-foreground" />
+                    <FileCode aria-hidden="true" className="h-5 w-5 text-muted-foreground" />
                   </div>
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -197,23 +197,23 @@ export const SavedFiles: React.FC = () => {
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-9 w-9"
+                    className="h-10 w-10"
                     onClick={() => handleDownload(file)}
                     title="Download"
+                    aria-label={`Download ${file.name}`}
                   >
-                    <Download className="h-4 w-4" />
-                    <span className="sr-only">Download</span>
+                    <Download className="h-4 w-4" aria-hidden="true" />
                   </Button>
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-9 w-9 hover:border-destructive/30 hover:bg-destructive/[0.06] hover:text-destructive"
+                    className="h-10 w-10 hover:border-destructive/30 hover:bg-destructive/[0.06] hover:text-destructive"
                     onClick={() => handleDelete(file)}
                     disabled={deletingId === file.id}
                     title="Delete"
+                    aria-label={`Delete ${file.name}`}
                   >
-                    {deletingId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    <span className="sr-only">Delete</span>
+                    {deletingId === file.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
                   </Button>
                 </div>
               </li>

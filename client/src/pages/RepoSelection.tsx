@@ -164,7 +164,7 @@ export const RepoSelection = () => {
           <Card className="min-w-0">
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
-                <Github className="h-5 w-5" />
+                <Github aria-hidden="true" className="h-5 w-5" />
                 Select Repository
               </CardTitle>
               <CardDescription>
@@ -173,20 +173,22 @@ export const RepoSelection = () => {
             </CardHeader>
             <CardContent>
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="browse">
-                    <Users className="h-4 w-4" />
-                    <span className="truncate">Browse Repositories</span>
+                {/* Labels wrap at phone width rather than being cut off */}
+                <TabsList className="grid h-auto w-full grid-cols-2">
+                  <TabsTrigger value="browse" className="h-auto whitespace-normal py-2 text-center leading-tight">
+                    <Users className="h-4 w-4" aria-hidden="true" />
+                    <span>Browse Repositories</span>
                   </TabsTrigger>
-                  <TabsTrigger value="manual">
-                    <Link className="h-4 w-4" />
-                    <span className="truncate">Manual URL</span>
+                  <TabsTrigger value="manual" className="h-auto whitespace-normal py-2 text-center leading-tight">
+                    <Link className="h-4 w-4" aria-hidden="true" />
+                    <span>Manual URL</span>
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="browse" className="mt-6">
                   <RepositorySelector
                     onRepositorySelect={handleRepositorySelect}
+                    selectedFullName={selectedRepository?.fullName ?? null}
                     isConnected={isConnected}
                     onConnect={connectGitHub}
                   />
@@ -194,7 +196,7 @@ export const RepoSelection = () => {
                     <div className="mt-4 flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/[0.05] p-4 sm:flex-row sm:items-center sm:justify-between">
                       <h4 className="text-sm font-medium text-primary">Selected Repository:</h4>
                       <div className="flex min-w-0 items-center gap-2">
-                        <Github className="h-4 w-4 shrink-0" />
+                        <Github aria-hidden="true" className="h-4 w-4 shrink-0" />
                         <span className="truncate font-mono text-sm">{selectedRepository.fullName}</span>
                         {selectedRepository.private && (
                            <span className="shrink-0 rounded-full border border-status-warning/30 bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">Private</span>
@@ -241,7 +243,7 @@ export const RepoSelection = () => {
                   ) : (
                     <>
                       Start AI Analysis
-                      <ArrowRight className="h-4 w-4" />
+                      <ArrowRight aria-hidden="true" className="h-4 w-4" />
                     </>
                   )}
                 </Button>
@@ -253,12 +255,13 @@ export const RepoSelection = () => {
             {/* GitHub Connection Notice */}
             <div className="rounded-lg border border-primary/20 bg-primary/[0.05] p-5">
               <div className="flex items-start gap-3">
-                 <Globe className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                 <Globe aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <div>
                    <h3 className="text-sm font-semibold text-primary">Repository Access</h3>
                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Browse Repositories uses your connected GitHub account, so private repositories you can
-                    access work there. Manual URL sends no GitHub credentials and works for public repositories only.
+                    Browse Repositories lists the repositories of the account you link with Connect GitHub,
+                    including private ones you can access. Manual URL sends no GitHub credentials and works for
+                    public repositories only.
                   </p>
                 </div>
               </div>

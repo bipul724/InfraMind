@@ -57,11 +57,12 @@ const LoginRedirect: React.FC = () => {
   return <Navigate to={{ pathname: '/auth', search }} replace />;
 };
 
-// One error boundary for every page, keyed by the path: moving to another page clears a
-// caught error. Pages may add their own (ModernDashboard does).
+// One error boundary for every page. Moving to another page clears a caught error
+// (resetKey); without an error, navigation remounts nothing. Pages may add their own
+// (ModernDashboard does).
 const RoutesWithBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { pathname } = useLocation();
-  return <ErrorBoundary key={pathname}>{children}</ErrorBoundary>;
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
 };
 
 function App() {
@@ -106,7 +107,7 @@ function App() {
             <Route path="/dashboard" element={<ModernDashboard />} />
             <Route path="/select-repo" element={<RepoSelection />} />
             
-            {/* Redirect /profile to /dashboard for now */}
+            {/* /profile: an alias of /dashboard kept for old bookmarks; nothing links to it */}
             <Route path="/profile" element={<Navigate to="/dashboard" replace />} />
           </Route>
 

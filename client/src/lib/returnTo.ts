@@ -1,8 +1,9 @@
 // Where to go after signing in. ProtectedRoute sends a signed-out user to
 // /auth?returnTo=<path + search>; the value comes back from the address bar, so anyone can
 // write it. Only a path on this site is used: anything that could leave the site
-// (//host, /\host, a scheme, encoded slashes or control characters) or lead back to a
-// sign-in page falls back to the dashboard. No imports, so `node --test` loads it directly.
+// (//host, /\host, a scheme, encoded slashes or control characters), lead back to a
+// sign-in page, or hold a "." or ".." segment falls back to the dashboard. No imports, so
+// `node --test` loads it directly.
 
 export const DEFAULT_RETURN_TO = '/dashboard';
 const MAX_LENGTH = 2048;
@@ -12,8 +13,13 @@ const SIGN_IN_PATHS = /^\/(?:auth|sign-in|sign-up|login)(?:[/?#]|$)/i;
 // eslint-disable-next-line no-control-regex
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f\\]/;
 
+// A "." or ".." path segment: browsers resolve them, so /dashboard/../auth is /auth
+const DOT_SEGMENT = /(?:^|\/)\.{1,2}(?:\/|$)/;
+const pathPart = (value: string): string => value.split(/[?#]/)[0];
+
 const isSafePath = (path: string): boolean =>
   path.startsWith('/') &&
+  !DOT_SEGMENT.test(pathPart(path)) &&
   !path.startsWith('//') &&
   !UNSAFE_CHARS.test(path) &&
   !path.toLowerCase().startsWith('/auth') &&

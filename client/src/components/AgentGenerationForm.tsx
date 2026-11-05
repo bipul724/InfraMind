@@ -241,7 +241,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
         <CardHeader className="border-b border-border pb-5">
           <div className="flex items-start gap-4">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-primary/15 bg-primary/[0.07]">
-              <Bot className="h-5 w-5 text-primary" />
+              <Bot aria-hidden="true" className="h-5 w-5 text-primary" />
             </div>
             <div className="min-w-0 space-y-1.5">
               <CardTitle className="flex flex-wrap items-center gap-2">
@@ -268,7 +268,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
               <div className="space-y-6">
                 <div className="space-y-2">
                   <Label htmlFor="repo-url" className="flex items-center gap-2">
-                    <GitBranch className="h-4 w-4 text-muted-foreground" />
+                    <GitBranch aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
                     <span>GitHub Repository URL</span>
                   </Label>
                   <div className="relative">
@@ -288,21 +288,21 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                       }`}
                     />
                     {isValidUrl && (
-                      <CheckCircle className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-success" />
+                      <CheckCircle aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-success" />
                     )}
                     {urlError && (
-                      <AlertCircle className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-error" />
+                      <AlertCircle aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-status-error" />
                     )}
                   </div>
                   {urlError && (
                     <Alert variant="destructive" className="mt-2">
-                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTriangle aria-hidden="true" className="h-4 w-4" />
                       <AlertDescription>{urlError}</AlertDescription>
                     </Alert>
                   )}
                   {isValidUrl && (
                     <Alert className="mt-2 border-status-success/25 bg-status-success/[0.06]">
-                       <CheckCircle className="h-4 w-4 text-status-success" />
+                       <CheckCircle aria-hidden="true" className="h-4 w-4 text-status-success" />
                        <AlertDescription className="text-status-success">
                         The URL has the format of a GitHub repository
                       </AlertDescription>
@@ -311,7 +311,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 </div>
 
                 <Alert className="bg-card">
-                  <Info className="h-4 w-4 text-muted-foreground" />
+                  <Info aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
                   <AlertDescription className="text-sm text-muted-foreground">
                     A typed URL is cloned without GitHub credentials, so it works for public repositories.
                     For a private repository, connect GitHub and choose it on the Repositories page linked in the header.
@@ -321,7 +321,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card">
-                      <Zap className="h-5 w-5 text-primary" />
+                      <Zap aria-hidden="true" className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-sm font-semibold">Three Agents</h3>
@@ -333,7 +333,7 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
 
                   <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 p-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card">
-                      <Github className="h-5 w-5 text-primary" />
+                      <Github aria-hidden="true" className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-sm font-semibold">Three Files</h3>
@@ -353,12 +353,12 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                   >
                     {isRunning ? (
                       <>
-                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
                         Running Analysis...
                       </>
                     ) : (
                       <>
-                        <Play className="h-5 w-5" />
+                        <Play aria-hidden="true" className="h-5 w-5" />
                         Start AI Analysis
                       </>
                     )}
@@ -376,11 +376,11 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
             <TabsContent value="progress" className="mt-6 space-y-4">
               {busyMessage && sessionId && status === 'cloned' && (
                 <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
-                  <AlertTriangle className="h-4 w-4 text-status-warning" />
+                  <AlertTriangle aria-hidden="true" className="h-4 w-4 text-status-warning" />
                   <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <span>{busyMessage} The repository is already cloned, so retrying starts the analysis without cloning it again.</span>
                     <Button size="sm" variant="outline" onClick={handleRetryAnalysis} disabled={isStarting} className="w-fit shrink-0">
-                      {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {isStarting ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
                       Retry Analysis
                     </Button>
                   </AlertDescription>

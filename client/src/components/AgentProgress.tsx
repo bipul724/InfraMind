@@ -302,16 +302,16 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const getStatusIcon = (stepState: StepState) => {
     switch (stepState) {
       case 'done':
-        return <CheckCircle className="h-4 w-4 text-status-success" />;
+        return <CheckCircle aria-hidden="true" className="h-4 w-4 text-status-success" />;
       case 'running':
       case 'in-sequence':
-        return <Loader2 className="h-4 w-4 animate-spin text-status-running" />;
+        return <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin text-status-running" />;
       case 'partial':
-        return <AlertTriangle className="h-4 w-4 text-status-warning" />;
+        return <AlertTriangle aria-hidden="true" className="h-4 w-4 text-status-warning" />;
       case 'failed':
-        return <AlertCircle className="h-4 w-4 text-status-error" />;
+        return <AlertCircle aria-hidden="true" className="h-4 w-4 text-status-error" />;
       default:
-        return <Clock className="h-4 w-4 text-muted-foreground" />;
+        return <Clock aria-hidden="true" className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
@@ -409,7 +409,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1.5">
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-            <Bot className="h-5 w-5 text-primary" />
+            <Bot aria-hidden="true" className="h-5 w-5 text-primary" />
             <span>AI DevOps Agent Pipeline</span>
             {sessionId && (
               <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">
@@ -454,7 +454,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {pollGaveUpFor !== null && pollGaveUpFor === sessionId && (status === 'cloning' || status === 'analyzing') && (
           <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
-            <AlertTriangle className="h-4 w-4 text-status-warning" />
+            <AlertTriangle aria-hidden="true" className="h-4 w-4 text-status-warning" />
             <AlertDescription>
               No update for this analysis after 30 minutes. Reload the page to check it again.
             </AlertDescription>
@@ -463,7 +463,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {goneFor !== null && goneFor.id === sessionId && (
           <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle aria-hidden="true" className="h-4 w-4" />
             <AlertDescription>
               {goneFor.reason === 'not-found'
                 ? 'This analysis no longer exists. It may have expired or been deleted.'
@@ -494,7 +494,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 shrink-0 text-foreground/70" />
+                    <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-foreground/70" />
                     <h3 className="truncate text-sm font-semibold">{step.title}</h3>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -524,7 +524,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {/* No files: the run completed, but the generator produced nothing */}
         {noFilesGenerated && (
           <Alert className="border-status-warning/30 bg-status-warning/[0.07]">
-            <AlertTriangle className="h-4 w-4 text-status-warning" />
+            <AlertTriangle aria-hidden="true" className="h-4 w-4 text-status-warning" />
             <AlertDescription className="space-y-1">
               <p className="font-medium text-status-warning">No files were generated</p>
               {errors.map((error, index) => (
@@ -540,7 +540,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {!noFilesGenerated && errors.length > 0 && (
           <div className="rounded-md border border-status-error/30 bg-status-error/[0.05] p-4">
             <div className="mb-2 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-status-error" />
+              <AlertCircle aria-hidden="true" className="h-4 w-4 text-status-error" />
               <h3 className="text-sm font-semibold text-status-error">Errors Detected</h3>
             </div>
             <div className="space-y-1 pl-6">
@@ -557,7 +557,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {showDetails && displayMessages.length > 0 && (
           <div className="space-y-3">
             <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <Bot className="h-4 w-4 text-muted-foreground" />
+              <Bot aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
               <span>Agent Activity Log</span>
             </h3>
             <ScrollArea className="code-surface scrollbar-slim h-56 w-full rounded-md border border-border">
@@ -615,7 +615,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {generatedFiles.length > 0 && (
           <div className="min-w-0 space-y-3 rounded-md border border-status-success/25 bg-status-success/[0.05] p-4">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-status-success">
-              <CheckCircle className="h-4 w-4" />
+              <CheckCircle aria-hidden="true" className="h-4 w-4" />
               <span>Generated Files</span>
             </h3>
             {resultFiles ? (
@@ -629,7 +629,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                       variant="outline"
                       className="gap-1.5 rounded-md bg-card py-1.5 font-mono text-[11px] font-normal"
                     >
-                      <FileCode className="h-3.5 w-3.5 text-status-success" />
+                      <FileCode aria-hidden="true" className="h-3.5 w-3.5 text-status-success" />
                       {FILE_META[file]?.downloadName || file}
                     </Badge>
                   ))}
@@ -638,14 +638,14 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
                   <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-status-error">The file contents could not be loaded.</span>
                     <Button size="sm" variant="outline" onClick={() => setResultErrorFor(null)} className="w-fit">
-                      <RefreshCw className="h-4 w-4" />
+                      <RefreshCw aria-hidden="true" className="h-4 w-4" />
                       Try Again
                     </Button>
                   </div>
                 )}
                 {status === 'completed' && !resultFailed && (
                   <p className="flex items-center gap-2 text-xs text-muted-foreground" aria-busy="true">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
                     Loading file contents...
                   </p>
                 )}
@@ -658,7 +658,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         {review !== null && (
           <div className="min-w-0 space-y-3">
             <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+              <ClipboardCheck aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
               <span>Review</span>
             </h3>
             <p className="text-xs leading-5 text-muted-foreground">
@@ -690,7 +690,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
           {status === 'completed' && !noFilesGenerated && (
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={handleSaveFiles} disabled={saving || saved || !resultFiles}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                {saving ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle aria-hidden="true" className="h-4 w-4" /> : <Save aria-hidden="true" className="h-4 w-4" />}
                 {saving ? 'Saving...' : saved ? 'Saved' : 'Save to Account'}
               </Button>
             </div>

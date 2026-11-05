@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Github,
   GitBranch,
@@ -13,7 +12,6 @@ import {
   CheckCircle,
   AlertCircle,
   ExternalLink,
-  LogOut,
   Activity,
   Plus,
   FileText,
@@ -84,8 +82,8 @@ const STATUS_START: Record<SessionStatus, { step: string; progress: number }> = 
 };
 
 export const ModernDashboard = () => {
-  const { user, logout } = useAuth();
-  const { user: githubUser, isConnected, isLoading, connectGitHub } = useGitHub();
+  const { user } = useAuth();
+  const { isConnected, isLoading, connectGitHub } = useGitHub();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -104,9 +102,7 @@ export const ModernDashboard = () => {
   const startingRef = useRef(false);
   const [startNotice, setStartNotice] = useState<{ kind: 'busy' | 'error'; message: string } | null>(null);
 
-  // GitHub connection status - use context values
-  const githubUsername = githubUser?.login;
-
+  // The repository connection (GitHubContext), for the empty-state card
   useEffect(() => {
     setGithubConnected(isConnected);
   }, [isConnected]);
@@ -277,20 +273,11 @@ export const ModernDashboard = () => {
     }
   };
 
-  const handleGitHubConnect = async () => {
+  const handleConnectGitHub = async () => {
     try {
       connectGitHub();
     } catch (error) {
       console.error('GitHub connection failed:', error);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate('/auth');
-    } catch (error) {
-      console.error('Logout failed:', error);
     }
   };
 
@@ -325,7 +312,7 @@ export const ModernDashboard = () => {
             </p>
           </div>
           <Button onClick={clearSessionParam} className="shrink-0">
-            <Plus className="h-4 w-4" />
+            <Plus aria-hidden="true" className="h-4 w-4" />
             Start a New Generation
           </Button>
         </CardContent>
@@ -334,7 +321,7 @@ export const ModernDashboard = () => {
       {view.phase === 'loading' && (
         <Card>
           <CardContent className="flex items-center gap-3 p-6 text-sm text-muted-foreground" aria-busy="true">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
             Loading analysis...
           </CardContent>
         </Card>
@@ -342,11 +329,11 @@ export const ModernDashboard = () => {
 
       {view.phase === 'error' && (
         <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+          <AlertCircle aria-hidden="true" className="h-4 w-4" />
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>This analysis could not be loaded.</span>
             <Button size="sm" variant="outline" onClick={() => setReloadKey((key) => key + 1)} className="w-fit">
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw aria-hidden="true" className="h-4 w-4" />
               Try Again
             </Button>
           </AlertDescription>
@@ -355,7 +342,7 @@ export const ModernDashboard = () => {
 
       {view.phase === 'ready' && view.status === 'failed' && (
         <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+          <AlertCircle aria-hidden="true" className="h-4 w-4" />
           <AlertDescription>
             <p className="font-medium">This analysis failed</p>
             <p className="mt-1 break-words">{view.error || 'No error message was stored for this session.'}</p>
@@ -369,18 +356,18 @@ export const ModernDashboard = () => {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">This repository is cloned. Its analysis has not started yet.</p>
               <Button onClick={() => void handleStartCloned(view.id)} disabled={starting} className="shrink-0">
-                {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {starting ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Play aria-hidden="true" className="h-4 w-4" />}
                 Start analysis
               </Button>
             </div>
             {startNotice && (
               <Alert variant={startNotice.kind === 'error' ? 'destructive' : 'default'}>
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle aria-hidden="true" className="h-4 w-4" />
                 <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <span>{startNotice.message}</span>
                   {startNotice.kind === 'busy' && (
                     <Button size="sm" variant="outline" onClick={() => void handleStartCloned(view.id)} disabled={starting} className="w-fit shrink-0">
-                      <RefreshCw className="h-4 w-4" />
+                      <RefreshCw aria-hidden="true" className="h-4 w-4" />
                       Retry
                     </Button>
                   )}
@@ -417,8 +404,8 @@ export const ModernDashboard = () => {
     <ErrorBoundary>
       <div className="text-foreground">
         <div className="space-y-8">
-          {/* Page header: welcome, GitHub status and account actions */}
-          <header className="flex flex-col gap-5 border-b border-border pb-8 md:flex-row md:items-end md:justify-between">
+          {/* Welcome. The GitHub status and account actions are in the layout's header. */}
+          <div className="flex flex-col gap-5 border-b border-border pb-8 md:flex-row md:items-end md:justify-between">
             <div className="min-w-0">
               <p className="eyebrow">AI-Powered DevOps</p>
               <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-[2rem] sm:leading-tight">
@@ -428,47 +415,21 @@ export const ModernDashboard = () => {
                 Generate a Dockerfile, a GitHub Actions workflow and a .env.example for a GitHub repository
               </p>
             </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {githubConnected && githubUsername && (
-                <div className="flex items-center gap-2 rounded-full border border-status-success/30 bg-status-success/[0.06] px-3 py-1.5">
-                  <Github className="h-4 w-4 text-status-success" />
-                  <span className="font-mono text-xs font-medium text-status-success">@{githubUsername}</span>
-                </div>
-              )}
-
-              <div className="flex items-center gap-1 rounded-full border border-border bg-card p-1 shadow-soft">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={user?.prefs?.avatarUrl} />
-                  <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                </Avatar>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleLogout}
-                  className="h-8 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                  aria-label="Sign out"
-                  title="Sign out"
-                >
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </header>
+          </div>
 
           {/* Main Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-flex sm:h-11 sm:w-auto">
               <TabsTrigger value="generate" className="h-9 sm:h-full">
-                <Zap className="h-4 w-4" />
+                <Zap aria-hidden="true" className="h-4 w-4" />
                 <span>Generate</span>
               </TabsTrigger>
               <TabsTrigger value="projects" className="h-9 sm:h-full">
-                <Activity className="h-4 w-4" />
+                <Activity aria-hidden="true" className="h-4 w-4" />
                 <span>Projects</span>
               </TabsTrigger>
               <TabsTrigger value="saved" className="h-9 sm:h-full">
-                <FileText className="h-4 w-4" />
+                <FileText aria-hidden="true" className="h-4 w-4" />
                 <span>Saved Files</span>
               </TabsTrigger>
             </TabsList>
@@ -477,17 +438,20 @@ export const ModernDashboard = () => {
                 keeps its socket and poller, and its completion still reaches Projects */}
             <TabsContent value="generate" forceMount className="mt-0 space-y-4 data-[state=inactive]:hidden">
               <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-primary" />
+                <Zap aria-hidden="true" className="h-4 w-4 text-primary" />
                 <h3 className="text-sm font-semibold tracking-tight">AI Agent Generation</h3>
               </div>
-              {sessionView ? (
-                renderSessionView(sessionView)
-              ) : !useManualUrl ? (
+              {sessionView && renderSessionView(sessionView)}
+              {/* The form stays mounted (hidden) while a result is open, so a run started
+                  in it keeps its socket and poller and still reaches Projects;
+                  "Start a New Generation" shows it again as it was */}
+              <div hidden={sessionView !== null}>
+              {!useManualUrl ? (
                 <Card>
                   <CardContent className="px-5 py-12 sm:px-6 sm:py-14">
                     <div className="mx-auto max-w-md space-y-6 text-center">
                       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-muted">
-                        <Github className="h-7 w-7 text-foreground" />
+                        <Github aria-hidden="true" className="h-7 w-7 text-foreground" />
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold">
@@ -502,15 +466,15 @@ export const ModernDashboard = () => {
                       <div className="flex flex-col justify-center gap-3 sm:flex-row">
                         {githubConnected ? (
                           <Button onClick={() => navigate('/select-repo')}>
-                            <GitBranch className="h-4 w-4" />
+                            <GitBranch aria-hidden="true" className="h-4 w-4" />
                             Choose from Your Repositories
                           </Button>
                         ) : (
                           <Button
-                            onClick={handleGitHubConnect}
+                            onClick={handleConnectGitHub}
                             disabled={isLoading}
                           >
-                            <Github className="h-4 w-4" />
+                            <Github aria-hidden="true" className="h-4 w-4" />
                             {isLoading ? 'Connecting...' : 'Connect GitHub'}
                           </Button>
                         )}
@@ -530,6 +494,7 @@ export const ModernDashboard = () => {
                   onError={(error) => console.error('Generation failed:', error)}
                 />
               )}
+              </div>
             </TabsContent>
 
             {/* Projects Tab */}
@@ -537,7 +502,7 @@ export const ModernDashboard = () => {
               <Card>
                 <CardHeader className="pb-4">
                   <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-primary" />
+                    <Activity aria-hidden="true" className="h-5 w-5 text-primary" />
                     <span>Results from This Visit</span>
                   </CardTitle>
                 </CardHeader>
@@ -545,7 +510,7 @@ export const ModernDashboard = () => {
                   {projects.length === 0 ? (
                     <div className="mx-auto max-w-md rounded-lg border border-dashed border-border px-6 py-10 text-center">
                       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
-                        <Code className="h-6 w-6 text-muted-foreground" />
+                        <Code aria-hidden="true" className="h-6 w-6 text-muted-foreground" />
                       </div>
                        <h3 className="text-base font-semibold">No Results Yet</h3>
                        <p className="mt-2 text-sm text-muted-foreground">
@@ -555,7 +520,7 @@ export const ModernDashboard = () => {
                         onClick={() => setActiveTab('generate')}
                         className="mt-5"
                       >
-                        <Plus className="h-4 w-4" />
+                        <Plus aria-hidden="true" className="h-4 w-4" />
                         Start a Generation
                       </Button>
                     </div>
@@ -566,7 +531,7 @@ export const ModernDashboard = () => {
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex min-w-0 items-center gap-3">
                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
-                                 <Code className="h-5 w-5 text-primary" />
+                                 <Code aria-hidden="true" className="h-5 w-5 text-primary" />
                               </div>
                               <div className="min-w-0">
                                  <h3 className="truncate font-semibold">{project.name}</h3>
@@ -578,7 +543,7 @@ export const ModernDashboard = () => {
                                 variant="outline"
                                 className="border-status-success/30 bg-status-success/[0.06] capitalize text-status-success"
                               >
-                                <CheckCircle className="h-3 w-3" />
+                                <CheckCircle aria-hidden="true" className="h-3 w-3" />
                                 {project.status}
                               </Badge>
                               <Button
@@ -588,7 +553,7 @@ export const ModernDashboard = () => {
                                 onClick={() => openSession(project.id)}
                                 aria-label={`View the result for ${project.name}`}
                               >
-                                <ExternalLink className="h-3 w-3" />
+                                <ExternalLink aria-hidden="true" className="h-3 w-3" />
                                 View
                               </Button>
                             </div>

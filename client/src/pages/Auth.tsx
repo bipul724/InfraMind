@@ -188,7 +188,7 @@ export const Auth = () => {
         <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-soft">
-              <Terminal className="h-4 w-4" />
+              <Terminal aria-hidden="true" className="h-4 w-4" />
             </div>
             <div className="flex flex-col leading-tight">
               <span className="text-base font-semibold tracking-tight">
@@ -204,7 +204,7 @@ export const Auth = () => {
             onClick={() => navigate('/')}
             className="text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft aria-hidden="true" className="h-4 w-4" />
             <span>Back to Home</span>
           </Button>
         </div>
@@ -240,7 +240,7 @@ export const Auth = () => {
                 {/* Error Alert */}
                 {error && (
                   <Alert variant="destructive" className="mt-4 animate-slideDown">
-                    <AlertCircle className="h-4 w-4" />
+                    <AlertCircle aria-hidden="true" className="h-4 w-4" />
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
@@ -251,7 +251,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signin-email">Email</Label>
                       <div className="relative">
-                        <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Mail aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-email"
                           type="email"
@@ -266,7 +266,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signin-password">Password</Label>
                       <div className="relative">
-                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signin-password"
                           type={showPassword ? "text" : "password"}
@@ -284,9 +284,9 @@ export const Auth = () => {
                           aria-label={showPassword ? 'Hide password' : 'Show password'}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4" />
+                            <EyeOff aria-hidden="true" className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4" />
+                            <Eye aria-hidden="true" className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -300,7 +300,7 @@ export const Auth = () => {
                     >
                       {loading ? (
                         <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
                           Signing in...
                         </>
                       ) : (
@@ -324,7 +324,7 @@ export const Auth = () => {
                         onClick={() => handleOAuthLogin('github')}
                         disabled={loading}
                       >
-                        <Github className="h-4 w-4" />
+                        <Github aria-hidden="true" className="h-4 w-4" />
                         GitHub
                       </Button>
                       <Button 
@@ -363,7 +363,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-name">Full Name</Label>
                       <div className="relative">
-                        <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <User aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-name"
                           type="text"
@@ -378,7 +378,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-email">Email</Label>
                       <div className="relative">
-                        <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Mail aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-email"
                           type="email"
@@ -393,7 +393,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-password">Password</Label>
                       <div className="relative">
-                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-password"
                           type={showPassword ? "text" : "password"}
@@ -411,9 +411,9 @@ export const Auth = () => {
                           aria-label={showPassword ? 'Hide password' : 'Show password'}
                         >
                           {showPassword ? (
-                            <EyeOff className="h-4 w-4" />
+                            <EyeOff aria-hidden="true" className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4" />
+                            <Eye aria-hidden="true" className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -422,7 +422,7 @@ export const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="signup-confirm-password">Confirm Password</Label>
                       <div className="relative">
-                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Lock aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="signup-confirm-password"
                           type={showConfirmPassword ? "text" : "password"}
@@ -437,12 +437,12 @@ export const Auth = () => {
                           size="sm"
                           className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                          aria-label={showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'}
                         >
                           {showConfirmPassword ? (
-                            <EyeOff className="h-4 w-4" />
+                            <EyeOff aria-hidden="true" className="h-4 w-4" />
                           ) : (
-                            <Eye className="h-4 w-4" />
+                            <Eye aria-hidden="true" className="h-4 w-4" />
                           )}
                         </Button>
                       </div>
@@ -456,7 +456,7 @@ export const Auth = () => {
                     >
                       {loading ? (
                         <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
                           Creating account...
                         </>
                       ) : (
@@ -480,7 +480,7 @@ export const Auth = () => {
                         onClick={() => handleOAuthLogin('github')}
                         disabled={loading}
                       >
-                        <Github className="h-4 w-4" />
+                        <Github aria-hidden="true" className="h-4 w-4" />
                         GitHub
                       </Button>
                       <Button 
@@ -517,7 +517,7 @@ export const Auth = () => {
 
             <CardFooter className="flex flex-col items-center justify-center rounded-b-lg border-t border-border bg-muted/40 px-6 py-4 sm:py-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Shield className="h-4 w-4" />
+                <Shield aria-hidden="true" className="h-4 w-4" />
                 <span>Authentication by</span>
                 <a 
                   href="https://supabase.com" 

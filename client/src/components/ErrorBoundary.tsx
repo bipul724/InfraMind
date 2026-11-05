@@ -6,6 +6,10 @@ import { AlertTriangle, RefreshCw, Copy, Home } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
+  // When this changes while an error is shown (the app passes the path), the error is
+  // cleared, so moving to another page leaves the error screen. While nothing failed, a
+  // change does nothing: the pages below are not remounted.
+  resetKey?: string;
 }
 
 interface State {
@@ -26,6 +30,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { error, errorId: newErrorId(), copy: 'idle' };
+  }
+
+  // Only an error that was already showing before this update is cleared: an error thrown
+  // by the page being navigated to stays on screen
+  componentDidUpdate(previousProps: Props, previousState: State) {
+    if (this.state.error && previousState.error && previousProps.resetKey !== this.props.resetKey) this.handleRetry();
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
@@ -63,14 +73,14 @@ export class ErrorBoundary extends Component<Props, State> {
           <CardHeader>
             <CardTitle className="flex items-center gap-3 text-destructive">
               <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-destructive/25 bg-destructive/[0.06]">
-                <AlertTriangle className="h-5 w-5" />
+                <AlertTriangle aria-hidden="true" className="h-5 w-5" />
               </span>
               <span>Something went wrong</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle aria-hidden="true" className="h-4 w-4" />
               <AlertDescription>
                 <div className="space-y-2">
                   <p className="font-medium">This page hit an unexpected error. Try again, or go back to the home page.</p>
@@ -106,16 +116,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <Button onClick={this.handleRetry} className="flex-1">
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw aria-hidden="true" className="h-4 w-4" />
                 Try Again
               </Button>
               <Button variant="outline" onClick={() => void this.handleCopy()} className="flex-1">
-                <Copy className="h-4 w-4" />
+                <Copy aria-hidden="true" className="h-4 w-4" />
                 Copy error details
               </Button>
               {/* A full page load: nothing of the failed page is kept */}
               <a href="/" className={buttonVariants({ variant: 'outline' })}>
-                <Home className="h-4 w-4" />
+                <Home aria-hidden="true" className="h-4 w-4" />
                 Go to Home
               </a>
             </div>

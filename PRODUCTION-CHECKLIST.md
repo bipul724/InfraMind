@@ -55,7 +55,9 @@ The server exits at startup without these, listing every problem at once (`start
 
 - [ ] `GET /health` returns 200 with `{ status: "ok", timestamp, uptime }` (liveness only: it checks no database or provider)
 - [ ] Sign up and sign in work with each enabled provider
-- [ ] Connect GitHub completes on `/auth/success` and the dashboard shows the GitHub login
+- [ ] Connect GitHub completes on `/auth/success`, and the header then shows `@<your GitHub login>` (the repository connection), not the account you signed in with
+- [ ] Disconnect GitHub (account menu) with a real connection: after confirming, the header shows Connect GitHub, Browse Repositories asks to connect again, and the OAuth App's authorization is gone on GitHub (Settings → Applications)
+- [ ] A phone-width pass on a real device: the dashboard tabs, a completed result, Repositories and Saved Files fit the screen with no sideways scrolling, and the account menu shows the GitHub status
 - [ ] Cancel a Google sign-in on Google's consent screen: the app lands on `/auth` with "Sign-in was cancelled or not allowed by the provider." and no error text from the provider in the address bar or on the page
 - [ ] Signed out, open a `/dashboard?session=<id>` link of your own analysis, then sign in with email: the app opens that analysis, not the plain dashboard
 - [ ] Signed in, open `/auth` (and `/sign-in`, `/login`): the app goes straight to the dashboard without showing the sign-in form

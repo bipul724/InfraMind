@@ -52,6 +52,15 @@ From `src/App.tsx`:
 | `/select-repo` | `RepoSelection` | signed in |
 | `/auth/github/callback` | `GitHubCallback` (forwards to the server) | public |
 | `/login` | redirect to `/auth`, keeping the query string | public |
-| `/profile` | redirect to `/dashboard` | signed in |
+| `/profile` | redirect to `/dashboard` (an alias for old bookmarks; nothing links to it) | signed in |
+
+Signed-in page components:
+
+- `components/layouts/DashboardLayout.tsx`: the one header of the signed-in pages. Its GitHub status is the repository connection from `contexts/GitHubContext.tsx` (Connect GitHub, or `@login`); the account menu shows how the user signed in, Connect or Disconnect GitHub, and Sign out
+- `pages/ModernDashboard.tsx`: the Generate, Projects and Saved Files tabs, and `?session=<id>`
+- `components/AgentGenerationForm.tsx`, `components/AgentProgress.tsx`, `components/GeneratedFilesView.tsx`: a run, its progress and its files
+- `components/dashboard/SavedFiles.tsx`: files saved to the account
+- `pages/RepoSelection.tsx` and `components/RepositorySelector.tsx`: Browse Repositories and Manual URL
+- `components/ErrorBoundary.tsx`: the error screen around every page
 
 Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.

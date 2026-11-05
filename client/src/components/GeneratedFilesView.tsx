@@ -55,9 +55,7 @@ export const GeneratedFilesView: React.FC<GeneratedFilesViewProps> = ({ files, s
 
   const handleDownload = (key: string, name: string) => {
     try {
-      // octet-stream: with text/plain, Chrome appends ".txt" to a name without an
-      // extension (Dockerfile -> Dockerfile.txt)
-      downloadTextFile(name, files[key], 'application/octet-stream');
+      downloadTextFile(name, files[key]);
     } catch (error) {
       console.warn(`Download of ${name} failed (session ${sessionId ?? 'unknown'}):`, error);
       toast({ title: 'Download failed', description: `${name} could not be downloaded.`, variant: 'destructive' });
@@ -86,11 +84,11 @@ export const GeneratedFilesView: React.FC<GeneratedFilesViewProps> = ({ files, s
               </p>
               <div className="flex shrink-0 gap-2">
                 <Button size="sm" variant="outline" onClick={() => handleCopy(kind.key, kind.name)} aria-label={`Copy ${kind.name}`}>
-                  {copiedKey === kind.key ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  {copiedKey === kind.key ? <Check aria-hidden="true" className="h-4 w-4" /> : <Copy aria-hidden="true" className="h-4 w-4" />}
                   {copiedKey === kind.key ? 'Copied' : 'Copy'}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => handleDownload(kind.key, kind.name)} aria-label={`Download ${kind.name}`}>
-                  <Download className="h-4 w-4" />
+                  <Download aria-hidden="true" className="h-4 w-4" />
                   Download
                 </Button>
               </div>

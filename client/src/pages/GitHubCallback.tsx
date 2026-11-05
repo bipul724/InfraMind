@@ -58,7 +58,7 @@ export const GitHubCallback = () => {
       <Card className="w-full max-w-md shadow-raised">
         <CardHeader className="items-center pb-4 text-center">
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
-            <Github className="h-6 w-6" />
+            <Github aria-hidden="true" className="h-6 w-6" />
           </div>
           <CardTitle className="flex items-center gap-2">
             <span>GitHub Connection</span>
@@ -67,7 +67,7 @@ export const GitHubCallback = () => {
         <CardContent className="space-y-4">
           {status === 'loading' && (
             <div className="space-y-4 py-4 text-center" aria-busy="true">
-              <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+              <Loader2 aria-hidden="true" className="mx-auto h-8 w-8 animate-spin text-primary" />
               <p className="text-sm text-muted-foreground">{message}</p>
             </div>
           )}
@@ -75,7 +75,7 @@ export const GitHubCallback = () => {
           {status === 'error' && (
             <div className="space-y-4">
               <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
+                <AlertTriangle aria-hidden="true" className="h-4 w-4" />
                 <AlertDescription>
                   {message}
                 </AlertDescription>

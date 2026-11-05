@@ -35,6 +35,19 @@ const CASES: [unknown, string][] = [
   ['dashboard', D],
   ['', D],
   [`/${'a'.repeat(2048)}`, D],
+  // Rejected: dot segments, raw or encoded
+  ['/./x', D],
+  ['/.//evil.example', D],
+  ['/dashboard/../auth', D],
+  ['/%2e%2e/auth', D],
+  ['/%2E%2E/dashboard', D],
+  ['/dashboard/.', D],
+  ['/dashboard/..', D],
+  ['/dashboard/%2e?x=1', D],
+  // Kept: dots that are not whole segments, and dots in the query
+  ['/dashboard.json', '/dashboard.json'],
+  ['/a.b/c', '/a.b/c'],
+  ['/dashboard?next=../x', '/dashboard?next=../x'],
   // Rejected: a sign-in page
   ['/auth', D],
   ['/auth?returnTo=/auth', D],

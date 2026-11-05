@@ -138,7 +138,7 @@ const AuthSuccess: React.FC = () => {
       <Card className="w-full max-w-md shadow-raised">
         <CardHeader className="items-center pb-4 text-center">
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-muted">
-            <Github className="h-6 w-6" />
+            <Github aria-hidden="true" className="h-6 w-6" />
           </div>
           <CardTitle className="flex items-center justify-center gap-2">
             GitHub Connection
@@ -154,7 +154,7 @@ const AuthSuccess: React.FC = () => {
 
           {status === 'success' && (
               <Alert className="border-status-success/25 bg-status-success/[0.06]">
-              <CheckCircle className="h-4 w-4 text-status-success" />
+              <CheckCircle aria-hidden="true" className="h-4 w-4 text-status-success" />
               <AlertDescription className="text-status-success">
                 <strong>Success!</strong> Your GitHub account has been connected.
                 Redirecting to dashboard...
@@ -164,7 +164,7 @@ const AuthSuccess: React.FC = () => {
 
           {status === 'error' && (
             <Alert variant="destructive">
-              <XCircle className="h-4 w-4" />
+              <XCircle aria-hidden="true" className="h-4 w-4" />
               <AlertDescription>
                 <strong>Authentication Failed</strong><br />
                 {error}

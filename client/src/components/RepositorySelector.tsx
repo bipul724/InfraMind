@@ -63,6 +63,8 @@ const isGitHubPage = (url: string | undefined): url is string =>
 
 interface RepositorySelectorProps {
   onRepositorySelect: (repository: Repository) => void;
+  // The repository picked so far, shown as pressed on its card
+  selectedFullName?: string | null;
   isConnected: boolean;
   onConnect: () => void;
 }
@@ -74,6 +76,7 @@ const PERSONAL_REPOS_VALUE = '__personal__';
 
 export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   onRepositorySelect,
+  selectedFullName = null,
   isConnected,
   onConnect
 }) => {
@@ -171,7 +174,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/40 px-5 py-8 text-center sm:px-8">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-soft">
-          <Github className="h-6 w-6" />
+          <Github aria-hidden="true" className="h-6 w-6" />
         </div>
         <h3 className="mt-4 text-base font-semibold">
           Connect GitHub Account
@@ -185,7 +188,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
             className="w-full sm:w-auto"
             size="lg"
           >
-            <Github className="h-5 w-5" />
+            <Github aria-hidden="true" className="h-5 w-5" />
             Connect GitHub Account
           </Button>
         </div>
@@ -207,7 +210,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
             <p className="truncate font-mono text-xs text-muted-foreground">@{user.login}</p>
           </div>
           <Badge variant="outline" className="gap-1 border-status-success/30 bg-status-success/[0.06] text-status-success">
-            <Github className="h-3 w-3" />
+            <Github aria-hidden="true" className="h-3 w-3" />
             Connected
           </Badge>
         </div>
@@ -222,7 +225,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
             <div className="flex-1">
               <Label htmlFor="search" className="sr-only">Search repositories</Label>
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="search"
                   placeholder="Search repositories..."
@@ -246,14 +249,14 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                   <SelectContent>
                     <SelectItem value={PERSONAL_REPOS_VALUE}>
                       <div className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
+                        <User aria-hidden="true" className="h-4 w-4" />
                         All repositories
                       </div>
                     </SelectItem>
                     {organizations.map((org) => (
                       <SelectItem key={org.id} value={org.login}>
                         <div className="flex items-center gap-2">
-                          <Building className="h-4 w-4" />
+                          <Building aria-hidden="true" className="h-4 w-4" />
                           {org.login}
                         </div>
                       </SelectItem>
@@ -272,7 +275,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                 <span>{error.message}</span>
                 {error.code && GITHUB_RECONNECT_CODES.has(error.code) && (
                   <Button size="sm" variant="outline" onClick={onConnect} className="w-fit shrink-0">
-                    <Github className="h-4 w-4" />
+                    <Github aria-hidden="true" className="h-4 w-4" />
                     Reconnect GitHub
                   </Button>
                 )}
@@ -298,7 +301,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
             <div className="space-y-2">
               {filteredRepositories.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border px-4 py-12 text-center">
-                  <Github className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
+                  <Github aria-hidden="true" className="mx-auto mb-3 h-8 w-8 text-muted-foreground/60" />
                   <p className="text-sm text-muted-foreground">
                     {searchTerm ? 'No repositories match your search.' : 'No repositories found.'}
                   </p>
@@ -309,21 +312,30 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                   {filteredRepositories.map((repo) => (
                     <div
                       key={repo.id}
-                      className="cursor-pointer rounded-md border border-border bg-card p-4 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/40"
-                      onClick={() => onRepositorySelect(repo)}
+                      className="relative rounded-md border border-border bg-card p-4 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/40"
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      {/* The whole card selects the repository: one button stretched over it,
+                          so it is reachable by keyboard and named; the card's content stays
+                          outside the button */}
+                      <button
+                        type="button"
+                        className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        onClick={() => onRepositorySelect(repo)}
+                        aria-label={`Select ${repo.fullName}`}
+                        aria-pressed={selectedFullName === repo.fullName}
+                      />
+                      <div className="pointer-events-none flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
                             <h4 className="min-w-0 max-w-full truncate font-mono text-sm font-medium">{repo.name}</h4>
                             {repo.private ? (
                               <Badge variant="secondary" className="gap-1 border-status-warning/30 bg-status-warning/10 text-status-warning">
-                                <Lock className="h-3 w-3" />
+                                <Lock aria-hidden="true" className="h-3 w-3" />
                                 Private
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="gap-1 text-muted-foreground">
-                                <Globe className="h-3 w-3" />
+                                <Globe aria-hidden="true" className="h-3 w-3" />
                                 Public
                               </Badge>
                             )}
@@ -338,15 +350,15 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                           )}
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
-                              <Star className="h-3 w-3" />
+                              <Star aria-hidden="true" className="h-3 w-3" />
                               {repo.stargazersCount}
                             </span>
                             <span className="flex items-center gap-1">
-                              <GitBranch className="h-3 w-3" />
+                              <GitBranch aria-hidden="true" className="h-3 w-3" />
                               {repo.forksCount}
                             </span>
                             <span className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
+                              <Calendar aria-hidden="true" className="h-3 w-3" />
                               Updated {formatDate(repo.updatedAt)}
                             </span>
                           </div>
@@ -355,7 +367,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                            className="pointer-events-auto relative h-10 w-10 shrink-0 p-0 text-muted-foreground"
                             onClick={(event) => {
                               event.stopPropagation();
                               window.open(repo.htmlUrl, '_blank', 'noopener,noreferrer');
@@ -363,7 +375,7 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
                             aria-label={`Open ${repo.fullName} on GitHub`}
                             title="Open on GitHub"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <ExternalLink aria-hidden="true" className="h-4 w-4" />
                           </Button>
                         )}
                       </div>

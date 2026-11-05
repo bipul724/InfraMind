@@ -17,7 +17,8 @@ interface GitHubContextType {
   isLoading: boolean;
   error: string | null;
   connectGitHub: () => Promise<void>;
-  disconnect: () => Promise<void>;
+  // true when the connection is gone
+  disconnect: () => Promise<boolean>;
   refresh: () => Promise<void>;
 }
 
@@ -104,14 +105,15 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
   }, []);
 
   // GitHub state follows the Supabase user: reset on sign-out, re-read on sign-in or user switch
+  const authUserId = authUser?.id ?? null;
   useEffect(() => {
     if (authLoading) return;
-    if (!authUser) {
+    if (!authUserId) {
       resetState();
       return;
     }
     refresh();
-  }, [authLoading, authUser?.id, refresh, resetState]);
+  }, [authLoading, authUserId, refresh, resetState]);
 
   // Ask the server for a one-time ticket, then navigate (not fetch) so the server's
   // OAuth state cookie is set first-party before it redirects to GitHub
@@ -129,17 +131,20 @@ export const GitHubProvider: React.FC<GitHubProviderProps> = ({ children }) => {
     }
   }, []);
 
-  // The server revokes the grant at GitHub and deletes the stored token
-  const disconnect = useCallback(async () => {
+  // DELETE /api/github/connection: the server asks GitHub to revoke the token (best effort)
+  // and deletes the stored connection. Resolves true when the connection is gone.
+  const disconnect = useCallback(async (): Promise<boolean> => {
     setError(null);
     try {
       const response = await apiFetch('/api/github/connection', { method: 'DELETE' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       resetState();
+      return true;
     } catch {
       console.error('GitHub disconnect failed');
       await refresh();
       setError(DISCONNECT_ERROR_MESSAGE);
+      return false;
     }
   }, [refresh, resetState]);
 
