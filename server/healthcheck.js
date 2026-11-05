@@ -1,10 +1,9 @@
 import http from 'http';
 import { resolvePort } from './utils/port.js';
 
-/**
- * Health check script for Docker containers
- * Tests if the application is responding correctly
- */
+// A probe for a container HEALTHCHECK (e.g. `HEALTHCHECK CMD node healthcheck.js`): requests
+// the real server's GET /health on localhost and exits 0 on a 200, 1 otherwise. Render does
+// not use it: render.yaml sets healthCheckPath: /health instead.
 
 const options = {
   hostname: 'localhost',

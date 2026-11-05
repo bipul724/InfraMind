@@ -399,15 +399,8 @@ The full variable list with comments is in `server/.env.example`.
 
 ## 9. Code that is not part of the running system
 
-`npm start` runs `node server.js`. These files are not loaded by it:
+`npm start` runs `node server.js`. Every other `.js` file in `server/` is loaded by it, by `npm test`, or by a script in `server/package.json` (`scripts/ai-smoke.js`, `scripts/assert-local-db.js`); `healthcheck.js` is a probe for a container `HEALTHCHECK` (Render uses `healthCheckPath: /health` instead).
 
-| File | What it is | How it runs |
-|---|---|---|
-| `server/index.js` | The legacy `devPilotAI` generator, which calls Tavily, Mem0 and Keywords AI | Imported only by `server/test.js` (`npm run test:legacy`) |
-| `server/minimal.js` | A mock server with a mock `POST /api/devpilot` and unauthenticated GitHub routes | `npm run start:minimal` and `npm run debug` |
-| `server/test-render.js` | An HTTP server that answers every request with a fixed JSON message | `npm run test:render` |
-| `server/start.js` | Prints environment details, test-imports modules, then imports `server.js` | `npm run start:debug` |
-
-`server.js` registers no `/api/devpilot` route. Tavily, Mem0 and Keywords AI are not part of the analysis pipeline.
+**Removed (B4.2):** `server/index.js` (an older template generator), `server/minimal.js` (a mock server), `server/start.js`, `server/test.js`, `server/test-system.js` and `server/test-render.js`, with their npm scripts, the `node-fetch` dependency and the three API-key variables only the first one read. `server.js` registers no `/api/devpilot` route.
 
 On the client, the files that no route in `client/src/App.tsx` reached were removed: `pages/EnhancedDashboard.tsx`; the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard`, `TechStackSelector` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`; the `ui` files `dialog`, `form`, `separator`, `textarea`, `tooltip` and `use-toast`; `hooks/use-mobile.tsx` and `integrations/core.ts`. `lib/api.ts`'s `DevPilotAPI`, `ProjectsAPI`, `AnalyticsAPI` and `GitHubAPI` classes went with them. Nothing on the server changed: removing the server code that only those files called is a separate task.

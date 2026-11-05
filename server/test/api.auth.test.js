@@ -6,6 +6,8 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import jwt from 'jsonwebtoken';
 import {
   allCapturedLogs,
@@ -17,6 +19,7 @@ import {
   randomAlphanumeric,
   randomSecret,
   runServerExpectingExit,
+  SERVER_DIR,
   startServer
 } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
@@ -66,8 +69,13 @@ const PROTECTED_ROUTES = [
   ['POST', '/api/github/verify-repo', { owner: 'octocat', repo: 'Hello-World' }],
   ['GET', '/api/github/status'],
   ['POST', '/api/github/connect'],
+  ['POST', '/api/github/connect/complete', {}],
   ['DELETE', '/api/github/connection']
 ];
+
+// The /api routes registered before requireUser: token-protected operator endpoints (404
+// without METRICS_TOKEN, tested below), not open to signed-in users or anyone else
+const PRE_AUTH_API_ROUTES = [['GET', '/api/metrics'], ['GET', '/api/analytics']];
 
 describe('anonymous and invalid-token access', () => {
   let server;
@@ -88,7 +96,47 @@ describe('anonymous and invalid-token access', () => {
       assert.equal(response.json?.code, 'AUTH_REQUIRED');
       assert.equal(fakes.supabase.callCount, before, 'garbage tokens are rejected locally');
     });
+
+    // B4.2 (T-403): a real Supabase-issued token past its exp is refused locally
+    test(`${method} ${route.replace(SAMPLE_ID, '<uuid>')} with an expired token is 401 without calling Supabase`, async () => {
+      const expired = fakes.supabase.issueToken(USER_A, { expiresInSeconds: -60 });
+      secretsThatMustNotBeLogged.push(expired);
+      const before = fakes.supabase.callCount;
+      const response = await request(server.baseUrl, method, route, { body, headers: { Authorization: `Bearer ${expired}` } });
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.json, { error: 'Authentication required', code: 'AUTH_REQUIRED' });
+      assert.equal(fakes.supabase.callCount, before, 'an expired token is rejected locally');
+    });
+
+    // B4.2 (T-403): well-formed, unexpired, right issuer, but Supabase does not know it
+    test(`${method} ${route.replace(SAMPLE_ID, '<uuid>')} with a token Supabase rejects is 401`, async () => {
+      const unknown = jwt.sign({ sub: USER_A.id, iss: `${fakes.supabase.url}/auth/v1`, nonce: crypto.randomUUID() }, randomSecret(), { expiresIn: 3600 });
+      secretsThatMustNotBeLogged.push(unknown);
+      const before = fakes.supabase.callCount;
+      const response = await request(server.baseUrl, method, route, { body, headers: { Authorization: `Bearer ${unknown}` } });
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.json, { error: 'Authentication required', code: 'AUTH_REQUIRED' });
+      assert.equal(fakes.supabase.callCount, before + 1, 'Supabase was asked once');
+    });
   }
+
+  // B4.2 (T-403): PROTECTED_ROUTES is every /api route server.js registers after
+  // requireUser, so the loops above cover all of them; the only /api routes before it are
+  // the token-protected operator endpoints
+  test('every /api route in server.js is in PROTECTED_ROUTES or PRE_AUTH_API_ROUTES', () => {
+    const source = fs.readFileSync(path.join(SERVER_DIR, 'server.js'), 'utf8');
+    const guard = source.indexOf("app.use('/api', requireUser(verifier));");
+    assert.ok(guard > 0, 'requireUser is mounted on /api');
+    const registered = [...source.matchAll(/app\.(get|post|put|patch|delete)\('(\/api\/[^']*)'/g)]
+      .map((m) => ({ method: m[1].toUpperCase(), route: m[2], protectedRoute: m.index > guard }));
+    assert.ok(registered.length >= 14, `found ${registered.length} /api routes`);
+    const matches = (pattern, method, route) => method === pattern.method && new RegExp(`^${pattern.route.replace(/:[^/]+/g, '[^/]+')}$`).test(route);
+    for (const pattern of registered) {
+      const list = pattern.protectedRoute ? PROTECTED_ROUTES : PRE_AUTH_API_ROUTES;
+      assert.ok(list.some(([method, route]) => matches(pattern, method, route)), `${pattern.method} ${pattern.route} is not covered`);
+    }
+    assert.equal(registered.filter((r) => !r.protectedRoute).length, PRE_AUTH_API_ROUTES.length);
+  });
 
   test('a GitHub session JWT alone (no Supabase token) is 401 AUTH_REQUIRED', async () => {
     const response = await request(server.baseUrl, 'POST', '/api/clone-repo', {

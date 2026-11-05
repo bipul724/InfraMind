@@ -2,7 +2,7 @@
 
 > **Historical record (note added 2026-11-04).** This document describes an earlier round of changes and is kept as written, except for the commands marked below. It is not a description of the current system; for that, see [ARCHITECTURE.md](ARCHITECTURE.md) and [server/OBSERVABILITY.md](server/OBSERVABILITY.md). What is no longer current:
 >
-> - `/api/metrics` and `/api/analytics` now answer 404 unless `METRICS_TOKEN` (32+ characters) is set and sent as the `X-Metrics-Token` header (`server/server.js`). `npm run test:system` (`server/test-system.js`) calls them without the header.
+> - `/api/metrics` and `/api/analytics` now answer 404 unless `METRICS_TOKEN` (32+ characters) is set and sent as the `X-Metrics-Token` header (`server/server.js`). The separate system-testing script, which called them without the header, was removed (B4.2); `npm test` covers them.
 > - Of the rate limiters listed below, only the clone and analysis limiters are applied to routes; `general` and `auth` are defined but unused. The Joi request validation, session validation and IP whitelist middleware in `server/utils/security.js` are not used by any route.
 > - `agents.log` and `websocket.log` are never written: nothing calls `logger.websocket`, and `logger.agent` is called only from `trackAgentSession`, which nothing calls. For the same reason session analytics stay empty (`server/utils/logger.js`, `server/utils/performance.js`).
 > - The `SystemMonitoringDashboard` component, which no route in `client/src/App.tsx` reached, was removed, and `ErrorBoundary` no longer sends errors anywhere: its `POST /api/errors` call, to an endpoint nothing served, was removed.
@@ -92,7 +92,6 @@ Removed: no route reached the component. The server's metrics endpoint (`/api/me
   "scripts": {
     "dev": "node --watch server.js",
     "dev:debug": "NODE_DEBUG=http,net node --watch server.js",
-    "test:system": "node test-system.js",
     "logs": "tail -f logs/app.log",
     "logs:error": "tail -f logs/error.log",
     "logs:agent": "tail -f logs/agents.log",
@@ -102,18 +101,13 @@ Removed: no route reached the component. The server's metrics endpoint (`/api/me
 }
 ```
 
-### 2. System Testing Script (`server/test-system.js`)
-- **Comprehensive testing** of all new features
-- **Performance benchmarking**
-- **Security testing**
-- **Rate limiting verification**
-- **Error handling validation**
+### 2. System Testing Script
+Removed (B4.2): `npm test` in `server/` covers these checks with local fakes.
 
 ### 3. Additional Dependencies Added
 - `express-rate-limit`: Rate limiting middleware
 - `helmet`: Security headers
 - `joi`: Request validation
-- `node-fetch`: HTTP client for testing
 
 ## 📊 New API Endpoints
 
@@ -174,10 +168,10 @@ Removed: no route reached the component. The server's metrics endpoint (`/api/me
 ## 🔍 Testing and Validation
 
 ### 1. System Testing
-Run the comprehensive test suite:
+Run the test suite:
 ```bash
 cd server
-npm run test:system
+npm test
 ```
 
 ### 2. Health Monitoring
@@ -275,8 +269,8 @@ npm run dev
 
 ### Testing the System
 ```bash
-# Run comprehensive tests
-npm run test:system
+# Run the test suite
+npm test
 
 # Check health
 curl http://localhost:10000/health

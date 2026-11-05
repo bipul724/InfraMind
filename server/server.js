@@ -45,6 +45,10 @@ import { attachRealtime } from './utils/realtime.js';
 import { toStatusResponse, toFilesResponse, toAgentMessages, toErrorList } from './utils/sessionView.js';
 import { resolvePort } from './utils/port.js';
 import {
+  removeSessionDirectory as removeTempSessionDirectory,
+  removeSessionDirectories as removeTempSessionDirectories
+} from './utils/tempCleanup.js';
+import {
   StoreUnavailableError,
   createConnectionStoreFromEnv,
   createOneTimeTokenStore,
@@ -1086,50 +1090,11 @@ app.get('/api/status/:sessionId', async (req, res) => {
   }
 });
 
-// Removes temp/<id> for one session: only a real directory (not a symlink) directly
-// under TEMP_DIR whose name is a UUID v4. Never throws.
-async function removeSessionDirectory(sessionId) {
-  if (!isUuidV4(sessionId)) return false;
-  const target = path.join(TEMP_DIR, sessionId);
-  try {
-    if (!(await fs.lstat(target)).isDirectory()) return false;
-    await fs.remove(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Removes temp/<id> directories that are no longer needed: deleted sessions, orphans (no
-// session row, e.g. left by a crash) and, since B2.1, finished sessions (completed or
-// failed), which nothing reads from disk. Only directories directly under TEMP_DIR whose
-// names are UUID v4 are considered; symlinks and anything else are never touched. A
-// directory whose session cannot be looked up (store unavailable) is kept.
-const FINISHED_STATUSES = new Set(['completed', 'failed']);
-async function removeSessionDirectories(deletedIds = []) {
-  let entries;
-  try {
-    entries = await fs.readdir(TEMP_DIR, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  const deleted = new Set(deletedIds);
-  let removed = 0;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !isUuidV4(entry.name)) continue;
-    let remove = deleted.has(entry.name);
-    if (!remove) {
-      try {
-        const session = await sessionStore.get(entry.name);
-        remove = !session || FINISHED_STATUSES.has(session.status);
-      } catch {
-        continue;
-      }
-    }
-    if (remove && await removeSessionDirectory(entry.name)) removed++;
-  }
-  return removed;
-}
+// temp/<id> cleanup (utils/tempCleanup.js), bound to this server's TEMP_DIR and session store.
+// Neither ever throws; see that file for the rules.
+const removeSessionDirectory = (sessionId) => removeTempSessionDirectory(TEMP_DIR, sessionId);
+const removeSessionDirectories = (deletedIds = []) =>
+  removeTempSessionDirectories({ tempDir: TEMP_DIR, deletedIds, getSession: (id) => sessionStore.get(id) });
 
 // B2.1: a session cloned but never analyzed within this time is failed and its clone removed
 const STALE_CLONED_MS = 60 * 60 * 1000;

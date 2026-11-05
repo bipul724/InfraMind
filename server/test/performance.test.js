@@ -11,6 +11,11 @@ import {
 } from '../utils/performance.js';
 import { DEFAULT_PORT, resolvePort } from '../utils/port.js';
 import { SERVER_DIR } from './helpers.js';
+import { captureConsole } from './consoleCapture.js';
+
+// trackAgentSession logs "🤖 AGENT [...]" lines (utils/logger.js); printed to this process's
+// stdout they can make node:test fail the whole file (T-410, see consoleCapture.js)
+captureConsole();
 
 const monitorAt = (clock) => new PerformanceMonitor({ now: () => clock.t, startMonitoring: false });
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -97,8 +102,8 @@ describe('default port', () => {
     assert.equal(resolvePort({ PORT: '4321' }), '4321');
   });
 
-  test('server.js, healthcheck.js and test-system.js use resolvePort; the npm scripts use 10000', () => {
-    for (const file of ['server.js', 'healthcheck.js', 'test-system.js']) {
+  test('server.js and healthcheck.js use resolvePort; the npm scripts use 10000', () => {
+    for (const file of ['server.js', 'healthcheck.js']) {
       const source = fs.readFileSync(path.join(SERVER_DIR, file), 'utf8');
       assert.match(source, /resolvePort\(process\.env\)/, file);
       assert.doesNotMatch(source, /3001|localhost:3000|PORT \|\| 3000/, file);

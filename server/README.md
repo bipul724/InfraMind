@@ -36,11 +36,6 @@ From `package.json`:
 | `npm run health` | `curl -s http://localhost:10000/health \| jq` | The literal default port 10000 |
 | `npm run metrics` | `curl` of `/api/metrics` on port 10000 with `X-Metrics-Token: $METRICS_TOKEN` | 404 unless the server has `METRICS_TOKEN` |
 | `npm run logs`, `logs:error`, `logs:agent` | `tail -f` of `logs/app.log`, `logs/error.log`, `logs/agents.log` | `agents.log` holds the clone and analysis analytics lines ([OBSERVABILITY.md](OBSERVABILITY.md)) |
-| `npm run start:debug` | `node start.js` | Prints environment details, test-imports modules, then loads `server.js` |
-| `npm run start:minimal`, `npm run debug` | `node minimal.js` | A mock server, not the real API (see below) |
-| `npm run test:legacy` | `node test.js` | Runs the legacy generator in `index.js` |
-| `npm run test:system` | `node test-system.js` | HTTP checks against `http://localhost:${PORT}`, default 10000 |
-| `npm run test:render` | `node test-render.js` | A server that answers every request with a fixed message |
 
 ## Layout
 
@@ -66,21 +61,29 @@ utils/config.js         TRUST_PROXY, allowed origins, rate limits, GITHUB_TIMEOU
 utils/security.js       helmet headers, the rate limiters (HTTP and Socket.IO handshakes), request logger
 utils/logger.js         Console and logs/ files
 utils/performance.js    Request metrics, session analytics, /health data
-utils/port.js           Default port (10000) for server.js, healthcheck.js and test-system.js
+utils/port.js           Default port (10000) for server.js and healthcheck.js
+utils/tempCleanup.js    Which temp/<session id> directories cleanup removes (finished, deleted, orphaned)
+healthcheck.js          A probe for a container HEALTHCHECK: exits 0 when GET /health answers 200
 scripts/                ai-smoke.js, assert-local-db.js
 test/                   node --test suite and fakes (test/fakeGit.js: a stand-in git for offline clones); test/faultInjection.js is loaded only with TEST_FAULT_INJECTION, which the server refuses unless NODE_ENV=test
 ```
 
-## Legacy and mock entry points
+## Tests
 
-These files are not loaded by `server.js`:
+`npm test` runs every `test/*.test.js` file with `node --test`, offline: GitHub, Supabase, the AI providers and `git` are local fakes (`test/fakeGitHub.js`, `fakeSupabase.js`, `fakePostgrest.js`, `fakeLlm.js`, `fakeGit.js`), and spawned servers get their environment from `test/helpers.js`, never from `.env`. With `TEST_DATABASE_URL` set to a throwaway local Postgres, the database suites run too (`test/db.js`); with `RUN_NETWORK_TESTS=1`, the few tests that clone from github.com.
 
-- **`index.js`** exports `devPilotAI`, an older generator that builds files from templates and calls Tavily (deployment links), Mem0 (interaction storage) and Keywords AI (event tracking). Only `test.js` imports it (`npm run test:legacy`). It reads `TAVILY_API_KEY`, `MEM0_API_KEY`, `KEYWORDS_AI_API_KEY` and `KEYWORDS_AI_BASE_URL`; the running server reads none of them.
-- **`minimal.js`** is a mock server: `/health`, `/`, a mock `POST /api/devpilot`, a mock `POST /api/analyze-repo`, and GitHub routes without user authentication. It listens on `PORT` or 10000.
-- **`test-render.js`** answers every request, including `/health`, with `{"message": "Render deployment test successful", ...}`. It must never be the production start command.
-- **`healthcheck.js`** requests `http://localhost:${PORT}/health` (default 10000) and exits 0 on a 200 response.
+| Area | Files |
+|---|---|
+| Sign-in and ownership | `auth.test.js` (the Supabase verifier), `api.auth.test.js` (401 on every `/api` route without a valid token, Supabase down fails closed, another user's session is 404), `realtime.test.js` (Socket.IO handshakes and private rooms) |
+| GitHub connection | `api.github.test.js`, `api.githubErrors.test.js`, `githubConnections.test.js` |
+| Clone and analysis | `api.security.test.js`, `api.analysis.test.js` (background runs, capacity, failures, shutdown), `api.results.test.js`, `api.download.test.js`, `git.test.js`, `repository.test.js`, `jobs.test.js`, `e2e.flow.test.js` (two users end to end: offline with the fake `git`, and against github.com with `RUN_NETWORK_TESTS=1`) |
+| Agents and AI | `agents.test.js`, `agents.files.test.js`, `agents.generation.test.js`, `agents.redaction.test.js`, `ai.client.test.js`, `ai.config.test.js`, `ai.lazy.test.js`, `api.ai.test.js` |
+| Storage | `sessionStore.test.js`, `sessionView.test.js`, `api.persistence.test.js`, `db.config.test.js`, `db.schema.test.js`, `supabase.migrations.test.js`, `tempCleanup.test.js` (which temp directories cleanup removes or keeps) |
+| Operations | `api.limits.test.js`, `rateLimitKey.test.js`, `api.observability.test.js`, `api.process.test.js`, `api.startup.test.js`, `config.test.js`, `performance.test.js` |
 
-The real server registers no `/api/devpilot` route.
+Tests that run the pipeline or the logger in their own process call `captureConsole()` (`test/consoleCapture.js`): their console output stays out of the test runner's stdout, where Node 22 can misread a line that starts with an emoji and fail the whole file.
+
+The legacy generator, the mock server and the debug and system-test scripts were removed (B4.2); see [../ARCHITECTURE.md, section 9](../ARCHITECTURE.md#9-code-that-is-not-part-of-the-running-system). The real server registers no `/api/devpilot` route.
 
 ## License
 

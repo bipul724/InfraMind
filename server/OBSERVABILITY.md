@@ -101,6 +101,6 @@ All console lines from `server/server.js`:
 - `🛑 Shutting down: <SIGTERM | SIGINT | uncaught exception>`, then `🛑 Pending GitHub connect tokens: <n> revoked, <m> failed` and `🛑 Analysis jobs: <n> still running, <m> queued dropped` (the runner waits at most 1 s for running jobs and does not finish them). No token is ever logged.
 - `GitHub rate limit reached: <route>` and `GitHub did not respond: <route>` when a GitHub-backed route answers 503 `GITHUB_RATE_LIMITED` or 504 `GITHUB_UNAVAILABLE`.
 
-## Legacy: Keywords AI tracking
+## Third-party event tracking
 
-`server/index.js` (the legacy `devPilotAI` generator) sends events such as `devpilot_request_started`, `dockerfile_generation_completed` and `tavily_query_completed` to Keywords AI when `KEYWORDS_AI_API_KEY` is set (`KEYWORDS_AI_BASE_URL` defaults to `https://api.keywordsai.co`). That file is imported only by `server/test.js` (`npm run test:legacy`); the running server does not load it and sends nothing to Keywords AI.
+None. The legacy generator that sent events to Keywords AI was removed (B4.2); the server sends no events to any tracking service.

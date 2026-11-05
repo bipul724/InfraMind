@@ -8,6 +8,11 @@ import { findDockerfiles } from '../agents/grounding.js';
 import { resetDefaultAiClient } from '../ai/index.js';
 import { generatorUserPrompt } from '../agents/prompts.js';
 import { defaultContentFor, generatorKindOf } from './fakeLlm.js';
+import { captureConsole } from './consoleCapture.js';
+
+// The pipeline's progress lines start with emoji; printed to this process's stdout they can
+// make node:test fail the whole file (T-410, see consoleCapture.js). Kept here instead.
+captureConsole();
 
 let fixtureDir;
 let outsideDir;

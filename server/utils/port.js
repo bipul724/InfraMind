@@ -1,4 +1,4 @@
-// The server's default port, shared by server.js, healthcheck.js and test-system.js.
+// The server's default port, shared by server.js and healthcheck.js.
 // 10000 matches render.yaml, server/.env.example and the client's fallback API URL
 // (client/src/lib/api.ts). The health/metrics npm scripts use the literal 10000.
 export const DEFAULT_PORT = 10000;

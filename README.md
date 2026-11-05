@@ -170,7 +170,7 @@ supabase/migrations/    SQL for public.github_connections
 render.yaml             Render services
 ```
 
-`server/index.js`, `server/minimal.js`, `server/test-render.js` and `server/start.js` are not part of the running server; see [ARCHITECTURE.md, section 9](ARCHITECTURE.md#9-code-that-is-not-part-of-the-running-system).
+The legacy generator and the mock and debug entry points were removed; see [ARCHITECTURE.md, section 9](ARCHITECTURE.md#9-code-that-is-not-part-of-the-running-system).
 
 ## Tests
 

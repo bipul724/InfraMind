@@ -427,6 +427,43 @@ for (const store of STORES) {
     });
   });
 
+  // B4.2 (T-403): an AI provider failure never throws out of the pipeline. Each generator
+  // records a fixed public error, the verifier is skipped, and the run completes with no
+  // files; only a throw (the describe above) fails a session.
+  describe(`B4.2 every AI call fails (${store.label} store)`, { skip: store.skip }, () => {
+    let ctx;
+    before(async () => { ctx = await launch(store); });
+    after(async () => {
+      fakes.llm.setResponder(null);
+      await ctx?.server.stop();
+    });
+
+    test('completed with no files and one sanitized error per file; no review call; the directory is removed', { timeout: 60000 }, async () => {
+      const { server } = ctx;
+      fakes.llm.reset();
+      // 400 on every provider (no retry), with a body that must never reach the user
+      const providerBody = { error: { message: `provider said no ${FAULT_SECRET_MARKER}` } };
+      fakes.llm.setResponder(() => ({ status: 400, body: providerBody }));
+      const sessionId = await clone(server);
+      assert.equal((await analyze(server, sessionId)).status, 202);
+
+      await waitForStatus(server, sessionId, 'completed');
+      assert.equal(await pathExists(cloneDir(server, sessionId)), false, 'the clone directory is removed');
+      const response = await fetch(`${server.baseUrl}/api/files/${sessionId}`, { headers: authHeaders(tokenA()) });
+      assert.equal(response.status, 200);
+      const text = await response.text();
+      const listing = JSON.parse(text);
+      assert.deepEqual(listing.files, {});
+      const generatorErrors = listing.errors.filter((error) => error.startsWith('Generator Agent Error: '));
+      assert.equal(generatorErrors.length, 3, JSON.stringify(listing.errors));
+      assert.ok(!text.includes(FAULT_SECRET_MARKER) && !text.includes('provider said no'), 'the provider body is not shown');
+      const download = await fetch(`${server.baseUrl}/api/files/${sessionId}/dockerfile`, { headers: authHeaders(tokenA()) });
+      assert.equal(download.status, 404);
+      assert.ok(fakes.llm.requests.length > 0, 'the generators did call the AI');
+      assert.ok(fakes.llm.requests.every((request) => generatorKindOf(request.body)), 'no verifier call without files');
+    });
+  });
+
   describe(`B2.1 shutdown with a running job (${store.label} store)`, { skip: store.skip }, () => {
     test('SIGTERM exits within the 3 s cap; after a restart the session is failed (database store)', { timeout: 60000 }, async () => {
       fakes.llm.reset();
