@@ -8,6 +8,8 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { apiFetch } from '@/lib/apiClient';
 import { startAnalysis } from '@/lib/analysis';
+import { UNREACHABLE_MESSAGE, describeApiError, readApiError } from '@/lib/apiError';
+import { INVALID_REPO_URL_MESSAGE, canonicalRepoUrl, parseGitHubRepoUrl } from '@/lib/githubUrl';
 import {
   Bot,
   GitBranch,
@@ -29,7 +31,7 @@ import type {
   SessionStatus,
   TechStack
 } from '@/lib/session';
-import { isStatusRegression } from '@/lib/session';
+import { isSessionId, isStatusRegression } from '@/lib/session';
 
 interface AgentGenerationFormProps {
   repoUrl?: string;
@@ -38,27 +40,26 @@ interface AgentGenerationFormProps {
   className?: string;
 }
 
-// Response body of POST /api/clone-repo (server/server.js)
-interface CloneResponse {
-  success?: boolean;
-  sessionId?: string;
-  error?: string;
-}
-
 // The manual-URL path sends only the URL: no GitHub credential leaves the browser.
-// Private repositories go through the connected-GitHub path (/select-repo).
-async function cloneRepository(repoUrl: string): Promise<CloneResponse> {
-  const response = await apiFetch('/api/clone-repo', {
-    method: 'POST',
-    body: JSON.stringify({ repoUrl })
-  });
-  return response.json();
+// Private repositories go through the connected-GitHub path (/select-repo). Returns the
+// new session id; throws an Error whose message is meant for the user.
+async function cloneRepository(repoUrl: string): Promise<string> {
+  let response: Response;
+  try {
+    response = await apiFetch('/api/clone-repo', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl })
+    });
+  } catch {
+    throw new Error(UNREACHABLE_MESSAGE);
+  }
+  if (!response.ok) {
+    throw new Error(describeApiError(await readApiError(response, 'The repository could not be cloned. Please try again.')));
+  }
+  const body = await response.json().catch(() => null);
+  if (!isSessionId(body?.sessionId)) throw new Error('The server sent an unexpected answer. Please try again.');
+  return body.sessionId;
 }
-
-const validateGitHubUrl = (url: string) => {
-  const githubUrlPattern = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/;
-  return githubUrlPattern.test(url);
-};
 
 export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
   repoUrl: initialRepoUrl = '',
@@ -96,17 +97,14 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
 
   // Form validation
   const [urlError, setUrlError] = useState<string | null>(null);
-  const isValidUrl = repoUrl && validateGitHubUrl(repoUrl);
+  // The server's own rules (lib/githubUrl.ts); the canonical form is what is sent
+  const parsedRepo = repoUrl ? parseGitHubRepoUrl(repoUrl) : null;
+  const isValidUrl = parsedRepo !== null;
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;
     setRepoUrl(url);
-
-    if (url && !validateGitHubUrl(url)) {
-      setUrlError('Please enter a valid GitHub repository URL (e.g., https://github.com/user/repo)');
-    } else {
-      setUrlError(null);
-    }
+    setUrlError(url && !parseGitHubRepoUrl(url) ? INVALID_REPO_URL_MESSAGE : null);
   };
 
   // Stable, so the progress socket is not re-created on every render. Status, step and
@@ -172,12 +170,12 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
   };
 
   const handleStartAnalysis = async () => {
-    if (!isValidUrl) {
-      setUrlError('Please enter a valid GitHub repository URL');
+    if (!parsedRepo) {
+      setUrlError(INVALID_REPO_URL_MESSAGE);
       return;
     }
 
-    const url = repoUrl;
+    const url = canonicalRepoUrl(parsedRepo);
     runRef.current += 1;
     setIsStarting(true);
     setBusyMessage(null);
@@ -194,20 +192,17 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
 
     try {
       // Step 1: Clone repository
-      const cloneResult = await cloneRepository(url);
-      if (!cloneResult.success || !cloneResult.sessionId) {
-        throw new Error(cloneResult.error || 'Failed to clone repository');
-      }
+      const clonedSessionId = await cloneRepository(url);
 
       // The progress panel subscribes to this session once the id is known
-      setSessionId(cloneResult.sessionId);
+      setSessionId(clonedSessionId);
       setCurrentStep('Repository cloned successfully');
       setProgress(25);
       setStatus('cloned');
 
       // Step 2: start the agents. The server answers 202 at once and runs them in the
       // background; completion arrives as a progress event or through the status poller.
-      await beginAnalysis(cloneResult.sessionId);
+      await beginAnalysis(clonedSessionId);
     } catch (error) {
       console.error('Agent workflow error:', error);
       reportFailure(error instanceof Error ? error.message : 'Unknown error occurred');

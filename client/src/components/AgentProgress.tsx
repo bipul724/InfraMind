@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL, SavedFilesAPI } from '@/lib/api';
 import { getAccessToken } from '@/lib/supabase';
 import { useSessionPoller } from '@/hooks/use-session-poller';
+import type { GoneReason } from '@/hooks/use-session-poller';
 import { GeneratedFilesView } from '@/components/GeneratedFilesView';
 import {
   currentGeneration,
@@ -154,6 +155,8 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
   const [, setSaving] = useState(false);
   // The session whose status polling gave up after 30 minutes
   const [pollGaveUpFor, setPollGaveUpFor] = useState<string | null>(null);
+  // The poller saw a 404 or 401 for this session: it stopped, and the reason is shown
+  const [goneFor, setGoneFor] = useState<{ id: string; reason: GoneReason } | null>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -228,7 +231,10 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
       }
       onProgressUpdateRef.current?.(payload);
     },
-    onGiveUp: () => setPollGaveUpFor(sessionId ?? null)
+    onGiveUp: () => setPollGaveUpFor(sessionId ?? null),
+    onGone: (reason) => {
+      if (sessionId) setGoneFor({ id: sessionId, reason });
+    }
   });
 
   // Neither the socket's completed event nor the status carries file contents or the
@@ -451,6 +457,17 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             <AlertTriangle className="h-4 w-4 text-status-warning" />
             <AlertDescription>
               No update for this analysis after 30 minutes. Reload the page to check it again.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {goneFor !== null && goneFor.id === sessionId && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {goneFor.reason === 'not-found'
+                ? 'This analysis no longer exists. It may have expired or been deleted.'
+                : 'Your sign-in has expired. Sign in again to see this analysis.'}
             </AlertDescription>
           </Alert>
         )}

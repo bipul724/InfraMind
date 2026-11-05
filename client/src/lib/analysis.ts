@@ -1,9 +1,9 @@
 import { apiFetch } from '@/lib/apiClient';
+import { readApiError, UNREACHABLE_MESSAGE } from '@/lib/apiError';
 import { ANALYSIS_BUSY } from '@/lib/session';
-import type { AnalyzeStartedResponse, ApiErrorBody } from '@/lib/session';
 
-// The outcome of POST /api/analyze (B2.1). The server answers 202 as soon as the
-// analysis has started; nothing in the response is a result.
+// The outcome of POST /api/analyze. The server answers 202 as soon as the analysis has
+// started; nothing in the response is a result.
 export type StartAnalysisOutcome =
   | { kind: 'started' }
   // 503 ANALYSIS_BUSY: retry the same session later, without cloning again
@@ -20,19 +20,13 @@ export async function startAnalysis(sessionId: string): Promise<StartAnalysisOut
       body: JSON.stringify({ sessionId })
     });
   } catch {
-    return { kind: 'error', message: 'Could not reach the server. Please try again.' };
-  }
-
-  let body: (Partial<AnalyzeStartedResponse> & ApiErrorBody) | null = null;
-  try {
-    body = await response.json();
-  } catch {
-    // no JSON body
+    return { kind: 'error', message: UNREACHABLE_MESSAGE };
   }
 
   if (response.status === 202) return { kind: 'started' };
-  if (response.status === 503 && body?.code === ANALYSIS_BUSY) {
-    return { kind: 'busy', message: body.error || BUSY_FALLBACK };
+  const { code, message } = await readApiError(response, 'The analysis could not be started.');
+  if (response.status === 503 && code === ANALYSIS_BUSY) {
+    return { kind: 'busy', message: message || BUSY_FALLBACK };
   }
-  return { kind: 'error', message: body?.error || 'Failed to start the analysis' };
+  return { kind: 'error', message };
 }

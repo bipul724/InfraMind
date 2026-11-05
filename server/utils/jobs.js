@@ -87,7 +87,8 @@ export function createJobRunner({ concurrency, queueMax, logger = console, now =
       const slot = reserve();
       return slot ? slot.enqueue(id, fn) : null;
     },
-    stats: () => ({ running, queued: queue.length }),
+    // reserved: slots taken by a request still claiming its session (see reserve)
+    stats: () => ({ running, queued: queue.length, reserved }),
 
     // Stops accepting, drops the queued jobs (they never start) and waits at most
     // timeoutMs for the running ones. Returns what was left.

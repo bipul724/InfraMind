@@ -4,11 +4,15 @@ import type { ProgressPayload, SessionFilesResponse, SessionStatusResponse } fro
 
 // The backstop for missed progress events (B2.1): while a session is in flight, its
 // status is polled. Every 5 s for the first 10 minutes, then every 30 s; after 30
-// minutes polling stops and onGiveUp is called (the page asks for a reload).
+// minutes polling stops and onGiveUp is called (the page asks for a reload). A 404 or
+// 401 is final: the session is gone, or the sign-in has expired, so polling stops at
+// once and onGone is called. Any other status, and a network error, is retried.
 export const POLL_INTERVAL_MS = 5000;
 export const SLOW_POLL_INTERVAL_MS = 30000;
 export const SLOW_POLL_AFTER_MS = 10 * 60 * 1000;
 export const STOP_POLLING_AFTER_MS = 30 * 60 * 1000;
+
+export type GoneReason = 'not-found' | 'unauthorized';
 
 export interface PollUpdate {
   payload: ProgressPayload;
@@ -23,15 +27,21 @@ interface Options {
   active: boolean;
   onUpdate: (update: PollUpdate) => void;
   onGiveUp: () => void;
+  onGone?: (reason: GoneReason) => void;
 }
 
-export function useSessionPoller({ sessionId, active, onUpdate, onGiveUp }: Options) {
+const goneReason = (status: number): GoneReason | null =>
+  (status === 404 ? 'not-found' : status === 401 ? 'unauthorized' : null);
+
+export function useSessionPoller({ sessionId, active, onUpdate, onGiveUp, onGone }: Options) {
   // The latest callbacks, read at call time, so they are not effect dependencies
   const onUpdateRef = useRef(onUpdate);
   const onGiveUpRef = useRef(onGiveUp);
+  const onGoneRef = useRef(onGone);
   useEffect(() => {
     onUpdateRef.current = onUpdate;
     onGiveUpRef.current = onGiveUp;
+    onGoneRef.current = onGone;
   });
   // When polling began for each session, so pausing and resuming does not reset the
   // back-off clock
@@ -56,11 +66,21 @@ export function useSessionPoller({ sessionId, active, onUpdate, onGiveUp }: Opti
       timer = setTimeout(tick, elapsed >= SLOW_POLL_AFTER_MS ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     };
 
+    // Stops for good and reports once; true when the response was final
+    const stopIfGone = (response: Response): boolean => {
+      const reason = goneReason(response.status);
+      if (!reason) return false;
+      stopped = true;
+      onGoneRef.current?.(reason);
+      return true;
+    };
+
     const tick = async () => {
       if (stopped) return;
       try {
         const response = await apiFetch(`/api/status/${id}`);
         if (stopped) return;
+        if (stopIfGone(response)) return;
         if (response.ok) {
           const session: SessionStatusResponse = await response.json();
           if (stopped) return;
@@ -68,6 +88,7 @@ export function useSessionPoller({ sessionId, active, onUpdate, onGiveUp }: Opti
             // The result, once: the same fields the completed event carries, plus the review
             const filesResponse = await apiFetch(`/api/files/${id}`);
             if (stopped) return;
+            if (stopIfGone(filesResponse)) return;
             if (filesResponse.ok) {
               const files: SessionFilesResponse = await filesResponse.json();
               if (stopped) return;

@@ -36,6 +36,7 @@ React 18 + TypeScript app built with Vite and Tailwind CSS (`package.json`).
 - `npm run build`: `tsc && vite build`, output in `dist/`
 - `npm run lint`: ESLint with `--max-warnings 0`
 - `npm run preview`: serve the production build
+- `npm test`: `node --test src/lib/*.test.ts` (Node 22.18 or later, which runs TypeScript directly): the GitHub URL parser's parity with the server's (`src/lib/githubUrl.test.ts`) and the API error messages (`src/lib/apiError.test.ts`). These files are excluded from the app type-check (`tsconfig.app.json`) and are not in the bundle
 
 ## Routes
 
@@ -52,4 +53,4 @@ From `src/App.tsx`:
 | `/auth/github/callback` | `GitHubCallback` (forwards to the server) | signed in |
 | `/profile`, `/login` | redirects | signed in |
 
-Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/lib/agentApi.ts`, `src/lib/mockData.ts`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.
+Files not reachable from these routes: `src/pages/EnhancedDashboard.tsx`, `src/integrations/core.ts`, `src/hooks/use-mobile.tsx`, and the components `ChatPanel`, `OutputDisplay`, `RepositoryInput`, `SystemMonitoringDashboard` and `dashboard/GenerationForm`, `ProjectCard`, `ProjectsGrid`, `StatsOverview`.

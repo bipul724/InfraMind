@@ -31,19 +31,19 @@ describe('createJobRunner', () => {
     assert.equal(runner.canAccept(), false);
     assert.equal(runner.enqueue('c', () => {}), null, 'full: refused');
     await tick();
-    assert.deepEqual(runner.stats(), { running: 1, queued: 1 });
+    assert.deepEqual(runner.stats(), { running: 1, queued: 1, reserved: 0 });
     assert.deepEqual(order, ['a']);
 
     a.release();
     await tick();
     await tick();
     assert.deepEqual(order, ['a', 'b'], 'the queued job starts when a slot frees');
-    assert.deepEqual(runner.stats(), { running: 1, queued: 0 });
+    assert.deepEqual(runner.stats(), { running: 1, queued: 0, reserved: 0 });
     assert.equal(runner.canAccept(), true);
     b.release();
     await tick();
     await tick();
-    assert.deepEqual(runner.stats(), { running: 0, queued: 0 });
+    assert.deepEqual(runner.stats(), { running: 0, queued: 0, reserved: 0 });
   });
 
   test('a reserved slot counts against capacity until it is used or released', async () => {
@@ -51,9 +51,11 @@ describe('createJobRunner', () => {
     const runner = createJobRunner({ concurrency: 1, queueMax: 0, logger });
     const slot = runner.reserve();
     assert.ok(slot);
+    assert.deepEqual(runner.stats(), { running: 0, queued: 0, reserved: 1 }, 'stats() reports the reservation');
     assert.equal(runner.canAccept(), false, 'the reservation holds the only slot');
     assert.equal(runner.reserve(), null);
     slot.release();
+    assert.deepEqual(runner.stats(), { running: 0, queued: 0, reserved: 0 });
     assert.equal(runner.canAccept(), true);
     const again = runner.reserve();
     const job = controllable();
@@ -79,7 +81,7 @@ describe('createJobRunner', () => {
       assert.match(lines.error.join('\n'), /analysis job finished: session=rejects outcome=failed/);
       assert.match(lines.error.join('\n'), /analysis job finished: session=throws outcome=failed/);
       assert.ok(!lines.error.join('\n').includes(secret), 'redacted');
-      assert.deepEqual(runner.stats(), { running: 0, queued: 0 }, 'a failed job frees its slot');
+      assert.deepEqual(runner.stats(), { running: 0, queued: 0, reserved: 0 }, 'a failed job frees its slot');
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }

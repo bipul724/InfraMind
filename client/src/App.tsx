@@ -33,6 +33,15 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+// The signed-in pages, keyed by the user id: when a different user signs in (in this tab
+// or another, which shares the Supabase session), every page under it remounts, so no
+// state of the previous user (an open ?session= view, the form, a load in flight) is
+// kept. A token refresh keeps the same id and remounts nothing.
+const UserScopedOutlet: React.FC = () => {
+  const { user } = useAuth();
+  return <Outlet key={user?.id ?? 'signed-out'} />;
+};
+
 function App() {
   return (
     <AuthProvider>
@@ -60,7 +69,7 @@ function App() {
             element={
               <ProtectedRoute>
                 <DashboardLayout>
-                  <Outlet />
+                  <UserScopedOutlet />
                 </DashboardLayout>
               </ProtectedRoute>
             }

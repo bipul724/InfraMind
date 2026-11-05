@@ -117,7 +117,7 @@ Every route registered in `server/server.js`:
 | Method and path | Access | Purpose |
 |---|---|---|
 | `GET /health` | public | Liveness only: exactly `status: "ok"`, `timestamp`, `uptime`; queries no database or service |
-| `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions`, `analysisJobs` (`running`, `queued`) |
+| `GET /api/metrics` | `X-Metrics-Token` header equal to `METRICS_TOKEN` (32+ characters); otherwise 404 | Request, memory and CPU metrics, Node `version`, `environment`, `trackedSessions`, `analysisJobs` (`running`, `queued`, `reserved`) |
 | `GET /api/analytics` | same as `/api/metrics` | Clone and analysis timings and outcomes of the last hour (at most 1,000 sessions) |
 | `POST /api/github/connect` | Bearer | Issues a one-time ticket (2 minutes) to start a GitHub connection |
 | `GET /auth/github` | public, needs a valid `ticket`; `oauth` limit | Sets the OAuth state cookie and redirects to GitHub |
@@ -176,6 +176,7 @@ render.yaml             Render services
 
 ```bash
 cd server && npm test      # node --test suite in server/test/
+cd client && npm test      # node --test: the client's URL parser against the server's, API error messages
 cd client && npm run build # tsc and vite build
 cd client && npm run lint
 ```

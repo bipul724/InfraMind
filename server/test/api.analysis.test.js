@@ -118,13 +118,13 @@ const metricsOf = async ({ server, metricsToken }) =>
   (await fetch(`${server.baseUrl}/api/metrics`, { headers: { 'X-Metrics-Token': metricsToken } })).json();
 const cloneDir = (server, sessionId) => path.join(server.cwd, 'temp', sessionId);
 
-// Waits until /api/metrics analysisJobs is { running: 0, queued: 0 }
+// Waits until /api/metrics analysisJobs is { running: 0, queued: 0, reserved: 0 }
 async function waitForIdle(ctx) {
   await waitFor(async () => {
     const { analysisJobs } = await metricsOf(ctx);
-    return analysisJobs.running === 0 && analysisJobs.queued === 0;
+    return analysisJobs.running === 0 && analysisJobs.queued === 0 && analysisJobs.reserved === 0;
   }, 5000, 'no running or queued job');
-  assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 0, queued: 0 });
+  assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 0, queued: 0, reserved: 0 });
 }
 
 // Every slot is usable: `capacity` freshly cloned sessions, analyzed one after another,
@@ -280,7 +280,7 @@ for (const store of STORES) {
       assert.equal(busy.headers.get('retry-after'), '30');
       assert.equal((await statusOf(server, s3)).status, 'cloned', 'a busy answer leaves the session retryable');
       assert.equal(await pathExists(cloneDir(server, s3)), true, 'and keeps its clone');
-      assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 1, queued: 1 });
+      assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 1, queued: 1, reserved: 0 });
 
       await waitFor(() => watcher.events.some((e) => e.step === 'Waiting for an analysis slot'), 3000, 'the waiting event');
       const waiting = watcher.events.find((e) => e.step === 'Waiting for an analysis slot');
@@ -296,14 +296,14 @@ for (const store of STORES) {
       await waitForStatus(server, s3, 'completed');
       assert.ok(watcher.events.findIndex((e) => e.step === 'Waiting for an analysis slot') < watcher.events.findIndex((e) => e.step === 'Starting AI agent analysis...'));
       watcher.socket.close();
-      assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 0, queued: 0 });
+      assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 0, queued: 0, reserved: 0 });
     });
   });
 
   // A slot not released after a refused claim is lost until a restart; once all
   // ANALYSIS_CONCURRENCY + ANALYSIS_QUEUE_MAX slots are lost, every analysis is 503
-  // ANALYSIS_BUSY. /api/metrics analysisJobs counts running and queued jobs only, not
-  // reserved slots, so a leak shows only as a 503 where a 202 is due.
+  // ANALYSIS_BUSY. /api/metrics analysisJobs also reports `reserved`, the slots held by
+  // requests still claiming their session, so a leaked slot shows there too.
   //
   // The lost claim needs room for two slots: with one slot and no queue the winner holds
   // the only slot, so a concurrent second request is refused by the capacity check (503)
@@ -363,6 +363,33 @@ for (const store of STORES) {
         await adminQuery('DROP FUNCTION IF EXISTS test_refuse_claim()', [], db.name);
       }
     });
+
+    test('while a claim is in progress, /api/metrics analysisJobs reports its reserved slot', { timeout: 60000 }, async () => {
+      const { server, db } = ctx;
+      fakes.llm.reset();
+      const slow = await clone(server);
+      // Holds this session's cloned -> analyzing update for 2 s, so the request sits
+      // between reserve() and enqueue()
+      await adminQuery(`CREATE FUNCTION test_slow_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN PERFORM pg_sleep(2); RETURN NEW; END $$`, [], db.name);
+      await adminQuery(`CREATE TRIGGER test_slow_claim BEFORE UPDATE ON analysis_sessions FOR EACH ROW
+        WHEN (OLD.id = '${slow}' AND NEW.status = 'analyzing') EXECUTE FUNCTION test_slow_claim()`, [], db.name);
+      try {
+        const pending = analyze(server, slow);
+        const during = await waitFor(async () => {
+          const { analysisJobs } = await metricsOf(ctx);
+          return analysisJobs.reserved === 1 ? analysisJobs : null;
+        }, 1800, 'a reserved slot');
+        assert.deepEqual(during, { running: 0, queued: 0, reserved: 1 });
+        assert.equal((await pending).status, 202);
+        await waitForStatus(server, slow, 'completed');
+        await waitForIdle(ctx);
+        assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 0, queued: 0, reserved: 0 });
+      } finally {
+        await adminQuery('DROP TRIGGER IF EXISTS test_slow_claim ON analysis_sessions', [], db.name);
+        await adminQuery('DROP FUNCTION IF EXISTS test_slow_claim()', [], db.name);
+      }
+    });
   });
 
   describe(`B2.1 a failure in the background (${store.label} store)`, { skip: store.skip }, () => {
@@ -390,7 +417,7 @@ for (const store of STORES) {
       await sleep(200);
       const metrics = await metricsOf(ctx);
       assert.equal(metrics.unhandledRejections, 0, 'the job rejection was caught by the runner');
-      assert.deepEqual(metrics.analysisJobs, { running: 0, queued: 0 });
+      assert.deepEqual(metrics.analysisJobs, { running: 0, queued: 0, reserved: 0 });
       const logs = server.logs().slice(logStart);
       assert.match(logs, new RegExp(`analysis job finished: session=${sessionId} outcome=failed`));
       assert.ok(!logs.includes(FAULT_SECRET_MARKER), 'logged redacted');
@@ -409,7 +436,7 @@ for (const store of STORES) {
         const sessionId = await clone(ctx.server);
         assert.equal((await analyze(ctx.server, sessionId)).status, 202);
         await waitFor(() => fakes.llm.requests.some(isFirstCall), 5000, 'the first generator call');
-        assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 1, queued: 0 });
+        assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 1, queued: 0, reserved: 0 });
 
         const started = Date.now();
         ctx.server.signal('SIGTERM');

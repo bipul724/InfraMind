@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { SavedFilesAPI, SavedFile } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Download, Trash2, RefreshCw, FilePlus, FileCode, AlertCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
+import { downloadTextFile } from '@/lib/download';
 
 export const SavedFiles: React.FC = () => {
   const { user } = useAuth();
@@ -15,8 +16,10 @@ export const SavedFiles: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const fetchSavedFiles = async () => {
-    if (!user?.id) return;
+  // Loaded once per signed-in user, and again from the Refresh button
+  const userId = user?.id;
+  const fetchSavedFiles = useCallback(async () => {
+    if (!userId) return;
 
     setLoading(true);
     setError(null);
@@ -35,23 +38,15 @@ export const SavedFiles: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId, toast]);
 
   useEffect(() => {
-    if (user) {
-      fetchSavedFiles();
-    }
-  }, [user]);
+    void fetchSavedFiles();
+  }, [fetchSavedFiles]);
 
-  const handleDownload = (file: SavedFile) => {
-    const blob = new Blob([file.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // Saved under its base name: the workflow is stored as .github/workflows/ci.yml and
+  // downloads as ci.yml
+  const handleDownload = (file: SavedFile) => downloadTextFile(file.name, file.content);
 
   const handleDelete = async (file: SavedFile) => {
     if (!window.confirm(`Delete ${file.name}? This cannot be undone.`)) return;

@@ -97,7 +97,14 @@ const STATUS_ORDER: Record<SessionStatus, number> = {
 export const isStatusRegression = (current: SessionStatus, next: SessionStatus) =>
   STATUS_ORDER[next] < STATUS_ORDER[current] || (current !== next && STATUS_ORDER[next] === STATUS_ORDER[current]);
 
-// Same rule as isUuidV4 in server/utils/repository.js
+// A UUID v4 in any case: the same rule as isUuidV4 in server/utils/repository.js
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const isUuidV4 = (value: unknown): value is string =>
   typeof value === 'string' && UUID_V4_PATTERN.test(value);
+
+// A session id as the server issues and accepts it: a lower-case UUID v4, the rule of
+// isId in server/utils/sessionStore.js (the session routes answer 404 for any other
+// form, upper case included). A ?session= value is lower-cased before it is used.
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const isSessionId = (value: unknown): value is string =>
+  typeof value === 'string' && SESSION_ID_PATTERN.test(value);

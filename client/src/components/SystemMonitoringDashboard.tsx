@@ -16,6 +16,7 @@ import {
   Cpu,
   HardDrive
 } from 'lucide-react';
+import { API_BASE_URL } from '@/lib/api';
 
 interface SystemMetrics {
   uptime: number;
@@ -75,7 +76,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const response = await fetch('/api/metrics');
+        const response = await fetch(`${API_BASE_URL}/api/metrics`);
         if (!response.ok) {
           throw new Error('Failed to fetch metrics');
         }
@@ -88,7 +89,7 @@ export const SystemMonitoringDashboard: React.FC = () => {
 
     const fetchHealthStatus = async () => {
       try {
-        const response = await fetch('/health');
+        const response = await fetch(`${API_BASE_URL}/health`);
         if (!response.ok) {
           throw new Error('Failed to fetch health status');
         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ import {
   Plus,
   FileText,
   Loader2,
+  Play,
   RefreshCw
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +30,9 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { SavedFiles } from '@/components/dashboard/SavedFiles';
 import { useToast } from '@/hooks/use-toast';
 import { apiFetch } from '@/lib/apiClient';
+import { startAnalysis } from '@/lib/analysis';
+import { UNREACHABLE_MESSAGE, describeApiError, readApiError } from '@/lib/apiError';
+import { repoLabel } from '@/lib/githubUrl';
 import { isStatusRegression, isUuidV4 } from '@/lib/session';
 import type {
   AgentMessage,
@@ -79,10 +83,6 @@ const STATUS_START: Record<SessionStatus, { step: string; progress: number }> = 
   failed: { step: 'Analysis failed', progress: 0 }
 };
 
-// "https://github.com/owner/repo(.git)" -> "owner/repo"
-const repoLabel = (url: string) =>
-  url.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '') || url;
-
 export const ModernDashboard = () => {
   const { user, logout } = useAuth();
   const { user: githubUser, isConnected, isLoading, connectGitHub } = useGitHub();
@@ -98,6 +98,11 @@ export const ModernDashboard = () => {
   const [useManualUrl, setUseManualUrl] = useState(false);
   const [sessionView, setSessionView] = useState<SessionView | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Starting a session opened while still `cloned`: the request in flight (a ref, so a
+  // double click sends one request) and the outcome to show when it did not start
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
+  const [startNotice, setStartNotice] = useState<{ kind: 'busy' | 'error'; message: string } | null>(null);
 
   // GitHub connection status - use context values
   const githubUsername = githubUser?.login;
@@ -132,10 +137,22 @@ export const ModernDashboard = () => {
       clearSessionParam();
       return;
     }
+    // The server accepts session ids in lower case only (isSessionId in lib/session.ts): show
+    // and load that form
+    const lowerCased = sessionParam.toLowerCase();
+    if (sessionParam !== lowerCased) {
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('session', lowerCased);
+        return next;
+      }, { replace: true });
+      return;
+    }
 
     const id = sessionParam;
     let cancelled = false;
     setActiveTab('generate');
+    setStartNotice(null);
     setSessionView({
       id,
       phase: 'loading',
@@ -146,23 +163,19 @@ export const ModernDashboard = () => {
       generatedFiles: []
     });
 
-    // Returns true when the response was an error that has been handled
-    const handleFailure = (status: number): boolean => {
-      if (status === 404) {
+    // A failed load: 404 closes the view; anything else shows the server's message
+    // (null: the request did not reach the server) and offers Try Again
+    const handleFailure = async (response: Response | null) => {
+      if (response?.status === 404) {
         toast({ title: 'This analysis was not found or has expired', variant: 'destructive' });
         setSessionView(null);
         clearSessionParam();
-        return true;
+        return;
       }
-      const description =
-        status === 401
-          ? 'Your sign-in has expired. Sign in again to open this analysis.'
-          : status === 503
-            ? 'The service is unavailable right now. Please try again shortly.'
-            : 'Please try again.';
+      const description = response ? describeApiError(await readApiError(response, 'Please try again.')) : UNREACHABLE_MESSAGE;
+      if (cancelled) return;
       toast({ title: 'Could not load this analysis', description, variant: 'destructive' });
       setSessionView((previous) => (previous && previous.id === id ? { ...previous, phase: 'error' } : previous));
-      return true;
     };
 
     const load = async () => {
@@ -170,7 +183,7 @@ export const ModernDashboard = () => {
         const statusResponse = await apiFetch(`/api/status/${id}`);
         if (cancelled) return;
         if (!statusResponse.ok) {
-          handleFailure(statusResponse.status);
+          await handleFailure(statusResponse);
           return;
         }
         const session: SessionStatusResponse = await statusResponse.json();
@@ -198,7 +211,7 @@ export const ModernDashboard = () => {
         const filesResponse = await apiFetch(`/api/files/${id}`);
         if (cancelled) return;
         if (!filesResponse.ok) {
-          handleFailure(filesResponse.status);
+          await handleFailure(filesResponse);
           return;
         }
         const result: SessionFilesResponse = await filesResponse.json();
@@ -212,7 +225,7 @@ export const ModernDashboard = () => {
           ...(Array.isArray(result.errors) ? { errors: result.errors } : {})
         });
       } catch {
-        if (!cancelled) handleFailure(0);
+        if (!cancelled) await handleFailure(null);
       }
     };
     void load();
@@ -220,7 +233,7 @@ export const ModernDashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [sessionParam, reloadKey, clearSessionParam, toast]);
+  }, [sessionParam, reloadKey, clearSessionParam, setSearchParams, toast]);
 
   // Live updates for an opened session that is still in progress: socket events, and
   // the status poller's updates when events are missed (AgentProgress)
@@ -241,6 +254,28 @@ export const ModernDashboard = () => {
       return next;
     });
   }, []);
+
+  // POST /api/analyze for an opened session that is still `cloned`. On 202 the view moves
+  // to analyzing, and AgentProgress (socket and poller) takes over
+  const handleStartCloned = async (id: string) => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    setStartNotice(null);
+    try {
+      const outcome = await startAnalysis(id);
+      if (outcome.kind === 'started') {
+        setSessionView((previous) => (previous && previous.id === id && previous.status === 'cloned'
+          ? { ...previous, status: 'analyzing', currentStep: STATUS_START.analyzing.step, progress: STATUS_START.analyzing.progress }
+          : previous));
+      } else {
+        setStartNotice({ kind: outcome.kind, message: outcome.message });
+      }
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
 
   const handleGitHubConnect = async () => {
     try {
@@ -328,6 +363,34 @@ export const ModernDashboard = () => {
         </Alert>
       )}
 
+      {view.phase === 'ready' && view.status === 'cloned' && (
+        <Card>
+          <CardContent className="space-y-4 p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">This repository is cloned. Its analysis has not started yet.</p>
+              <Button onClick={() => void handleStartCloned(view.id)} disabled={starting} className="shrink-0">
+                {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                Start analysis
+              </Button>
+            </div>
+            {startNotice && (
+              <Alert variant={startNotice.kind === 'error' ? 'destructive' : 'default'}>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{startNotice.message}</span>
+                  {startNotice.kind === 'busy' && (
+                    <Button size="sm" variant="outline" onClick={() => void handleStartCloned(view.id)} disabled={starting} className="w-fit shrink-0">
+                      <RefreshCw className="h-4 w-4" />
+                      Retry
+                    </Button>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {view.phase === 'ready' && view.status && view.status !== 'failed' && (
         <Card>
           <CardContent className="p-5 sm:p-6">
@@ -410,8 +473,9 @@ export const ModernDashboard = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Generate Tab */}
-            <TabsContent value="generate" className="mt-0 space-y-4">
+            {/* Generate Tab: kept mounted while another tab is shown, so a run started here
+                keeps its socket and poller, and its completion still reaches Projects */}
+            <TabsContent value="generate" forceMount className="mt-0 space-y-4 data-[state=inactive]:hidden">
               <div className="flex items-center gap-2">
                 <Zap className="h-4 w-4 text-primary" />
                 <h3 className="text-sm font-semibold tracking-tight">AI Agent Generation</h3>

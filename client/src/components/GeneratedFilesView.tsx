@@ -3,6 +3,7 @@ import { Check, Copy, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { downloadTextFile } from '@/lib/download';
 
 // The three generated kinds (server/agents/index.js GENERATED_FILES), in display order.
 // name: the download name (a browser does not accept a path in a download name);
@@ -14,9 +15,6 @@ const GENERATED_FILE_KINDS: { key: string; name: string; path: string | null; do
   { key: 'githubActions', name: 'ci.yml', path: '.github/workflows/ci.yml', downloadNote: null },
   { key: 'envExample', name: '.env.example', path: null, downloadNote: 'Chrome saves this file as env.example, without the leading dot. Rename it to .env.example after downloading.' }
 ];
-
-// Long enough for the browser to have started the download before the URL goes away
-const REVOKE_OBJECT_URL_AFTER_MS = 1500;
 
 const lineCount = (content: string): number => {
   if (content === '') return 0;
@@ -59,15 +57,7 @@ export const GeneratedFilesView: React.FC<GeneratedFilesViewProps> = ({ files, s
     try {
       // octet-stream: with text/plain, Chrome appends ".txt" to a name without an
       // extension (Dockerfile -> Dockerfile.txt)
-      const url = URL.createObjectURL(new Blob([files[key]], { type: 'application/octet-stream' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = name;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      // Revoking at once can cancel the download in some browsers
-      setTimeout(() => URL.revokeObjectURL(url), REVOKE_OBJECT_URL_AFTER_MS);
+      downloadTextFile(name, files[key], 'application/octet-stream');
     } catch (error) {
       console.warn(`Download of ${name} failed (session ${sessionId ?? 'unknown'}):`, error);
       toast({ title: 'Download failed', description: `${name} could not be downloaded.`, variant: 'destructive' });

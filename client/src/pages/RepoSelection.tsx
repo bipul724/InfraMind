@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGitHub } from '@/contexts/GitHubContext';
@@ -6,12 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowRight, Search, GitBranch, Github, Globe, Link, Users } from 'lucide-react';
-import { TechStackSelector } from '@/components/TechStackSelector';
+import { ArrowRight, Github, Globe, Link, Users } from 'lucide-react';
 import { RepositorySelector } from '@/components/RepositorySelector';
+import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { apiFetch } from '@/lib/apiClient';
 import { startAnalysis } from '@/lib/analysis';
+import { GITHUB_RECONNECT_CODES, UNREACHABLE_MESSAGE, describeApiError, readApiError } from '@/lib/apiError';
+import { INVALID_REPO_URL_MESSAGE, canonicalRepoUrl, parseGitHubRepoUrl } from '@/lib/githubUrl';
+import { isSessionId } from '@/lib/session';
 
 // The repository object RepositorySelector passes to onRepositorySelect
 type SelectedRepository = Parameters<React.ComponentProps<typeof RepositorySelector>['onRepositorySelect']>[0];
@@ -23,17 +26,11 @@ export const RepoSelection = () => {
   const { toast } = useToast();
   const [repoUrl, setRepoUrl] = useState('');
   const [selectedRepository, setSelectedRepository] = useState<SelectedRepository | null>(null);
-  const [selectedTechStack, setSelectedTechStack] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('browse');
   // A session that was cloned but got 503 ANALYSIS_BUSY: starting the same repository
   // again retries its analysis without cloning again
   const [pendingSession, setPendingSession] = useState<{ source: string; sessionId: string } | null>(null);
-
-  const validateGitHubUrl = (url: string) => {
-    const githubRegex = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/;
-    return githubRegex.test(url);
-  };
 
   const handleRepositorySelect = (repository: SelectedRepository) => {
     setSelectedRepository(repository);
@@ -52,15 +49,13 @@ export const RepoSelection = () => {
       repositoryData = selectedRepository;
       finalRepoUrl = selectedRepository.cloneUrl;
     } else if (activeTab === 'manual' && repoUrl.trim()) {
-      if (!validateGitHubUrl(repoUrl.trim())) {
-        toast({
-          title: 'Error',
-          description: 'Please enter a valid GitHub repository URL (e.g., https://github.com/username/repo).',
-          variant: 'destructive',
-        });
+      // The server's own rules; the canonical form is what is sent
+      const parsed = parseGitHubRepoUrl(repoUrl);
+      if (!parsed) {
+        toast({ title: 'Invalid repository URL', description: INVALID_REPO_URL_MESSAGE, variant: 'destructive' });
         return;
       }
-      finalRepoUrl = repoUrl.trim();
+      finalRepoUrl = canonicalRepoUrl(parsed);
     } else {
       toast({
         title: 'Error',
@@ -71,6 +66,17 @@ export const RepoSelection = () => {
     }
 
     const source = repositoryData ? `repo:${repositoryData.fullName}` : `url:${finalRepoUrl}`;
+    // A failure shown with the server's text; a GitHub sign-in problem in the Browse flow
+    // also offers to reconnect GitHub
+    const showFailure = (description: string, code: string | null = null) => {
+      const reconnect = repositoryData && code && GITHUB_RECONNECT_CODES.has(code);
+      toast({
+        title: 'Could not start the analysis',
+        description,
+        variant: 'destructive',
+        ...(reconnect ? { action: <ToastAction altText="Reconnect GitHub" onClick={() => void connectGitHub()}>Reconnect GitHub</ToastAction> } : {})
+      });
+    };
 
     setLoading(true);
     try {
@@ -80,19 +86,31 @@ export const RepoSelection = () => {
         sessionId = pendingSession.sessionId;
       } else {
         // Clone repository; for repositoryData the server uses this user's stored GitHub connection
-        const cloneResponse = await apiFetch('/api/clone-repo', {
-          method: 'POST',
-          body: JSON.stringify({
-            repoUrl: finalRepoUrl,
-            repositoryData
-          }),
-        });
-
-        if (!cloneResponse.ok) {
-          throw new Error('Failed to clone repository');
+        let cloneResponse: Response;
+        try {
+          cloneResponse = await apiFetch('/api/clone-repo', {
+            method: 'POST',
+            body: JSON.stringify({
+              repoUrl: finalRepoUrl,
+              repositoryData
+            }),
+          });
+        } catch {
+          showFailure(UNREACHABLE_MESSAGE);
+          return;
         }
 
-        const cloneData = await cloneResponse.json();
+        if (!cloneResponse.ok) {
+          const error = await readApiError(cloneResponse, 'The repository could not be cloned. Please try again.');
+          showFailure(describeApiError(error), error.code);
+          return;
+        }
+
+        const cloneData = await cloneResponse.json().catch(() => null);
+        if (!isSessionId(cloneData?.sessionId)) {
+          showFailure('The server sent an unexpected answer. Please try again.');
+          return;
+        }
         sessionId = cloneData.sessionId;
       }
 
@@ -110,7 +128,8 @@ export const RepoSelection = () => {
       }
       if (outcome.kind === 'error') {
         setPendingSession(null);
-        throw new Error(outcome.message);
+        showFailure(outcome.message);
+        return;
       }
 
       setPendingSession(null);
@@ -123,44 +142,11 @@ export const RepoSelection = () => {
       navigate(`/dashboard?session=${sessionId}`);
       
     } catch (error) {
-      console.error('Error generating CI/CD:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to process repository. Please try again.',
-        variant: 'destructive',
-      });
+      console.error('Error starting the analysis:', error);
+      showFailure('Something went wrong in the browser. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const exampleRepos = [
-    {
-      name: 'react-todo-app',
-      url: 'https://github.com/example/react-todo-app',
-      description: 'A modern React todo application with TypeScript',
-      language: 'TypeScript',
-      techStack: 'react'
-    },
-    {
-      name: 'node-api-server',
-      url: 'https://github.com/example/node-api-server',
-      description: 'RESTful API server built with Node.js and Express',
-      language: 'JavaScript',
-      techStack: 'node'
-    },
-    {
-      name: 'python-ml-project',
-      url: 'https://github.com/example/python-ml-project',
-      description: 'Machine learning project with FastAPI backend',
-      language: 'Python',
-      techStack: 'python'
-    }
-  ];
-
-  const handleExampleSelect = (example: typeof exampleRepos[0]) => {
-    setRepoUrl(example.url);
-    setSelectedTechStack(example.techStack);
   };
 
   return (
@@ -233,7 +219,7 @@ export const RepoSelection = () => {
                         className="w-full font-mono text-[13px]"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Example: <span className="font-mono">https://github.com/facebook/react</span>
+                        Example: <span className="font-mono">https://github.com/octocat/Hello-World</span>
                       </p>
                     </div>
                   </div>
@@ -264,41 +250,6 @@ export const RepoSelection = () => {
           </Card>
 
           <div className="space-y-6">
-            {/* Example Repositories */}
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="text-base">Sample URLs</CardTitle>
-                <CardDescription>
-                  Placeholder entries. Use This only fills in the Manual URL field; the repositories are not checked to exist.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-2">
-                  {exampleRepos.map((example, index) => (
-                    <div
-                      key={index}
-                      className="group flex cursor-pointer items-start justify-between gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/50"
-                      onClick={() => handleExampleSelect(example)}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                           <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
-                           <span className="truncate font-mono text-[13px] font-medium">{example.name}</span>
-                           <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                            {example.language}
-                          </span>
-                        </div>
-                         <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{example.description}</p>
-                      </div>
-                      <Button variant="ghost" size="sm" className="h-8 shrink-0 px-2.5 text-primary group-hover:bg-card">
-                        Use This
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
             {/* GitHub Connection Notice */}
             <div className="rounded-lg border border-primary/20 bg-primary/[0.05] p-5">
               <div className="flex items-start gap-3">

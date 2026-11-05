@@ -26,5 +26,7 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The node --test files (src/lib/*.test.ts) import node:test and the server: not app code
+  "exclude": ["src/**/*.test.ts"]
 }

@@ -65,6 +65,7 @@ The server exits at startup without these, listing every problem at once (`start
 - [ ] `/dashboard?session=<id>` (where `/select-repo` lands as soon as an analysis has started, and the "View" button in Results from This Visit) shows the run live and then a completed session's files; an unknown id shows "This analysis was not found or has expired"
 - [ ] During a run the three step cards move one by one (Running, then Done); with the browser offline for a few seconds mid-run, the run still completes on screen within about 5 s of coming back (status polling)
 - [ ] A second account can see neither the first account's sessions (404 on `/api/status/:sessionId`) nor its saved files
+- [ ] Cross-tab user switch: with an analysis open in tab 1 (`/dashboard?session=<id>`), sign in as a different account in tab 2. Without a reload, tab 1 shows the second account (its name in the header), says the analysis was not found, and none of the first account's files are on screen
 - [ ] After a backend restart, a completed session's files are still returned by `GET /api/files/:sessionId` (`SESSION_STORE=database`)
 - [ ] `server/logs/` and the `ai_call` lines contain no tokens or prompt text ([server/OBSERVABILITY.md](server/OBSERVABILITY.md))
 
@@ -77,7 +78,6 @@ Each item is a fact about the code today, for deciding what to fix before launch
 - The step after an agent's event is that agent's own step name (for example "Analyzing codebase structure" while the generator runs), because the event is sent when the agent finishes (`runAnalysisJob` in `server/server.js`).
 - Chrome saves the `.env.example` download as `env.example`: it removes a leading dot from download names, so the user renames the file (`client/src/components/GeneratedFilesView.tsx` shows this under the file).
 - "Save to Account" is remembered for the page load only: after a reload, or when the same analysis is opened in a new tab with `/dashboard?session=<id>`, the button is enabled again and a second save inserts a second set of rows (`client/src/components/AgentProgress.tsx`).
-- Switching away from the dashboard's Generate tab during a run unmounts the generation form (inactive tab content is not rendered, `client/src/components/ui/tabs.tsx`), so that run's progress view and its entry in Results from This Visit are lost. The server still finishes the run.
 - Rate-limit counters are kept in memory by each server process: a second instance counts separately, and a restart resets every count (`server/utils/security.js`).
 - `TRUST_PROXY` defaults to 0 and is not set in `render.yaml`: behind Render's proxy, every visitor shares one bucket for the per-IP limits until it is set (`server/utils/config.js`).
 - File validation checks format and the workflow policy only. It does not build the image, run the workflow, or check that the `.env.example` variables are complete (`server/agents/files.js`).

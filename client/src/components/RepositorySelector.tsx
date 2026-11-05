@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Alert, AlertDescription } from './ui/alert';
 import { apiFetch } from '@/lib/apiClient';
+import { GITHUB_RECONNECT_CODES, UNREACHABLE_MESSAGE, describeApiError, readApiError } from '@/lib/apiError';
 import { 
   Github, 
   Search, 
@@ -81,7 +82,8 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
   const [selectedOrg, setSelectedOrg] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The message shown, and the server's code (a GitHub sign-in problem offers Reconnect)
+  const [error, setError] = useState<{ message: string; code: string | null } | null>(null);
   const [user, setUser] = useState<GitHubUser | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -99,10 +101,18 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
         ? `/api/github/organizations/${encodeURIComponent(orgName)}/repositories?page=${page}&per_page=20`
         : `/api/github/repositories?page=${page}&per_page=20`;
 
-      const response = await apiFetch(endpoint);
+      let response: Response;
+      try {
+        response = await apiFetch(endpoint);
+      } catch {
+        setError({ message: UNREACHABLE_MESSAGE, code: null });
+        return;
+      }
 
       if (!response.ok) {
-        throw new Error('Failed to fetch repositories');
+        const failure = await readApiError(response, 'Your repositories could not be loaded. Please try again.');
+        setError({ message: describeApiError(failure), code: failure.code });
+        return;
       }
 
       const data = await response.json();
@@ -120,8 +130,9 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
       setHasMore(data.pagination.has_more);
       setCurrentPage(page);
     } catch (error) {
-      console.error('Error fetching repositories:', error);
-      setError('Failed to fetch repositories. Please try again.');
+      // An unexpected body: never shown raw
+      console.error('Error reading the repository list:', error);
+      setError({ message: 'The server sent an unexpected answer. Please try again.', code: null });
     } finally {
       setLoading(false);
     }
@@ -257,7 +268,15 @@ export const RepositorySelector: React.FC<RepositorySelectorProps> = ({
         <div>
           {error && (
             <Alert className="mb-4" variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{error.message}</span>
+                {error.code && GITHUB_RECONNECT_CODES.has(error.code) && (
+                  <Button size="sm" variant="outline" onClick={onConnect} className="w-fit shrink-0">
+                    <Github className="h-4 w-4" />
+                    Reconnect GitHub
+                  </Button>
+                )}
+              </AlertDescription>
             </Alert>
           )}
 
