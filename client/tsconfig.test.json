@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
+    "incremental": true,
     "allowJs": true,
     "checkJs": false,
     "types": ["node"],

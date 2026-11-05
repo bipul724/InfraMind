@@ -181,7 +181,102 @@ cd client && npm run build # tsc and vite build
 cd client && npm run lint
 ```
 
-From the repository root, run `npm run e2e` with Node 22.23.4 or later on the Node 22 line and Google Chrome installed. Playwright uses `channel: 'chrome'`; it does not download a browser. The suite starts loopback Supabase auth/PostgREST, GitHub, git and LLM fakes, the real server with an in-memory session store, and a Vite preview of a production client build. Build-time `VITE_*` values come from setup with environment-file loading disabled. Browser requests to hosts other than `127.0.0.1` are aborted and reported. Setup and teardown stop the services even when a test fails; builds and reports are gitignored.
+From the repository root, run `npm run e2e` with Node 22.23.4 or Node 24 and Google Chrome installed. Playwright uses `channel: 'chrome'`; it does not download a browser. The suite starts loopback Supabase auth/PostgREST, GitHub, git and LLM fakes, the real server with an in-memory session store, and a Vite preview of a production client build. Build-time `VITE_*` values come from setup with environment-file loading disabled. Browser requests to hosts other than `127.0.0.1` are aborted and reported. Setup and teardown stop the services even when a test fails; builds and reports are gitignored.
+
+## CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes to `main` and every pull request. Superseded runs on the same ref are cancelled. It uses read-only repository permissions, SHA-pinned actions, npm lockfile caching and time limits for every job. Test services use local fakes and throwaway data; no repository secrets or live provider credentials are required.
+
+| Job | Node | Checks |
+| --- | --- | --- |
+| `client` | 22 and 24 | Clean install, lint, TypeScript check and production build, library and component tests |
+| `server` | 22 and 24 | Clean install, Prisma client generation, offline server tests |
+| `server-db` | 24 | Clean install, Prisma client generation, server tests with a health-checked `postgres:17` service |
+| `e2e` | 24 | Clean installs in all three directories, Prisma client generation, end-to-end type check, Chrome smoke tests; upload `test-results/` on failure |
+| `audit` | 24 | Clean installs in all three directories, then `npm audit --audit-level=high` in each |
+
+Run these commands from the repository root with the job's Node version active. Repeat the client and server blocks on both Node 22 and 24. Node 22 must be at least 22.18 because the library tests use [Node's default TypeScript stripping](https://nodejs.org/en/blog/release/v22.18.0). `git` must be installed for server tests. `server/generated/` is gitignored, so both server and browser jobs generate it after installation.
+
+Client:
+
+```bash
+(
+  set -e
+  cd client
+  npm ci
+  npm run lint
+  npm run build
+  npm test
+)
+```
+
+Offline server:
+
+```bash
+(
+  set -e
+  cd server
+  npm ci
+  npm run db:generate
+  npm test
+)
+```
+
+Database server, on Node 24 with Docker running. Docker chooses a free loopback port; the trap stops the throwaway container on success or failure. The password below is fixed test data, matching the service in CI.
+
+```bash
+(
+  set -e
+  ci_db_container=$(docker run --rm -d \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=inframind-ci \
+    -e POSTGRES_DB=inframind_test \
+    -p 127.0.0.1::5432 \
+    --health-cmd 'pg_isready -U postgres -d inframind_test' \
+    --health-interval 1s --health-timeout 5s --health-retries 30 \
+    postgres:17)
+  trap 'docker stop "$ci_db_container" >/dev/null' EXIT
+  while [ "$(docker inspect --format '{{.State.Health.Status}}' "$ci_db_container")" = starting ]; do
+    sleep 1
+  done
+  test "$(docker inspect --format '{{.State.Health.Status}}' "$ci_db_container")" = healthy
+  ci_db_port=$(docker port "$ci_db_container" 5432/tcp | sed 's/.*://')
+  cd server
+  npm ci
+  npm run db:generate
+  TEST_DATABASE_URL="postgresql://postgres:inframind-ci@127.0.0.1:$ci_db_port/inframind_test" npm test
+)
+```
+
+End to end, on Node 24 with Google Chrome installed. Playwright uses the installed browser through `channel: 'chrome'`; no browser download command is needed. `e2e/` is type-checked by `typecheck:e2e`; it is not linted because the client's ESLint configuration is scoped to `client/`.
+
+```bash
+(
+  set -e
+  npm ci
+  (cd client && npm ci)
+  (cd server && npm ci)
+  (cd server && npm run db:generate)
+  npm run typecheck:e2e
+  npm run e2e
+)
+```
+
+Audit, on Node 24:
+
+```bash
+(
+  set -e
+  npm ci
+  (cd client && npm ci)
+  (cd server && npm ci)
+  npm audit --audit-level=high
+  (cd client && npm audit --audit-level=high)
+  (cd server && npm audit --audit-level=high)
+)
+```
+
+The first hosted run must confirm the runner's installed Chrome, service-container networking and health check, npm cache restore/save, and failure-artifact upload. The owner then enables required checks for `main`; see [PRODUCTION-CHECKLIST.md](PRODUCTION-CHECKLIST.md#ci-and-branch-protection-owner).
 
 ## License
 

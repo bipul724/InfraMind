@@ -2,6 +2,11 @@
 
 A checklist for an operator preparing a deployment. Nothing here is pre-ticked: each item is something to do or check on your own deployment. Setup details are in [DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md).
 
+## CI and branch protection (owner)
+
+- [ ] After the first push, confirm every CI job is green in the repository's [Actions tab](https://github.com/bipul724/InfraMind/actions): `client` and `server` on Node 22 and 24, `server-db`, `e2e` and `audit`.
+- [ ] In the repository's GitHub settings, configure branch protection for `main` to require all CI jobs to pass before merging. Only the owner can enable these required checks.
+
 ## Configuration the server requires
 
 The server exits at startup without these, listing every problem at once (`startServer` in `server/server.js`, `server/utils/config.js`):
