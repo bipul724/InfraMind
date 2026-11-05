@@ -33,10 +33,13 @@ React 18 + TypeScript app built with Vite and Tailwind CSS (`package.json`).
 ## Scripts
 
 - `npm run dev`: start the Vite development server
-- `npm run build`: `tsc -b && vite build`, output in `dist/`. `tsc -b` type-checks every app file in `src/` in strict mode, with unused locals and parameters reported as errors (`tsconfig.app.json`) and `vite.config.ts` (`tsconfig.node.json`); a type error fails the build
+- `npm run build`: `tsc -b && vite build`, output in `dist/`. The three TypeScript projects check the app, Vite/Vitest configuration, and both kinds of tests in strict mode; a test type error fails the build
 - `npm run lint`: ESLint with `--max-warnings 0`; it must pass with zero problems
 - `npm run preview`: serve the production build
-- `npm test`: `node --test src/lib/*.test.ts` (Node 22.18 or later, which runs TypeScript directly): the GitHub URL parser's parity with the server's (`src/lib/githubUrl.test.ts`), the API error messages (`src/lib/apiError.test.ts`), the sign-in return path (`src/lib/returnTo.test.ts`), sign-in error messages (`src/lib/oauthError.test.ts`), downloads (`src/lib/download.test.ts`) and the Saved Files button names (`src/lib/savedFileLabel.test.ts`). These files are excluded from the app type-check (`tsconfig.app.json`) and are not in the bundle
+- `npm test`: runs the existing `node --test src/lib/*.test.ts` library tests, including parser parity with the server, then the Vitest component suite
+- `npm run test:components`: runs only Vitest, using jsdom and Testing Library. Put component specs beside their components as `src/**/*.spec.tsx`; import Vitest helpers explicitly. `src/test/setup.ts` cleans up each rendered tree. `vitest.config.ts` disables environment-file loading and supplies loopback test values
+
+Use Node 22.23.4 or later on the Node 22 line: jsdom requires at least 22.22.2. Both library tests (`src/**/*.test.ts`) and component specs are checked by `tsconfig.test.json`, including the library tests' JavaScript import from the server, and stay out of the production bundle. From the repository root, `npm run e2e` runs the production client against offline services in installed Google Chrome; see the root README.
 
 ## Routes
 

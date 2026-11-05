@@ -176,10 +176,12 @@ The legacy generator and the mock and debug entry points were removed; see [ARCH
 
 ```bash
 cd server && npm test      # node --test suite in server/test/
-cd client && npm test      # node --test: the client's URL parser against the server's, API error messages
+cd client && npm test      # node --test library tests, then Vitest component specs
 cd client && npm run build # tsc and vite build
 cd client && npm run lint
 ```
+
+From the repository root, run `npm run e2e` with Node 22.23.4 or later on the Node 22 line and Google Chrome installed. Playwright uses `channel: 'chrome'`; it does not download a browser. The suite starts loopback Supabase auth/PostgREST, GitHub, git and LLM fakes, the real server with an in-memory session store, and a Vite preview of a production client build. Build-time `VITE_*` values come from setup with environment-file loading disabled. Browser requests to hosts other than `127.0.0.1` are aborted and reported. Setup and teardown stop the services even when a test fails; builds and reports are gitignored.
 
 ## License
 

@@ -397,6 +397,12 @@ Process errors and shutdown (`server/server.js`):
 
 The full variable list with comments is in `server/.env.example`.
 
+## Tests
+
+`cd server && npm test` runs the Node integration and unit suites with local auth, GitHub, LLM, git and database fakes (`server/test/`). `cd client && npm test` keeps the Node library tests, including parser parity with the server, and then runs jsdom component specs with Vitest and Testing Library. Component specs live in `src/**/*.spec.tsx`; `npm run test:components` runs them alone. `tsc -b` checks three projects, including both client test runners through `tsconfig.test.json`.
+
+The root `npm run e2e` runs six Playwright smoke tests in installed Google Chrome against a production client preview, the real server using a memory session store, and loopback fakes. It covers sign-in, public and private runs, downloads and saved files, ownership, return-to navigation and sign-out. The browser aborts external hosts; the client build receives explicit fake configuration without loading environment files. Setup and teardown own every service; generated output is ignored.
+
 ## 9. Code that is not part of the running system
 
 `npm start` runs `node server.js`. Every other `.js` file in `server/` is loaded by it, by `npm test`, or by a script in `server/package.json` (`scripts/ai-smoke.js`, `scripts/assert-local-db.js`); `healthcheck.js` is a probe for a container `HEALTHCHECK` (Render uses `healthCheckPath: /health` instead).

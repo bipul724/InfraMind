@@ -7,6 +7,9 @@ export default {
 		"./components/**/*.{ts,tsx}",
 		"./app/**/*.{ts,tsx}",
 		"./src/**/*.{ts,tsx}",
+		// Ignore component fixtures so test-only class names cannot change the production CSS.
+		"!./src/**/*.spec.tsx",
+		"!./src/test/**/*",
 	],
 	prefix: "",
 	theme: {

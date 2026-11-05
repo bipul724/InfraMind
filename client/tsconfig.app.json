@@ -28,6 +28,6 @@
     }
   },
   "include": ["src"],
-  // The node --test files (src/lib/*.test.ts) import node:test and the server: not app code
-  "exclude": ["src/**/*.test.ts"]
+  // The test project checks both runners without adding their code to the application project.
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.tsx", "src/test/**"]
 }
