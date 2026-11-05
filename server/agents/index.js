@@ -3,7 +3,7 @@ import path from 'path';
 import { redactSecrets } from '../utils/repository.js';
 import { AiError, generateText } from '../ai/index.js';
 import { extractFileContent } from './files.js';
-import { collectRepositoryEvidence, detectPythonFrameworks, readRepoJson } from './grounding.js';
+import { collectRepositoryEvidence, detectPythonFrameworks, findDockerfiles, fromPosix, readRepoJson } from './grounding.js';
 import {
   buildGeneratorSystemPrompt,
   buildVerifierSystemPrompt,
@@ -36,50 +36,6 @@ class AgentState {
     this.meta = {}; // { sessionId, userId }: passed to the AI call records only, never to a provider
   }
 }
-
-// Planner Agent - Decides what needs to be analyzed and built
-const plannerAgent = async (state) => {
-  console.log('🤔 Planner Agent: Planning project analysis...');
-  
-  state.currentStep = 'Planning project analysis';
-  state.progress = 20;
-  
-  const plannerPrompt = `You are a DevOps Planning Agent. Your task is to analyze the repository structure and create a comprehensive plan.
-
-Repository: ${state.repoName}
-
-Based on typical project patterns, create a plan that includes:
-1. File types to analyze for tech stack detection
-2. Key configuration files to examine
-3. Dependencies to check
-4. Deployment strategy recommendations
-
-Return a JSON plan with these categories.`;
-
-  try {
-    const response = await generateText({
-      task: 'planner',
-      system: plannerPrompt,
-      prompt: `Plan the analysis for: ${state.repoName}`,
-      meta: state.meta
-    });
-    
-    state.messages.push({
-      agent: 'planner',
-      message: 'Created comprehensive analysis plan',
-      timestamp: new Date().toISOString()
-    });
-    
-    // Parse the response to extract planning information
-    const planContent = response.text;
-    state.analysisplan = planContent;
-    
-    return state;
-  } catch (error) {
-    state.errors.push(`Planner Agent Error: ${publicErrorMessage('Planner', error)}`);
-    return state;
-  }
-};
 
 // Analyzer Agent - Analyzes the codebase structure and determines tech stack
 const analyzerAgent = async (state) => {
@@ -338,8 +294,8 @@ async function analyzeTechStack(repoPath, projectFiles) {
     if (fileNames.some(f => f.includes('spring'))) techStack.frameworks.push('spring');
   }
   
-  // Check for containerization
-  if (fileNames.includes('Dockerfile')) techStack.tools.push('docker');
+  // Check for containerization: a Dockerfile at any depth (findDockerfiles); Compose top-level only
+  if (findDockerfiles(projectFiles).length > 0) techStack.tools.push('docker');
   if (COMPOSE_FILES.some((name) => fileNames.includes(name))) techStack.tools.push('docker-compose');
   if (hasKubernetesEvidence(projectFiles)) techStack.tools.push('kubernetes');
   
@@ -380,10 +336,11 @@ async function performDetailedAnalysis(repoPath, projectFiles) {
   analysis.configFiles = fileNames.filter(f => configFiles.includes(f));
   
   // Generate recommendations
-  if (!fileNames.includes('Dockerfile')) {
+  if (findDockerfiles(projectFiles).length === 0) {
     analysis.recommendations.push('Add Dockerfile for containerization');
   }
-  if (!fileNames.includes('.github/workflows')) {
+  // projectStructure keys use the platform separator
+  if (!fileNames.includes(fromPosix('.github/workflows'))) {
     analysis.recommendations.push('Add GitHub Actions for CI/CD');
   }
   if (!fileNames.includes('.env.example')) {
@@ -393,10 +350,10 @@ async function performDetailedAnalysis(repoPath, projectFiles) {
   return analysis;
 }
 
-// The four agents, in order, with the progress value each one reports when it finishes
-// (B2.1: the same 20/50/80/95 the agents set on state.progress when they start)
+// The three agents, in order, with the progress value each one reports when it finishes
+// (B2.1: the same 50/80/95 the agents set on state.progress when they start). B2.6
+// removed the planner, which made one AI call per run that nothing read.
 const AGENT_SEQUENCE = [
-  { agent: 'planner', run: (state) => plannerAgent(state), progress: 20 },
   { agent: 'analyzer', run: (state) => analyzerAgent(state), progress: 50 },
   { agent: 'generator', run: (state) => generatorAgent(state), progress: 80 },
   { agent: 'verifier', run: (state) => verifierAgent(state), progress: 95 }
@@ -431,8 +388,8 @@ export function createAgentWorkflow() {
 
 // Main function to run the agent pipeline
 // repoName is the "owner/repo" label shown to the LLM; repoPath is only used locally;
-// onAgentDone (optional) gets a report after each of the four agents (B2.1; it replaces
-// the single callback that ran once after all four); meta ({ sessionId, userId })
+// onAgentDone (optional) gets a report after each of the three agents (B2.1; it replaces
+// the single callback that ran once after all of them); meta ({ sessionId, userId })
 // reaches only the AI call records
 export async function runAgentPipeline(repoName, repoPath, onAgentDone = null, meta = {}) {
   console.log('🚀 Starting AI Agent Pipeline...');
@@ -453,4 +410,4 @@ export async function runAgentPipeline(repoName, repoPath, onAgentDone = null, m
   }
 }
 
-export { AgentState, AGENT_SEQUENCE, GENERATED_FILES, scanProjectStructure, analyzeTechStack };
+export { AgentState, AGENT_SEQUENCE, GENERATED_FILES, scanProjectStructure, analyzeTechStack, performDetailedAnalysis };

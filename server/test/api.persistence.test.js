@@ -56,7 +56,7 @@ async function prismaFor(db) {
   return createPrismaClient({ DATABASE_URL: db.url });
 }
 
-async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresAt = new Date(Date.now() + 3600 * 1000), lastProgress, clonedAt } = {}) {
+async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresAt = new Date(Date.now() + 3600 * 1000), lastProgress, clonedAt, messages, errors } = {}) {
   const id = crypto.randomUUID();
   const completed = status === 'completed';
   await prisma.analysisSession.create({
@@ -79,8 +79,9 @@ async function seed(prisma, { userId = USER_A.id, status = 'completed', expiresA
         techStack: { primary: 'node', frameworks: [] },
         codebaseAnalysis: { entryPoints: ['index.js'] },
         verificationResults: 'verified',
-        messages: [{ agent: 'planner', message: 'ok' }],
-        errors: []
+        // agent 'planner' stands for a session stored before B2.6 removed the planner agent
+        messages: messages ?? [{ agent: 'planner', message: 'ok' }],
+        errors: errors ?? []
       } : {}),
       ...(lastProgress ? { lastProgress } : {})
     }
@@ -170,6 +171,31 @@ describe('database sessions: restart, ownership, recovery and cleanup', { skip: 
     const second = await read3(restarted, ids.completed, fakes.tokens.A);
     assert.deepEqual(second, first, 'byte-identical after a restart');
     await restarted.stop();
+  });
+
+  test('1b. B2.6: a session stored with the planner\'s message and a Planner Agent Error still answers 200 with the same shape', async () => {
+    const messages = [
+      { agent: 'planner', message: 'Created comprehensive analysis plan', timestamp: '2026-11-04T10:00:11.000Z' },
+      { agent: 'analyzer', message: 'Detected tech stack: node', timestamp: '2026-11-04T10:00:12.000Z' },
+      { agent: 'generator', message: 'Generated 3 of 3 files', timestamp: '2026-11-04T10:00:40.000Z' },
+      { agent: 'verifier', message: 'Review complete: see the review text', timestamp: '2026-11-04T10:00:59.000Z' }
+    ];
+    const errors = ['Planner Agent Error: AI providers are unavailable'];
+    const id = await seed(client.prisma, { messages, errors });
+    const read = await read3(server, id, fakes.tokens.A);
+    assert.equal(read.status.status, 200);
+    assert.deepEqual(Object.keys(JSON.parse(read.status.text)), ['sessionId', 'status', 'repoUrl', 'repoName', 'createdAt', 'clonedAt', 'analysisStartedAt', 'completedAt']);
+    assert.equal(read.files.status, 200);
+    assert.equal(read.files.text, JSON.stringify({
+      files: FILES,
+      techStack: { primary: 'node', frameworks: [] },
+      codebaseAnalysis: { entryPoints: ['index.js'] },
+      verificationResults: 'verified',
+      messages,
+      errors,
+      metadata: { repoUrl: 'https://github.com/octocat/Hello-World', repoName: 'Hello-World', completedAt: at(60).toISOString() }
+    }));
+    assert.equal(read.download.status, 200);
   });
 
   test('2. another user gets the same 404 as an unknown id, on every route and on the socket', async () => {

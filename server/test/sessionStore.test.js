@@ -28,6 +28,7 @@ const RESULT = {
   techStack: { primary: 'node', frameworks: ['express'] },
   codebaseAnalysis: { entryPoints: ['index.js'] },
   verificationResults: 'looks fine',
+  // agent 'planner' stands for a session stored before B2.6 removed the planner agent
   messages: [{ agent: 'planner', message: 'ok' }],
   errors: []
 };
@@ -260,7 +261,7 @@ function contractSuite(label, setup, { skip = false } = {}) {
       const start = clock.t;
       const old = await store().create(FIELDS);
       await store().saveResult(old.id, RESULT);
-      await store().recordAiCall({ task: 'planner', provider: 'gemini', model: 'm', attempt: 1, outcome: 'ok', httpStatus: 200, latencyMs: 5, sessionId: old.id, userId: USER_A });
+      await store().recordAiCall({ task: 'verifier', provider: 'gemini', model: 'm', attempt: 1, outcome: 'ok', httpStatus: 200, latencyMs: 5, sessionId: old.id, userId: USER_A });
 
       clock.t = start + SESSION_TTL_MS - 1;
       const fresh = await store().create(FIELDS);
@@ -274,7 +275,7 @@ function contractSuite(label, setup, { skip = false } = {}) {
       assert.ok(await store().get(fresh.id));
       assert.equal(await ctx.fileCount(old.id), 0, 'files cascade');
       const calls = await ctx.aiCalls();
-      const call = calls.find((c) => c.task === 'planner' && c.userId === USER_A && c.latencyMs === 5);
+      const call = calls.find((c) => c.task === 'verifier' && c.userId === USER_A && c.latencyMs === 5);
       assert.ok(call, 'the call record survives its session');
       assert.equal(call.sessionId, null, 'session_id is set to null');
 
@@ -293,7 +294,7 @@ function contractSuite(label, setup, { skip = false } = {}) {
         outcome: 'server_error', httpStatus: 503, latencyMs: 812.7, inputTokens: null, outputTokens: 33,
         sessionId: id, userId: USER_B, prompt: 'PROMPT_MARKER', text: 'RESPONSE_MARKER'
       });
-      await store().recordAiCall({ task: 'planner', provider: 'gemini', model: 'm', attempt: 1, outcome: 'ok', httpStatus: null, latencyMs: 1, sessionId: 'not-a-uuid', userId: 'nope' });
+      await store().recordAiCall({ task: 'verifier', provider: 'gemini', model: 'm', attempt: 1, outcome: 'ok', httpStatus: null, latencyMs: 1, sessionId: 'not-a-uuid', userId: 'nope' });
       const calls = await ctx.aiCalls();
       const call = calls.find((c) => c.outcome === 'server_error' && c.sessionId === id);
       assert.deepEqual(
@@ -301,7 +302,7 @@ function contractSuite(label, setup, { skip = false } = {}) {
         { task: 'generator', provider: 'openrouter', model: 'some/model', attempt: 2, outcome: 'server_error', httpStatus: 503, latencyMs: 813, inputTokens: null, outputTokens: 33, userId: USER_B }
       );
       assert.ok(!JSON.stringify(calls).includes('MARKER'));
-      const invalidIds = calls.find((c) => c.task === 'planner' && c.latencyMs === 1);
+      const invalidIds = calls.find((c) => c.task === 'verifier' && c.latencyMs === 1);
       assert.equal(invalidIds.sessionId, null);
       assert.equal(invalidIds.userId, null);
     });

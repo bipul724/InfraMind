@@ -32,7 +32,7 @@ group by provider, model, outcome
 order by provider, outcome;
 ```
 
-Other AI log lines: the startup route summary (`🤖 AI route planner: ...`, provider names and models only), circuit-breaker warnings (`ai provider <name> circuit open for <n>s (<outcome>)`), and one warning per generated file that fails validation (`Generator validation failed: kind=<kind> attempt=<1|2> errors=<list>`, fixed text and line or job/step numbers only, never file content) (`server/server.js`, `server/ai/client.js`, `server/agents/index.js`).
+Other AI log lines: the startup route summary (`🤖 AI route generator: ...` and `🤖 AI route verifier: ...`, provider names and models only), a warning when the retired `AI_ROUTE_PLANNER` is set (`⚠️ AI_ROUTE_PLANNER is set but no longer used ...`, the name only, never the value), circuit-breaker warnings (`ai provider <name> circuit open for <n>s (<outcome>)`), and one warning per generated file that fails validation (`Generator validation failed: kind=<kind> attempt=<1|2> errors=<list>`, fixed text and line or job/step numbers only, never file content) (`server/server.js`, `server/ai/client.js`, `server/agents/index.js`).
 
 ## Log files
 

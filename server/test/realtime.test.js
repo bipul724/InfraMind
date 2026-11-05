@@ -381,6 +381,7 @@ describe('B2.1 (T-207): late subscribers get the newest state', () => {
 
   test('while the newest write is still pending, a subscriber gets the in-memory payload, not the older stored one', async () => {
     const target = extraSessionsOfA[1];
+    // agent 'planner' stands for a session stored before B2.6 removed the planner agent
     await realtime.emitProgress(target, { step: 'agent 1 done', progress: 20, status: 'analyzing', messages: [{ agent: 'planner', message: 'm1' }] });
     assert.equal(sessions.get(target).lastProgress.step, 'agent 1 done', 'stored: the older event');
 

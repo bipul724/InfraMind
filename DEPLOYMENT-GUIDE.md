@@ -112,7 +112,6 @@ GITHUB_TOKEN_ENC_KEY=<openssl rand -base64 32>
 ```bash
 AI_PROVIDERS=gemini,groq,openrouter      # default chain, in order
 # Optional per-task chains:
-# AI_ROUTE_PLANNER=gemini,groq
 # AI_ROUTE_GENERATOR=gemini,openrouter
 # AI_ROUTE_VERIFIER=groq,gemini
 GEMINI_API_KEY=...
@@ -121,8 +120,9 @@ GEMINI_MODEL=<model id>
 ```
 
 - Every provider in any chain needs `<NAME>_API_KEY` and `<NAME>_MODEL`. There are no default model IDs (`server/ai/providers.js`, `server/ai/config.js`).
-- Up to 300 of the repository's file paths, the detected tech stack, and the contents of its top-level manifests (such as `requirements.txt`, `pyproject.toml`, `package.json`; up to 8 KB each, 32 KB in total) and of an existing Dockerfile and workflows (up to 4 KB each) are sent to these providers. `.env` files are never read ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers)).
-- Credentials found in manifests and in the existing Dockerfile and workflow excerpts are redacted on a best-effort basis before they reach a prompt: URL user names and passwords, tokens shaped like known secrets, and the values of keys containing TOKEN, SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY become `REDACTED` (`redactCredentials` in `server/agents/grounding.js`); keep secrets out of manifests.
+- `AI_ROUTE_PLANNER` is no longer used (the planner agent was removed). If it is still set, for example in an existing Render environment, the server starts and logs one warning naming it; it can be removed.
+- Up to 300 of the repository's file paths, the detected tech stack, and the contents of its top-level manifests (such as `requirements.txt`, `pyproject.toml`, `package.json`; up to 8 KB each, 32 KB in total) and of the first two existing Dockerfiles found at any depth and the workflows (up to 4 KB each) are sent to these providers. `.env` files are never read ([README-AI-AGENTS.md](README-AI-AGENTS.md#what-reaches-the-ai-providers)).
+- Credentials found in manifests and in the existing Dockerfile and workflow excerpts are redacted on a best-effort basis before they reach a prompt: URL user names and passwords, tokens shaped like known secrets, the values of keys containing TOKEN, SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY (also in quoted headers and Dockerfile `ENV`/`ARG KEY value`), `Authorization:` and `Proxy-Authorization:` credentials, Slack and Discord webhook paths, `curl -u`/`--oauth2-bearer` values and `docker login -p`/`--password` values (also in a command continued over several lines with `\`) become `REDACTED` (`redactCredentials` in `server/agents/grounding.js`); keep secrets out of manifests.
 - Limits: `AI_TIMEOUT_MS` (default 60000), `AI_CALL_BUDGET_MS` (default 180000), `AI_MAX_ATTEMPTS_PER_PROVIDER` (default 2) (`server/ai/config.js`).
 - Check the configuration against the real providers with `RUN_LIVE_AI=1 npm run ai:smoke` in `server/` (`server/scripts/ai-smoke.js`).
 

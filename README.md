@@ -1,6 +1,6 @@
 # InfraMind
 
-InfraMind generates DevOps files for a GitHub repository. A signed-in user picks a repository; the server clones it, runs four agents in sequence (planner, analyzer, generator, verifier) and returns a Dockerfile, a GitHub Actions workflow and a `.env.example`. The files can be downloaded or saved to the user's account.
+InfraMind generates DevOps files for a GitHub repository. A signed-in user picks a repository; the server clones it, runs three agents in sequence (analyzer, generator, verifier) and returns a Dockerfile, a GitHub Actions workflow and a `.env.example`. The files can be downloaded or saved to the user's account.
 
 ## How it fits together
 
@@ -18,7 +18,7 @@ flowchart LR
     Server -->|"verify tokens, store GitHub connections"| Supabase
     Server -->|"SESSION_STORE=database"| PG
     Server -->|"OAuth, repository API, git clone"| GitHub
-    Server -->|"planner, generator, verifier tasks"| AI
+    Server -->|"generator, verifier tasks"| AI
 ```
 
 Source: `server/server.js`, `server/utils/auth.js`, `server/utils/githubConnections.js`, `server/utils/sessionStore.js`, `server/github.js`, `server/utils/git.js`, `server/ai/providers.js`, `client/src/lib/supabase.ts`, `client/src/lib/api.ts`.
@@ -41,7 +41,7 @@ Diagrams:
 
 - **Sign-in with Supabase Auth:** email and password, GitHub or Google (`client/src/lib/supabase.ts`). The server checks the Supabase access token on its account API routes (every `/api` route except `/api/metrics` and `/api/analytics`) and on Socket.IO connections (`server/server.js`, `server/utils/auth.js`, `server/utils/realtime.js`).
 - **GitHub connection for repository access:** a separate GitHub OAuth App, run by the server, with scope `repo,user:email`. The token stays on the server, encrypted with AES-256-GCM (`server/github.js`, `server/utils/githubConnections.js`). Connected users can list their repositories and organizations and analyze private repositories they can access.
-- **Analysis:** a shallow `git clone`, then the four agents. Only the planner, generator and verifier call the AI layer, 4 to 8 calls per run. The analyzer reads the cloned files: the file list and the top-level manifests such as `requirements.txt`, `pyproject.toml` and `package.json`, never `.env` files (`server/agents/index.js`, `server/agents/grounding.js`).
+- **Analysis:** a shallow `git clone`, then the three agents. Only the generator and verifier call the AI layer, 3 to 7 calls per run. The analyzer reads the cloned files: the file list, the top-level manifests such as `requirements.txt`, `pyproject.toml` and `package.json`, and up to two existing Dockerfiles found at any depth, never `.env` files (`server/agents/index.js`, `server/agents/grounding.js`).
 - **Checked output:** each generated file is extracted from the AI reply as one raw file and validated before it is saved; the workflow must be CI-only (read-only permissions, major-version action refs, no registry push). An invalid reply gets one repair attempt, then the file is left out with an error (`server/agents/files.js`).
 - **Configurable AI providers:** per-task provider chains with retries and fallback; no provider or model is built in as the default (`server/ai/`).
 - **Live progress:** Socket.IO `progress` events, delivered only to the session's owner (`server/utils/realtime.js`).
@@ -162,7 +162,7 @@ Socket.IO: connect with `auth: { token }`, then emit `subscribe` with `{ session
 ```
 client/                 React app (pages in src/pages, routes in src/App.tsx)
 server/server.js        Express + Socket.IO server (npm start)
-server/agents/          The four agents
+server/agents/          The three agents
 server/ai/              AI provider layer
 server/utils/           Auth, GitHub connections, git, sessions, realtime, security, logging
 server/prisma/          Prisma schema and migration for the session tables

@@ -1,6 +1,6 @@
 # InfraMind Agents and AI Layer
 
-This document describes the four-agent pipeline in `server/agents/index.js` and the AI provider layer in `server/ai/`, as implemented. For the whole system see [ARCHITECTURE.md](ARCHITECTURE.md).
+This document describes the three-agent pipeline in `server/agents/index.js` and the AI provider layer in `server/ai/`, as implemented. For the whole system see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## What the pipeline produces
 
@@ -18,44 +18,40 @@ The server stores these with the session (`saveResult` in `server/utils/sessionS
 ```mermaid
 flowchart TD
     Start["runAgentPipeline(owner/repo, clone path, onAgentDone, meta)"]
-    Planner["plannerAgent: AI task planner, 1 call. Sees only owner/repo. Writes analysisplan and a message"]
-    Analyzer["analyzerAgent: no AI call. Scans files, reads top-level manifests. Writes projectStructure, techStack, codebaseAnalysis, evidence"]
+    Analyzer["analyzerAgent: no AI call. Scans files, reads top-level manifests and up to two Dockerfiles. Writes projectStructure, techStack, codebaseAnalysis, evidence"]
     Generator["generatorAgent: AI task generator, 3 to 6 calls. Each validated file writes its own generatedFiles key"]
     Verifier["verifierAgent: AI task verifier, 1 call, or none when no file was generated. Writes verificationResults"]
-    Report["onAgentDone after each agent: agent, progress 20/50/80/95, step, messages and errors so far"]
+    Report["onAgentDone after each agent: agent, progress 50/80/95, step, messages and errors so far"]
     AI["server/ai generateText"]
     Files[("temp/session-id/repo")]
 
-    Start --> Planner --> Analyzer --> Generator --> Verifier
-    Planner -.-> Report
+    Start --> Analyzer --> Generator --> Verifier
     Analyzer -.-> Report
     Generator -.-> Report
     Verifier -.-> Report
-    Planner -.-> AI
     Generator -.-> AI
     Verifier -.-> AI
     Analyzer -.-> Files
 ```
 
-Source: `server/agents/index.js` (`plannerAgent`, `analyzerAgent`, `generatorAgent`, `verifierAgent`, `scanProjectStructure`, `analyzeTechStack`, `performDetailedAnalysis`, `createAgentWorkflow`, `runAgentPipeline`), `server/agents/grounding.js` (`collectRepositoryEvidence`, `readRepoFile`), `server/agents/files.js` (`extractFileContent`, validators), `server/agents/prompts.js` (`buildGeneratorSystemPrompt`, `buildVerifierSystemPrompt`).
+Source: `server/agents/index.js` (`analyzerAgent`, `generatorAgent`, `verifierAgent`, `scanProjectStructure`, `analyzeTechStack`, `performDetailedAnalysis`, `createAgentWorkflow`, `runAgentPipeline`), `server/agents/grounding.js` (`collectRepositoryEvidence`, `findDockerfiles`, `readRepoFile`, `redactCredentials`), `server/agents/files.js` (`extractFileContent`, validators), `server/agents/prompts.js` (`buildGeneratorSystemPrompt`, `buildVerifierSystemPrompt`).
 
 How each agent works:
 
 | Agent | `state.progress` | AI task | Input it uses | Writes to state |
 |---|---|---|---|---|
-| Planner | 20 | `planner`, 1 call | The `owner/repo` name only | `analysisplan`, one message |
-| Analyzer | 50 | none | The cloned files: a file list (skipping `.git`, `node_modules`, `.next`, `dist`, `build`, `__pycache__` and symlinks), the top-level manifests and the existing Dockerfile and workflows (see [Repository grounding](#repository-grounding)) | `projectStructure`, `techStack`, `codebaseAnalysis`, `evidence` (not saved, not sent to the browser), one message |
+| Analyzer | 50 | none | The cloned files: a file list (skipping `.git`, `node_modules`, `.next`, `dist`, `build`, `__pycache__` and symlinks), the top-level manifests and the existing Dockerfiles and workflows (see [Repository grounding](#repository-grounding)) | `projectStructure`, `techStack`, `codebaseAnalysis`, `evidence` (not saved, not sent to the browser), one message |
 | Generator | 80 | `generator`, 3 to 6 calls: one per file, plus one repair call per file whose reply fails validation | `techStack`, `evidence` and a bounded file list | One `generatedFiles` key per validated file (`dockerfile`, `githubActions`, `envExample`); one message "Generated N of 3 files" when N > 0 |
 | Verifier | 95; 100 when its call succeeds or it is skipped; stays 95 when its call fails | `verifier`, 1 call, or none when no file was generated | Each saved file, up to 4,000 characters, within a 24,000-character prompt | `verificationResults` and one message, only when its call succeeds |
 
 Facts worth knowing:
 
 - The agents run strictly in sequence, in a fixed order, sharing one `AgentState` object. No orchestration library is used (`createAgentWorkflow`).
-- The planner's output (`analysisplan`) is not passed to any later agent and is not saved with the session (`server/agents/index.js`, `saveResult` in `server/utils/sessionStore.js`).
-- After each agent, `runAgentPipeline` calls `onAgentDone` with the agent's name, its progress value (20, 50, 80, 95), the current step and copies of `messages` and `errors` so far. The server turns each into a progress event; the planner's 20 is sent as 30 because the "Starting" event before it already showed 30 (`AGENT_SEQUENCE`, `createAgentWorkflow` in `server/agents/index.js`; `runAnalysisJob` in `server/server.js`). It replaces the single callback that ran once after the verifier.
+- There is no planner agent. B2.6 removed it: it made one AI call per run from the `owner/repo` name only, and nothing read its output. Sessions stored before that can still hold a `planner` message or a `Planner Agent Error:` entry; they are served as stored, and the browser shows no card for them.
+- After each agent, `runAgentPipeline` calls `onAgentDone` with the agent's name, its progress value (50, 80, 95), the current step and copies of `messages` and `errors` so far. The server turns each into a progress event, after the 30% "Starting" event, and never sends a lower value than one already sent (`AGENT_SEQUENCE`, `createAgentWorkflow` in `server/agents/index.js`; `runAnalysisJob` in `server/server.js`). It replaces the single callback that ran once after the verifier.
 - Each agent catches its own errors. An AI failure adds `"<Agent> Agent Error: AI providers are unavailable"` to `errors`; any other error adds `"<Agent> Agent Error: Internal error"` and is logged server-side with secrets redacted. The next agent still runs (`publicErrorMessage` in `server/agents/index.js`, `AI_UNAVAILABLE_MESSAGE` in `server/ai/errors.js`).
 - The three files are generated independently, in the order Dockerfile, GitHub Actions workflow, `.env.example`. A failed AI call adds one entry such as `"Generator Agent Error: Dockerfile: AI providers are unavailable"` and is not repaired (the AI layer already retried). A file whose reply fails validation twice adds `"Generator Agent Error: <label>: the AI output did not pass validation"`. In both cases the other files are kept (`generatorAgent`).
-- AI calls per run: planner 1, generator 3 to 6, verifier 0 or 1, so 4 to 8 calls. Each call can make several attempts across providers (see [AI provider fallback](#ai-provider-fallback)).
+- AI calls per run: generator 3 to 6, verifier 0 or 1, so 3 to 7 calls. Each call can make several attempts across providers (see [AI provider fallback](#ai-provider-fallback)).
 - With no generated file, the verifier makes no AI call, adds no message and leaves `verificationResults` unset; its step reads "Review skipped: no files were generated" (`verifierAgent`).
 - When its call succeeds, the verifier's message is "Review complete: see the review text"; the review itself is `verificationResults` (`verifierAgent`).
 - The analyzer reads repository files only through `readRepoFile`, which refuses paths outside the clone and anything that is not a regular file (`server/agents/index.js`).
@@ -65,14 +61,14 @@ What the analyzer detects (`analyzeTechStack`):
 - Primary: `node` (`package.json`), `python` (`requirements.txt` or `pyproject.toml`), `go` (`go.mod`), `rust` (`Cargo.toml`), `java` (`pom.xml` or `build.gradle`), otherwise `unknown`
 - Frameworks: `react`, `nextjs`, `vue`, `express` from `package.json` dependencies; for a Python repository, `django`, `flask`, `fastapi`, `streamlit`, `gradio`, `gunicorn` and `uvicorn` from the dependency names in `requirements.txt`, `requirements-dev.txt`, `pyproject.toml` and `Pipfile` (`detectPythonFrameworks`), plus `django` when `manage.py` exists; `spring` when a file path contains that word (Java)
 - Databases: `mongodb` (`mongoose`) and `postgresql` (`pg`) from `package.json` dependencies
-- Tools: `docker` (a top-level `Dockerfile`); `docker-compose` (a top-level `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.yaml`); `kubernetes` when a directory named `k8s` or `kubernetes` exists at any depth (so any YAML file under one counts), or a file named `kustomization.yaml`, `kustomization.yml` or `Chart.yaml` exists at any depth. Only names are checked; other YAML files do not count. Skipped directories such as `node_modules` are never scanned (`hasKubernetesEvidence`, `COMPOSE_FILES`)
+- Tools: `docker` (a Dockerfile at any depth: a file named `Dockerfile`, `Dockerfile.<suffix>` or `<prefix>.Dockerfile`, in any case, such as `backend/Dockerfile` or `docker/Dockerfile.prod`, but not a name ending in a documentation, text or image extension such as `Dockerfile.md` or `docs/Dockerfile.txt`; `findDockerfiles`); `docker-compose` (a top-level `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.yaml`); `kubernetes` when a directory named `k8s` or `kubernetes` exists at any depth (so any YAML file under one counts), or a file named `kustomization.yaml`, `kustomization.yml` or `Chart.yaml` exists at any depth. Only names are checked; other YAML files do not count. Skipped directories such as `node_modules` are never scanned (`hasKubernetesEvidence`, `COMPOSE_FILES`). Without any Dockerfile, the analysis recommends adding one
 
 ### Repository grounding
 
 The analyzer gives the generator facts from the repository, computed without AI (`collectRepositoryEvidence` in `server/agents/grounding.js`):
 
 - **Manifests:** the top-level files among `requirements.txt`, `requirements-dev.txt`, `pyproject.toml`, `Pipfile`, `setup.cfg`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `Gemfile`, `composer.json`, `Procfile`, `runtime.txt`, `.python-version`, `.nvmrc`, `.tool-versions` (`MANIFEST_FILES`). Each is read up to 8 KB, 32 KB in total; a cut file ends with `[truncated]`, and files past the total are named as not included. No other file is read as a manifest, and `.env*`, `.npmrc`, `.pypirc`, `.netrc`, `*.pem` and `*.key` are refused by name (`isForbiddenFileName`).
-- **Existing configuration:** the names of a top-level `Dockerfile`, `.dockerignore`, `docker-compose.y(a)ml` or `compose.y(a)ml` and the files in `.github/workflows/`, with up to 4 KB of the Dockerfile and of each workflow (16 KB in total).
+- **Existing configuration:** the names of up to 10 Dockerfiles at any depth (shallowest first, then alphabetical; more are counted on one line, such as `… and 50 more Dockerfiles`), a top-level `.dockerignore`, `docker-compose.y(a)ml` or `compose.y(a)ml` and the files in `.github/workflows/`, at most 50 names, with up to 4 KB of the first two Dockerfiles and of each workflow (16 KB in total) (`findDockerfiles`, `DOCKERFILE_EXCERPT_CAP`). Compose files are detected at the top level only. The generated Dockerfile is still written for the repository root.
 - **Evidence flags:** entry-point candidates (top-level `app.py`, `main.py`, `wsgi.py`, `asgi.py`, `manage.py`, `server.py`, `run.py`, `src/main.py`, `src/app.py`; `package.json` `main` and `scripts.start`; a `Procfile` `web:` line), test evidence (a top-level `tests/` or `test/` directory, `pytest.ini`, `tox.ini`, `[tool.pytest` in `pyproject.toml`, a `package.json` `scripts.test` other than npm's placeholder), linter evidence (`ruff.toml`, `.ruff.toml`, `[tool.ruff` in `pyproject.toml`, `.flake8`, `.eslintrc*`, `eslint.config.*`) and the Python dependency names.
 - **File list:** at most 300 paths, shallowest first, then alphabetical, after a summary line with the total file and directory counts and the 10 most common extensions (`listForPrompt`). The full list stays in `projectStructure`.
 
@@ -88,7 +84,7 @@ The validators (`validateDockerfile`, `validateWorkflow`, `validateEnvExample`):
 
 - **Dockerfile:** the first instruction is `FROM` or `ARG`; every other non-blank, non-comment line is a known instruction or continues the previous one (heredocs are allowed); at least one `FROM`; no code fence.
 - **Workflow:** parsed with the `yaml` package (YAML 1.2, so the key `on` stays a string); one document with `on`, top-level `permissions` and a non-empty `jobs` mapping; every job has `runs-on` and non-empty `steps`; every `uses:` has an `@ref` that is not `master`, `main` or `HEAD`; no permission grants `write` (or `write-all`); no `docker/login-action`, `docker push`, `--push` or `push` other than `false`; no repository secret other than `GITHUB_TOKEN`.
-- **`.env.example`:** only `#` comments and `KEY=value` lines with upper-case keys, at least one key, no code fence, and no value or comment that looks like a real credential (`sk-`, `ghp_`, `gho_`, `github_pat_`, `AKIA`, `-----BEGIN` and similar).
+- **`.env.example`:** only `#` comments and `KEY=value` lines with upper-case keys, at least one key, no code fence, and no value or comment that looks like a real credential (`sk-`, `ghp_`, `gho_`, `github_pat_`, `AKIA`, `-----BEGIN`, Slack and Discord webhook URLs and similar).
 
 A reply that fails gets one repair call with the same system prompt; its user prompt lists the validation errors and repeats the contract. Error strings hold fixed text and line or job/step numbers only, never file content, and the server log line is `Generator validation failed: kind=<kind> attempt=<1|2> errors=<list>`. If the repair also fails, the file is not saved.
 
@@ -100,11 +96,10 @@ Validation checks format and the workflow policy. It does not build the image, r
 
 ### What reaches the AI providers
 
-- Planner: the repository's `owner/repo` name
-- Generator: the detected tech stack, the evidence flags, the contents of the top-level manifests listed above (up to 8 KB each, 32 KB in total), up to 4 KB of an existing top-level Dockerfile and of each existing workflow, and up to 300 file paths with a summary line
+- Generator: the detected tech stack, the evidence flags, the contents of the top-level manifests listed above (up to 8 KB each, 32 KB in total), up to 4 KB of each of the first two existing Dockerfiles (at any depth) and of each existing workflow, and up to 300 file paths with a summary line
 - Verifier: each saved file, up to 4,000 characters (no call when there is none)
 
-Credentials found in manifests and in the existing Dockerfile and workflow excerpts are redacted on a best-effort basis before they reach a prompt: URL user names and passwords, tokens shaped like known secrets, and the values of keys containing TOKEN, SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY become `REDACTED` (`redactCredentials` in `server/agents/grounding.js`); keep secrets out of manifests.
+Credentials found in manifests and in the existing Dockerfile and workflow excerpts are redacted on a best-effort basis before they reach a prompt: URL user names and passwords, tokens shaped like known secrets, the values of keys containing TOKEN, SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY (also in a quoted header such as `-H "X-Api-Key: ..."` and in Dockerfile `ENV KEY value` and `ARG KEY value`), `Authorization:` and `Proxy-Authorization:` credentials (the scheme word stays), Slack and Discord webhook paths, `curl -u` / `--user` / `--oauth2-bearer` values and `docker login -p` / `--password` values, also when the command is continued over several lines with `\`, become `REDACTED`; `${{ ... }}`, `${VAR}` and `$VAR` references stay (`redactCredentials` in `server/agents/grounding.js`). This is best effort; keep secrets out of manifests.
 
 No other file contents are sent, and `.env` files are never read. Session and user ids go only into the call records, never to a provider (`server/agents/index.js`, `AgentState.meta`).
 
@@ -126,11 +121,8 @@ sequenceDiagram
     S-->>B: 202 success, sessionId, status analyzing (or 503 ANALYSIS_BUSY, session stays cloned)
     J->>B: progress 30%, Starting AI agent analysis
     J->>P: runAgentPipeline(owner/repo, clone path, onAgentDone)
-    P->>AI: planner x1
-    P-->>J: onAgentDone planner
-    J->>B: progress 30%, analyzing, 1 message
     P-->>J: onAgentDone analyzer (no AI call)
-    J->>B: progress 50%, analyzing, 2 messages
+    J->>B: progress 50%, analyzing, 1 message
     P->>AI: generator x3 to x6
     P-->>J: onAgentDone generator
     J->>B: progress 80%, analyzing, messages and errors so far
@@ -191,7 +183,8 @@ Source: `server/ai/client.js` (`run`, `callProvider`, `attemptOnce`, `backoffMs`
 
 The rules, from `server/ai/client.js` and `server/ai/config.js`:
 
-- **Chain:** `AI_ROUTE_PLANNER`, `AI_ROUTE_GENERATOR` or `AI_ROUTE_VERIFIER` when set, otherwise `AI_PROVIDERS`. Names must be from `gemini`, `groq`, `openrouter`, `novita`, without duplicates.
+- **Chain:** `AI_ROUTE_GENERATOR` or `AI_ROUTE_VERIFIER` when set, otherwise `AI_PROVIDERS`. Names must be from `gemini`, `groq`, `openrouter`, `novita`, without duplicates.
+- **`AI_ROUTE_PLANNER`:** no longer used, since the planner agent was removed. If it is set, the server starts normally and logs one warning that names the variable (never its value); it can be removed (`describeRetiredAiVariables` in `server/ai/config.js`).
 - **Attempts:** up to `AI_MAX_ATTEMPTS_PER_PROVIDER` (default 2) per provider per call. Each attempt's timeout is `AI_TIMEOUT_MS` (default 60000), shortened to what is left of the call budget.
 - **Retried on the same provider:** `rate_limited` (429), `server_error` (5xx), `timeout`, `network`, `invalid_response`. The wait is the `Retry-After` header for 429 and 503 (whole seconds, capped at 10 s), otherwise exponential backoff from 500 ms, capped at 8 s, with ±20% jitter.
 - **Not retried on the same provider:** `auth` (401, 403) and `bad_request` (other 4xx). The call moves to the next provider.
@@ -222,17 +215,18 @@ To check a configuration against the real providers: `RUN_LIVE_AI=1 npm run ai:s
 
 ## Adding an agent
 
-`createAgentWorkflow()` takes no options. Write an `async (state) => state` function in `server/agents/index.js` and add it to the sequence in `invoke`:
+`createAgentWorkflow()` takes no options. Write an `async (state) => state` function in `server/agents/index.js` and add it to `AGENT_SEQUENCE`, with the progress value it reports when it finishes:
 
 ```javascript
-state = await plannerAgent(state);
-state = await analyzerAgent(state);
-state = await generatorAgent(state);
-state = await verifierAgent(state);
-// state = await yourNewAgent(state);
+const AGENT_SEQUENCE = [
+  { agent: 'analyzer', run: (state) => analyzerAgent(state), progress: 50 },
+  { agent: 'generator', run: (state) => generatorAgent(state), progress: 80 },
+  { agent: 'verifier', run: (state) => verifierAgent(state), progress: 95 }
+  // { agent: 'yourNewAgent', run: (state) => yourNewAgent(state), progress: ... }
+];
 ```
 
-A new agent that calls the AI layer must use one of the tasks in `TASKS` (`planner`, `generator`, `verifier`) or add a task there and in `ROUTE_VARS` (`server/ai/config.js`).
+A new agent that calls the AI layer must use one of the tasks in `TASKS` (`generator`, `verifier`) or add a task there and in `ROUTE_VARS` (`server/ai/config.js`).
 
 ## Tests
 

@@ -38,6 +38,7 @@ const plantedSession = () => ({
     codebaseAnalysis: { entryPoints: [] },
     verificationResults: 'ok',
     repoPath: '/abs/MARKER_CLONE_PATH/repo',
+    // agent 'planner' stands for a session stored before B2.6 removed the planner agent
     messages: [{ agent: 'planner', message: 'MARKER_TOKEN' }]
   }
 });
@@ -86,6 +87,21 @@ describe('toFilesResponse', () => {
     assert.deepEqual(output.messages, session.messages);
     assert.deepEqual(output.errors, session.errors);
     assert.notEqual(output.messages[0], session.messages[0], 'a copy, never the stored object');
+  });
+
+  test('B2.6: a session stored before the planner was removed keeps its planner message and error', () => {
+    const session = {
+      ...plantedSession(),
+      messages: [
+        { agent: 'planner', message: 'Created comprehensive analysis plan', timestamp: '2026-01-01T00:00:00.000Z' },
+        { agent: 'analyzer', message: 'Detected tech stack: node', timestamp: '2026-01-01T00:00:01.000Z' }
+      ],
+      errors: ['Planner Agent Error: AI providers are unavailable']
+    };
+    const output = toFilesResponse(session);
+    assert.deepEqual(Object.keys(output).sort(), ['codebaseAnalysis', 'errors', 'files', 'messages', 'metadata', 'techStack', 'verificationResults']);
+    assert.deepEqual(output.messages, session.messages);
+    assert.deepEqual(output.errors, session.errors);
   });
 
   test('extra fields on a stored message never appear', () => {

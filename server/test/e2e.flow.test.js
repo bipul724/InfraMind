@@ -125,10 +125,10 @@ const checkDatabaseRows = async (sessionId) => {
     let calls = [];
     for (let i = 0; i < 40; i++) {
       calls = await client.prisma.aiCall.findMany({ where: { sessionId } });
-      if (['planner', 'generator', 'verifier'].every((task) => calls.some((c) => c.task === task && c.outcome === 'ok'))) break;
+      if (['generator', 'verifier'].every((task) => calls.some((c) => c.task === task && c.outcome === 'ok'))) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    for (const task of ['planner', 'generator', 'verifier']) {
+    for (const task of ['generator', 'verifier']) {
       assert.ok(calls.some((c) => c.task === task && c.outcome === 'ok' && c.userId === USER_A.id), `an ok ${task} call record`);
     }
     assert.equal(calls.filter((c) => c.task === 'generator').length, 3);

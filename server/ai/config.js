@@ -10,12 +10,14 @@ import { describeServiceUrlProblem } from '../utils/auth.js';
 import { AiConfigError } from './errors.js';
 import { DEFAULT_JSON_MODE, JSON_MODES, PROVIDERS, PROVIDER_NAMES } from './providers.js';
 
-export const TASKS = Object.freeze(['planner', 'generator', 'verifier']);
+export const TASKS = Object.freeze(['generator', 'verifier']);
 const ROUTE_VARS = Object.freeze({
-  planner: 'AI_ROUTE_PLANNER',
   generator: 'AI_ROUTE_GENERATOR',
   verifier: 'AI_ROUTE_VERIFIER'
 });
+// Route variables of removed tasks (B2.6: the planner). Never read or validated: an
+// existing deployment may still set one, so it gets a warning, never a startup failure.
+const RETIRED_ROUTE_VARS = Object.freeze(['AI_ROUTE_PLANNER']);
 
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_CALL_BUDGET_MS = 180000;
@@ -136,6 +138,13 @@ export function loadAiConfig(env = process.env) {
     callBudgetMs,
     maxAttemptsPerProvider
   });
+}
+
+// One warning per retired route variable that is set; names the variable, never its value
+export function describeRetiredAiVariables(env = process.env) {
+  return RETIRED_ROUTE_VARS
+    .filter((variable) => env[variable] !== undefined)
+    .map((variable) => `${variable} is set but no longer used (the planner agent was removed); it can be removed`);
 }
 
 // One line per task, names and models only (never keys or URLs)

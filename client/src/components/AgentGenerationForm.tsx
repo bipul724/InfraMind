@@ -329,9 +329,9 @@ export const AgentGenerationForm: React.FC<AgentGenerationFormProps> = ({
                       <Zap className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold">Four Agents</h3>
+                      <h3 className="text-sm font-semibold">Three Agents</h3>
                       <p className="text-sm text-muted-foreground">
-                        Planner, analyzer, generator and verifier, in sequence
+                        Analyzer, generator and verifier, in sequence
                       </p>
                     </div>
                   </div>

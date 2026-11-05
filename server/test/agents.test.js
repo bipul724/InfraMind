@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { analyzeTechStack, runAgentPipeline, scanProjectStructure } from '../agents/index.js';
+import { AGENT_SEQUENCE, analyzeTechStack, performDetailedAnalysis, runAgentPipeline, scanProjectStructure } from '../agents/index.js';
+import { findDockerfiles } from '../agents/grounding.js';
 import { resetDefaultAiClient } from '../ai/index.js';
 import { generatorUserPrompt } from '../agents/prompts.js';
 import { defaultContentFor, generatorKindOf } from './fakeLlm.js';
@@ -42,6 +43,8 @@ const PROMPTS = {
 };
 const countRequests = (bodies, prompt) => bodies.filter((body) => body.includes(prompt)).length;
 const ERROR_BODY_MARKER = 'SECRET_BODY_MARKER';
+// The removed planner agent's system prompt began with this (B2.6)
+const OLD_PLANNER_PROMPT = 'You are a DevOps Planning Agent';
 
 before(async () => {
   fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'inframind-agents-fixture-'));
@@ -131,7 +134,8 @@ describe('runAgentPipeline with untrusted repository content', () => {
       }
     }
 
-    assert.ok(capturedBodies[0].includes('octocat/Hello-World'), 'planner prompt should name the repository');
+    assert.ok(capturedBodies[0].includes(PROMPTS.dockerfile), 'the first request is the Dockerfile generator call');
+    assert.ok(capturedBodies[0].includes('octocat/Hello-World'), 'the generator prompt names the repository');
 
     const structureKeys = Object.keys(result.projectStructure);
     assert.ok(!structureKeys.some((key) => key.startsWith('rootlink')));
@@ -162,7 +166,6 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
     // SERVER-FIX: one entry per failed generator call; with no files the verifier
     // makes no call, so it reports no error
     assert.deepEqual(result.errors, [
-      'Planner Agent Error: AI providers are unavailable',
       'Generator Agent Error: Dockerfile: AI providers are unavailable',
       'Generator Agent Error: GitHub Actions workflow: AI providers are unavailable',
       'Generator Agent Error: .env.example: AI providers are unavailable'
@@ -190,7 +193,6 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
       resetDefaultAiClient();
     }
     assert.deepEqual(result.errors, [
-      'Planner Agent Error: Internal error',
       'Generator Agent Error: Dockerfile: Internal error',
       'Generator Agent Error: GitHub Actions workflow: Internal error',
       'Generator Agent Error: .env.example: Internal error'
@@ -207,7 +209,8 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
     const result = await runAgentPipeline('octocat/Hello-World', fixtureDir, null, meta);
     assert.deepEqual(result.errors, []);
     const sent = capturedBodies.slice(before);
-    assert.equal(sent.length, 5, 'planner + 3 generator calls + verifier');
+    assert.equal(sent.length, 4, '3 generator calls + verifier');
+    assert.equal(countRequests(sent, OLD_PLANNER_PROMPT), 0, 'no planner call');
     for (const body of sent) {
       assert.ok(!body.includes('SESSION_ID_MARKER'));
       assert.ok(!body.includes('USER_ID_MARKER'));
@@ -215,8 +218,29 @@ describe('agent errors reaching state.errors (sent to the browser)', () => {
   });
 });
 
+describe('B2.6: three agents, no planner', () => {
+  test('AGENT_SEQUENCE is analyzer, generator, verifier with 50, 80 and 95', () => {
+    assert.deepEqual(AGENT_SEQUENCE.map(({ agent, progress }) => [agent, progress]), [
+      ['analyzer', 50], ['generator', 80], ['verifier', 95]
+    ]);
+  });
+
+  test('a successful run makes 4 AI calls (3 generator, 1 verifier) and none carries the planner prompt', { timeout: 60000 }, async () => {
+    resetDefaultAiClient();
+    const before = capturedBodies.length;
+    const result = await runAgentPipeline('octocat/Hello-World', fixtureDir);
+    const sent = capturedBodies.slice(before);
+    assert.deepEqual(result.errors, []);
+    assert.equal(sent.length, 4);
+    assert.deepEqual([PROMPTS.dockerfile, PROMPTS.githubActions, PROMPTS.envExample, PROMPTS.verifier].map((p) => countRequests(sent, p)), [1, 1, 1, 1]);
+    assert.equal(countRequests(sent, OLD_PLANNER_PROMPT), 0);
+    assert.ok(!result.messages.some((m) => m.agent === 'planner'));
+    assert.equal(result.analysisplan, undefined);
+  });
+});
+
 describe('B2.1: onAgentDone after each agent', () => {
-  test('called four times, in order, with the agent\'s progress value and copies of the arrays', { timeout: 60000 }, async () => {
+  test('called three times, in order, with the agent\'s progress value and copies of the arrays', { timeout: 60000 }, async () => {
     resetDefaultAiClient();
     const reports = [];
     let firstMessagesRef = null;
@@ -225,12 +249,12 @@ describe('B2.1: onAgentDone after each agent', () => {
       reports.push(structuredClone(report));
     });
     assert.deepEqual(reports.map((r) => [r.agent, r.progress, r.messages.length]), [
-      ['planner', 20, 1], ['analyzer', 50, 2], ['generator', 80, 3], ['verifier', 95, 4]
+      ['analyzer', 50, 1], ['generator', 80, 2], ['verifier', 95, 3]
     ]);
     assert.deepEqual(Object.keys(reports[0]).sort(), ['agent', 'currentStep', 'errors', 'messages', 'progress']);
-    assert.equal(reports[0].currentStep, 'Planning project analysis');
-    assert.equal(reports[3].currentStep, 'Complete');
-    assert.deepEqual(reports[3].messages, result.messages);
+    assert.equal(reports[0].currentStep, 'Analyzing codebase structure');
+    assert.equal(reports[2].currentStep, 'Complete');
+    assert.deepEqual(reports[2].messages, result.messages);
     assert.notEqual(firstMessagesRef, result.messages, 'a copy, not the state\'s own array');
     assert.equal(firstMessagesRef.length, 1, 'later agents do not change an earlier report');
   });
@@ -241,11 +265,11 @@ describe('B2.1: onAgentDone after each agent', () => {
     await assert.rejects(
       runAgentPipeline('octocat/Hello-World', fixtureDir, (report) => {
         seen.push(report.agent);
-        if (report.agent === 'analyzer') throw new Error('callback failed');
+        if (report.agent === 'generator') throw new Error('callback failed');
       }),
       /callback failed/
     );
-    assert.deepEqual(seen, ['planner', 'analyzer']);
+    assert.deepEqual(seen, ['analyzer', 'generator']);
   });
 });
 
@@ -343,5 +367,92 @@ describe('analyzeTechStack: kubernetes and compose detection (SERVER-FIX)', () =
 
   test('a Kubernetes directory found inside a skipped directory does not count', async () => {
     assert.ok(!(await detect(['node_modules/pkg/k8s/deployment.yaml'])).includes('kubernetes'));
+  });
+});
+
+describe('T-243: Dockerfiles at any depth', () => {
+  // projectStructure as scanProjectStructure builds it: platform separators, directories included
+  const structure = (files) => {
+    const result = {};
+    for (const file of files) {
+      const segments = file.split('/');
+      for (let i = 1; i < segments.length; i++) result[path.join(...segments.slice(0, i))] = 'directory';
+      result[path.join(...segments)] = 'file';
+    }
+    return result;
+  };
+
+  const cases = [
+    { name: 'top-level only', files: ['Dockerfile', 'index.js'], expected: ['Dockerfile'] },
+    { name: 'nested only', files: ['backend/Dockerfile', 'backend/app.py'], expected: ['backend/Dockerfile'] },
+    { name: 'Dockerfile.<suffix>', files: ['docker/Dockerfile.prod'], expected: ['docker/Dockerfile.prod'] },
+    { name: '<prefix>.Dockerfile', files: ['api.Dockerfile'], expected: ['api.Dockerfile'] },
+    { name: 'lower case', files: ['services/web/dockerfile'], expected: ['services/web/dockerfile'] },
+    { name: 'not Dockerfiles', files: ['Dockerfile-notes.md', 'docs/dockerfile-guide.txt', 'MyDockerfile', 'Dockerfile.', '.Dockerfile', 'Dockerfiles/readme.md'], expected: [] },
+    // Architect review of B2.6: a documentation, text or image suffix is not a Dockerfile
+    {
+      name: 'documentation, text and image names are excluded',
+      files: ['Dockerfile.md', 'docs/Dockerfile.txt', 'Dockerfile.MARKDOWN', 'Dockerfile.rst', 'Dockerfile.adoc', 'Dockerfile.html', 'Dockerfile.htm',
+        'Dockerfile.pdf', 'Dockerfile.png', 'Dockerfile.JPG', 'Dockerfile.jpeg', 'Dockerfile.gif', 'Dockerfile.svg', 'docs/api.Dockerfile.md'],
+      expected: []
+    },
+    {
+      name: 'Dockerfile.prod, Dockerfile.dev, api.Dockerfile and Dockerfile.bak still count',
+      files: ['Dockerfile.prod', 'Dockerfile.dev', 'api.Dockerfile', 'Dockerfile.bak', 'Dockerfile.md'],
+      expected: ['Dockerfile.bak', 'Dockerfile.dev', 'Dockerfile.prod', 'api.Dockerfile']
+    },
+    {
+      name: 'shallowest first, then alphabetical',
+      files: ['z/Dockerfile', 'backend/Dockerfile', 'a/b/Dockerfile', 'web.Dockerfile', 'Dockerfile.dev', 'Dockerfile'],
+      expected: ['Dockerfile', 'Dockerfile.dev', 'web.Dockerfile', 'backend/Dockerfile', 'z/Dockerfile', 'a/b/Dockerfile']
+    }
+  ];
+  for (const { name, files, expected } of cases) {
+    test(`findDockerfiles: ${name}`, () => assert.deepEqual(findDockerfiles(structure(files)), expected));
+  }
+
+  test('findDockerfiles: a directory named Dockerfile and a credential-file name never count', () => {
+    assert.deepEqual(findDockerfiles({ Dockerfile: 'directory', 'Dockerfile.pem': 'file', [path.join('x', 'Dockerfile.key')]: 'file' }), []);
+  });
+
+  // A real repository through the analyzer's own scan
+  const analyze = async (files) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'inframind-dockerfiles-'));
+    try {
+      for (const file of files) {
+        await fs.mkdir(path.join(dir, path.dirname(file)), { recursive: true });
+        await fs.writeFile(path.join(dir, file), 'FROM node:20\n');
+      }
+      const projectFiles = await scanProjectStructure(dir);
+      return {
+        tools: (await analyzeTechStack(dir, projectFiles)).tools,
+        recommendations: (await performDetailedAnalysis(dir, projectFiles)).recommendations
+      };
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('a repository whose only Dockerfile is backend/Dockerfile: docker detected, no "Add Dockerfile"', async () => {
+    const { tools, recommendations } = await analyze(['package.json', 'backend/Dockerfile']);
+    assert.ok(tools.includes('docker'), JSON.stringify(tools));
+    assert.ok(!recommendations.includes('Add Dockerfile for containerization'), JSON.stringify(recommendations));
+  });
+
+  test('no Dockerfile anywhere: no docker tool, and the recommendation stays', async () => {
+    const { tools, recommendations } = await analyze(['package.json', 'docs/dockerfile-guide.txt']);
+    assert.ok(!tools.includes('docker'));
+    assert.ok(recommendations.includes('Add Dockerfile for containerization'));
+  });
+
+  test('a .github/workflows directory means no "Add GitHub Actions" recommendation', async () => {
+    const { recommendations } = await analyze(['package.json', '.github/workflows/ci.yml']);
+    assert.ok(!recommendations.includes('Add GitHub Actions for CI/CD'), JSON.stringify(recommendations));
+    const without = await analyze(['package.json']);
+    assert.ok(without.recommendations.includes('Add GitHub Actions for CI/CD'));
+  });
+
+  test('a Dockerfile inside a skipped directory does not count', async () => {
+    assert.ok(!(await analyze(['node_modules/pkg/Dockerfile'])).tools.includes('docker'));
   });
 });

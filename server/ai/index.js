@@ -10,7 +10,7 @@ import { createAiClient, logCallRecord } from './client.js';
 import { loadAiConfig } from './config.js';
 
 export { AiError, AiConfigError, AI_UNAVAILABLE_MESSAGE, OUTCOMES } from './errors.js';
-export { loadAiConfig, describeAiRoutes, TASKS } from './config.js';
+export { loadAiConfig, describeAiRoutes, describeRetiredAiVariables, TASKS } from './config.js';
 export { createAiClient, logCallRecord } from './client.js';
 
 let defaultClient = null;

@@ -92,7 +92,7 @@ function harness({ env = {}, scripts = {}, onCall, logger, useDefaultSink = fals
   };
 }
 
-const text = (h, extra = {}) => h.client.generateText({ task: 'planner', system: 'sys', prompt: 'hi', ...extra });
+const text = (h, extra = {}) => h.client.generateText({ task: 'verifier', system: 'sys', prompt: 'hi', ...extra });
 
 async function captureConsole(fn) {
   const lines = [];
@@ -111,7 +111,7 @@ async function captureConsole(fn) {
 describe('1-2. requests', () => {
   test('1. the first provider succeeds: one POST with Bearer key, model, temperature, max_tokens, no response_format', async () => {
     const h = harness();
-    const result = await h.client.generateText({ task: 'planner', system: 'S', prompt: 'P', temperature: 0.3, maxTokens: 123 });
+    const result = await h.client.generateText({ task: 'verifier', system: 'S', prompt: 'P', temperature: 0.3, maxTokens: 123 });
     assert.deepEqual(result, { text: 'hello', provider: 'gemini', model: 'gem-model', usage: { inputTokens: 5, outputTokens: 3 } });
     assert.equal(h.requests.length, 1);
     const [request] = h.requests;
@@ -159,6 +159,15 @@ describe('1-2. requests', () => {
     assert.throws(() => h.client.generateObject({ task: undefined, schema: z.object({}) }), TypeError);
     assert.equal(h.requests.length, 0);
   });
+
+  test('B2.6: planner is no longer a task (the planner agent was removed)', () => {
+    const h = harness();
+    assert.throws(
+      () => h.client.generateText({ task: 'planner', system: 's', prompt: 'p' }),
+      { name: 'TypeError', message: 'Unknown AI task (expected one of: generator, verifier)' }
+    );
+    assert.equal(h.requests.length, 0);
+  });
 });
 
 describe('3-7. retry, fallback and outcomes', () => {
@@ -204,7 +213,7 @@ describe('3-7. retry, fallback and outcomes', () => {
         onCall: () => {},
         logger: { warn: () => {} }
       });
-      await assert.rejects(client.generateText({ task: 'planner', system: 's', prompt: 'p' }), AiError);
+      await assert.rejects(client.generateText({ task: 'verifier', system: 's', prompt: 'p' }), AiError);
       return sleeps;
     };
     assert.deepEqual(await sleepsWith(0), [400, 800, 1600, 3200]);
@@ -396,14 +405,14 @@ describe('10-11. budget and routes', () => {
     const generated = await h.client.generateText({ task: 'generator', system: 's', prompt: 'p' });
     assert.equal(generated.provider, 'groq');
     assert.equal(h.requestsFor('gemini').length, 0);
-    const planned = await h.client.generateText({ task: 'planner', system: 's', prompt: 'p' });
-    assert.equal(planned.provider, 'gemini', 'other tasks keep AI_PROVIDERS');
+    const verified = await h.client.generateText({ task: 'verifier', system: 's', prompt: 'p' });
+    assert.equal(verified.provider, 'gemini', 'other tasks keep AI_PROVIDERS');
   });
 });
 
 describe('13. generateObject', () => {
   const schema = z.object({ ok: z.boolean(), count: z.number().int() });
-  const object = (h, extra = {}) => h.client.generateObject({ task: 'planner', system: 'SYS', prompt: 'P', schema, schemaName: 'check', ...extra });
+  const object = (h, extra = {}) => h.client.generateObject({ task: 'verifier', system: 'SYS', prompt: 'P', schema, schemaName: 'check', ...extra });
 
   test('json_object mode: response_format json_object and the JSON Schema appended to the system message', async () => {
     const h = harness({ scripts: { gemini: [success('{"ok":true,"count":2}')] } });
@@ -488,7 +497,7 @@ describe('13. generateObject', () => {
 
   test('a non-zod schema is a programming error', () => {
     const h = harness();
-    assert.throws(() => h.client.generateObject({ task: 'planner', system: 's', prompt: 'p', schema: {} }), TypeError);
+    assert.throws(() => h.client.generateObject({ task: 'verifier', system: 's', prompt: 'p', schema: {} }), TypeError);
   });
 });
 
@@ -518,10 +527,10 @@ describe('14-16. call records and the sink', () => {
   test('the default sink prints the ai_call line without the user id', async () => {
     const { lines } = await captureConsole(async () => {
       const h = harness({ useDefaultSink: true });
-      await h.client.generateText({ task: 'planner', system: 's', prompt: 'p', meta: { sessionId: 'S1', userId: 'USER_MARKER' } });
+      await h.client.generateText({ task: 'verifier', system: 's', prompt: 'p', meta: { sessionId: 'S1', userId: 'USER_MARKER' } });
     });
     assert.deepEqual(lines, [
-      'ai_call task=planner provider=gemini model=gem-model attempt=1 outcome=ok http_status=200 latency_ms=0 input_tokens=5 output_tokens=3 session=S1'
+      'ai_call task=verifier provider=gemini model=gem-model attempt=1 outcome=ok http_status=200 latency_ms=0 input_tokens=5 output_tokens=3 session=S1'
     ]);
   });
 
@@ -541,9 +550,9 @@ describe('14-16. call records and the sink', () => {
 
   test('16. records never contain prompt or response text', async () => {
     const h = harness({ scripts: { gemini: [success('RESPONSE_MARKER text')] } });
-    await h.client.generateText({ task: 'planner', system: 'SYSTEM_MARKER', prompt: 'PROMPT_MARKER' });
+    await h.client.generateText({ task: 'verifier', system: 'SYSTEM_MARKER', prompt: 'PROMPT_MARKER' });
     await h.client.generateObject({
-      task: 'planner', system: 'SYSTEM_MARKER', prompt: 'PROMPT_MARKER', schema: z.object({ ok: z.boolean() })
+      task: 'verifier', system: 'SYSTEM_MARKER', prompt: 'PROMPT_MARKER', schema: z.object({ ok: z.boolean() })
     });
     const serialised = JSON.stringify(h.records);
     for (const marker of ['RESPONSE_MARKER', 'SYSTEM_MARKER', 'PROMPT_MARKER', '"ok":true']) {

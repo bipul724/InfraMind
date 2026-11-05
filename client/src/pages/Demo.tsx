@@ -56,7 +56,7 @@ export const Demo = () => {
       type: 'assistant',
       content: `This is a scripted demo. Nothing was fetched from ${repoUrl}: every answer below is a fixed sample written for a made-up React project.
 
-The real InfraMind app has no chat. It clones a repository, runs four agents and generates:
+The real InfraMind app has no chat. It clones a repository, runs three agents and generates:
 
 • a Dockerfile
 • a GitHub Actions workflow
@@ -82,7 +82,7 @@ Pick a sample question to see a scripted answer.`
     let currentText = '';
     const words = response.split(' ');
     
-    for (let word of words) {
+    for (const word of words) {
       currentText += (currentText ? ' ' : '') + word;
       setMessages(prev => 
         prev.map(msg => 

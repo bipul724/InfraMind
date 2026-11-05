@@ -252,7 +252,17 @@ export const SECRET_PATTERNS = Object.freeze([
   /\bxox[abprs]-/,
   /\bAIza[0-9A-Za-z_-]{30,}/
 ]);
-export const looksLikeSecret = (value) => SECRET_PATTERNS.some((pattern) => pattern.test(value));
+// Slack and Discord incoming-webhook URLs: the path after this prefix is the credential.
+// grounding.js redacts that path (keeping this prefix); a generated file must not carry one.
+export const WEBHOOK_URL_PREFIX = /https?:\/\/(?:hooks\.slack\.com\/(?:services|workflows)|(?:discord|discordapp)\.com\/api\/webhooks)\//i;
+// Real webhook shapes only, not in SECRET_PATTERNS: grounding.js extends those over
+// [A-Za-z0-9_-] and would stop at the first "/", leaving the rest of the path visible
+const WEBHOOK_SECRET_PATTERNS = Object.freeze([
+  /hooks\.slack\.com\/(?:services|workflows)\/T[A-Z0-9]{6,}\//i,
+  /(?:discord|discordapp)\.com\/api\/webhooks\/\d{15,}\/[A-Za-z0-9_-]/i
+]);
+export const looksLikeSecret = (value) =>
+  SECRET_PATTERNS.some((pattern) => pattern.test(value)) || WEBHOOK_SECRET_PATTERNS.some((pattern) => pattern.test(value));
 
 export function validateEnvExample(text) {
   const lines = toLines(text);

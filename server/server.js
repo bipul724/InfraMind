@@ -10,7 +10,7 @@ import crypto from 'crypto';
 import fs from 'fs-extra';
 import path from 'path';
 import { runAgentPipeline } from './agents/index.js';
-import { AiConfigError, describeAiRoutes, loadAiConfig, logCallRecord, setDefaultAiCallSink } from './ai/index.js';
+import { AiConfigError, describeAiRoutes, describeRetiredAiVariables, loadAiConfig, logCallRecord, setDefaultAiCallSink } from './ai/index.js';
 import {
   SessionStoreUnavailableError,
   createSessionStore,
@@ -929,7 +929,8 @@ async function runAnalysisJob({ sessionId, fullName, userId }) {
   const startedAt = Date.now();
   let lastProgress = 30;
   const emitAnalyzing = (data) => {
-    // Never backwards: the planner's 20 follows the 30 of "Starting"
+    // Never backwards: a later event never shows less than the 30 of "Starting" or an
+    // earlier agent (the agents report 50, 80 and 95)
     lastProgress = Math.max(lastProgress, data.progress);
     emitProgress(sessionId, { ...data, progress: lastProgress, status: 'analyzing' });
   };
@@ -1275,6 +1276,7 @@ async function startServer() {
   }
   // Provider names and model IDs only; keys and URLs are never printed
   for (const line of describeAiRoutes(aiConfig)) console.log(`🤖 ${line}`);
+  for (const line of describeRetiredAiVariables(process.env)) console.warn(`⚠️ ${line}`);
   console.log(`🌐 Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
   console.log(`🌐 Trust proxy: ${TRUST_PROXY}`);
   console.log(`🚦 Rate limits: ${describeRateLimits(RATE_LIMITS)}`);
@@ -1371,7 +1373,7 @@ async function startServer() {
       console.log(`🚀 DevOps AI Agent Server running on port ${PORT}`);
       console.log(`📁 Temp directory: ${TEMP_DIR}`);
       console.log(`🔗 Client URL: ${process.env.CLIENT_URL}`);
-      console.log('🤖 Multi-agent system: 4 sequential agents; AI providers per task as listed in the AI route lines');
+      console.log('🤖 Multi-agent system: 3 sequential agents; AI providers per task as listed in the AI route lines');
       console.log('✅ Server startup complete!');
     });
     

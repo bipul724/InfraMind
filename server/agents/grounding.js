@@ -3,7 +3,8 @@
  * repository besides its file names. No AI here.
  *
  * Only the top-level files in MANIFEST_FILES are ever read as manifests, plus the
- * existing Dockerfile and workflow excerpts, always through readRepoFile (symlink-safe).
+ * existing Dockerfile (at most DOCKERFILE_EXCERPT_CAP, at any depth) and workflow
+ * excerpts, always through readRepoFile (symlink-safe).
  * Everything returned here is repository content and must be presented to the AI as
  * data, never as instructions.
  */
@@ -12,7 +13,7 @@ import fs from 'fs-extra';
 import { open } from 'node:fs/promises';
 import path from 'path';
 import { isPathInside } from '../utils/repository.js';
-import { SECRET_PATTERNS } from './files.js';
+import { SECRET_PATTERNS, WEBHOOK_URL_PREFIX } from './files.js';
 
 export const MANIFEST_FILES = Object.freeze([
   'requirements.txt', 'requirements-dev.txt', 'pyproject.toml', 'Pipfile', 'setup.cfg',
@@ -29,6 +30,10 @@ export const MANIFEST_TOTAL_CAP = 32 * 1024;
 export const EXISTING_FILE_CAP = 4 * 1024;
 export const EXISTING_TOTAL_CAP = 16 * 1024;
 export const EXISTING_NAME_CAP = 50;
+// Existing Dockerfiles excerpted into the prompt, in findDockerfiles order
+export const DOCKERFILE_EXCERPT_CAP = 2;
+// Existing Dockerfiles named in the prompt; more are counted on one line
+export const DOCKERFILE_NAME_CAP = 10;
 export const PATH_LIST_CAP = 300;
 export const TRUNCATED_MARKER = '[truncated]';
 
@@ -40,7 +45,7 @@ const VALUE_CAP = 200;
 
 // projectStructure keys use the platform separator; prompts always show "/"
 const toPosix = (relativePath) => relativePath.split(path.sep).join('/');
-const fromPosix = (relativePath) => relativePath.split('/').join(path.sep);
+export const fromPosix = (relativePath) => relativePath.split('/').join(path.sep);
 const isFileIn = (projectFiles, posixPath) => projectFiles[fromPosix(posixPath)] === 'file';
 const isDirectoryIn = (projectFiles, posixPath) => projectFiles[fromPosix(posixPath)] === 'directory';
 const oneLine = (value) => String(value).replace(/\s+/g, ' ').trim().slice(0, VALUE_CAP);
@@ -114,10 +119,34 @@ const SECRET_TOKENS = SECRET_PATTERNS.map((pattern) => ({
 const SENSITIVE_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY/i;
 // KEY=value, KEY: value, key = "value", "key": "value". "==" (a version pin) is not an assignment
 const ASSIGNMENT = /(^|[^A-Za-z0-9_.$-])(["']?)([A-Za-z_][A-Za-z0-9_.-]*)\2([ \t]*)(=(?!=)|:(?=[ \t]|$))([ \t]*)/gm;
+// ${{ ... }}, ${VAR}, $VAR: a reference to a secret, not the secret, so it stays
+const REFERENCE = /\$\{\{|\$\{|\$[A-Za-z_]/;
+const QUOTES = ['"', "'", '`'];
+// Slack and Discord webhook URLs: the prefix stays, the rest of the path is the credential
+const WEBHOOK_URL = new RegExp(`(${WEBHOOK_URL_PREFIX.source})([^\\s"'<>\`)\\]}]+)`, 'gi');
+// Authorization: and Proxy-Authorization: headers, the name optionally quoted ("Authorization": ...)
+const AUTH_HEADER = /(^|[^A-Za-z0-9_-])(["'`]?)((?:proxy-)?authorization)\2([ \t]*:[ \t]*)/gim;
+// An authorization value: an optional scheme word (Bearer, token, Basic, Bot, Digest, ...), then the credential
+const AUTH_VALUE = /^([A-Za-z][A-Za-z0-9_-]*)([ \t]+)(\S.*)$/;
+const AUTH_SCHEME_ALONE = /^(bearer|token|basic|bot|digest)$/i;
+// Dockerfile ENV and ARG in the space form, ENV KEY value: the rest of the line is the value
+const DOCKER_ENV_SPACE = /^([ \t]*(?:env|arg)[ \t]+)([A-Za-z_][A-Za-z0-9_]*)([ \t]+)(\S[^\n]*?)([ \t\r]*)$/gim;
+// One shell command: from its name to the next ;, &&, || or | on its logical line
+const COMMAND_END = /&&|\|\||[;|]/;
+// A physical line whose last non-whitespace character is "\" continues onto the next one
+const CONTINUED_LINE = /\\[ \t\r]*$/;
+// A gap between words: blanks, or a "\" line continuation and the next line's indentation
+const GAP = String.raw`(?:[ \t]|\\[ \t\r]*\n)`;
+// curl -u user:pass, -uuser:pass, --user user:pass, --user=user:pass, --oauth2-bearer token
+const CURL_COMMAND = /\bcurl\b/g;
+const CURL_USER_OPTION = new RegExp(String.raw`(^|${GAP})(-u${GAP}*|--(?:user|oauth2-bearer)(?:${GAP}+|=))(?=\S)`, 'g');
+// docker login -p value, --password value, --password=value (--password-stdin stays)
+const DOCKER_LOGIN_COMMAND = new RegExp(String.raw`\bdocker${GAP}+login\b`, 'g');
+const DOCKER_PASSWORD_OPTION = new RegExp(String.raw`(^|${GAP})(-p${GAP}*|--password(?:${GAP}+|=))(?=\S)`, 'g');
 // Values left alone: references, versions, YAML structure and keywords
 const KEEP_VALUE = [
   /^$/,
-  /\$\{\{|\$\{|\$[A-Za-z_]/, // ${{ ... }}, ${VAR}, $VAR
+  REFERENCE,
   /^[{[|>&*!]/, // a mapping, a list, a block scalar, an anchor/alias, a tag; >= and * version specifiers
   /^(null|true|false|~|inherit|latest|next)$/i,
   /^(?:[\^~<>=!]=?\s*)?v?\d+(?:\.[0-9A-Za-z*+-]+)+$/, // 1.2.3, ^9.0.2, ~=3.3
@@ -126,10 +155,16 @@ const KEEP_VALUE = [
 ];
 const keepValue = (value) => KEEP_VALUE.some((pattern) => pattern.test(value.trim()));
 
-// The value of one assignment, from `start` to at most the end of its line
-function redactValue(text, start, { jsonKey, op, spaced }) {
+// The value of one assignment, from `start` to at most the end of its line, or to the
+// closing `enclosingQuote` when the assignment sits inside a quoted string
+// (-H "X-Api-Key: value" https://...): the quote and the rest of the line stay
+function redactValue(text, start, { jsonKey, op, spaced, enclosingQuote }) {
   const lineEnd = text.indexOf('\n', start);
-  const rest = text.slice(start, lineEnd === -1 ? text.length : lineEnd);
+  let rest = text.slice(start, lineEnd === -1 ? text.length : lineEnd);
+  if (enclosingQuote) {
+    const close = rest.indexOf(enclosingQuote);
+    if (close !== -1) rest = rest.slice(0, close);
+  }
   const quote = rest[0];
   if (quote === '"' || quote === "'") {
     const close = rest.indexOf(quote, 1);
@@ -161,16 +196,125 @@ function redactAssignments(text) {
   ASSIGNMENT.lastIndex = 0;
   let match;
   while ((match = ASSIGNMENT.exec(text))) {
-    const [whole, , quote, key, before, op, after] = match;
+    const [whole, lead, quote, key, before, op, after] = match;
     if (!SENSITIVE_KEY.test(key)) continue;
     const valueStart = match.index + whole.length;
-    const { end, replacement } = redactValue(text, valueStart, { jsonKey: quote !== '', op, spaced: before !== '' || after !== '' });
+    const enclosingQuote = quote === '' && QUOTES.includes(lead) ? lead : null;
+    const { end, replacement } = redactValue(text, valueStart, { jsonKey: quote !== '', op, spaced: before !== '' || after !== '', enclosingQuote });
     output += text.slice(last, valueStart) + replacement;
     last = end;
     ASSIGNMENT.lastIndex = end;
   }
   return output + text.slice(last);
 }
+
+// Scheme word kept, credential replaced; references, empty values and a scheme alone stay
+function redactAuthorizationValue(value) {
+  const body = value.replace(/\s+$/, '');
+  const tail = value.slice(body.length);
+  const match = body.match(AUTH_VALUE);
+  const [scheme, gap, credential] = match ? [match[1], match[2], match[3]] : ['', '', body];
+  if (credential === '' || REFERENCE.test(credential) || (!match && AUTH_SCHEME_ALONE.test(credential))) return value;
+  return `${scheme}${gap}${REDACTED}${tail}`;
+}
+
+// The value ends at its own closing quote when it is quoted ("Authorization": "Bearer x"),
+// at the enclosing string's closing quote when the header sits inside one
+// (-H "Authorization: Bearer x" https://...), otherwise at the end of the line
+function redactAuthorizationHeaders(text) {
+  let output = '';
+  let last = 0;
+  AUTH_HEADER.lastIndex = 0;
+  let match;
+  while ((match = AUTH_HEADER.exec(text))) {
+    const [whole, lead, keyQuote] = match;
+    const valueStart = match.index + whole.length;
+    const newline = text.indexOf('\n', valueStart);
+    const lineEnd = newline === -1 ? text.length : newline;
+    const rest = text.slice(valueStart, lineEnd);
+    let start = valueStart;
+    let end = lineEnd;
+    if (QUOTES.includes(rest[0])) {
+      const close = rest.indexOf(rest[0], 1);
+      start += 1;
+      if (close !== -1) end = valueStart + close;
+    } else if (keyQuote === '' && QUOTES.includes(lead)) {
+      const close = rest.indexOf(lead);
+      if (close !== -1) end = valueStart + close;
+    }
+    output += text.slice(last, start) + redactAuthorizationValue(text.slice(start, end));
+    last = end;
+    AUTH_HEADER.lastIndex = Math.max(end, valueStart);
+  }
+  return output + text.slice(last);
+}
+
+// The value after one command-line option: a quoted string (quotes kept) or one word
+function redactOptionValues(segment, option) {
+  let output = '';
+  let last = 0;
+  option.lastIndex = 0;
+  let match;
+  while ((match = option.exec(segment))) {
+    const start = match.index + match[0].length;
+    const quote = QUOTES.includes(segment[start]) ? segment[start] : null;
+    let valueStart = start;
+    let valueEnd;
+    if (quote) {
+      const close = segment.indexOf(quote, start + 1);
+      valueStart = start + 1;
+      valueEnd = close === -1 ? segment.length : close;
+    } else {
+      const stop = segment.slice(start).search(/[\s"'`]/);
+      valueEnd = stop === -1 ? segment.length : start + stop;
+    }
+    const value = segment.slice(valueStart, valueEnd);
+    if (value !== '' && value !== REDACTED && !REFERENCE.test(value)) {
+      output += segment.slice(last, valueStart) + REDACTED;
+      last = valueEnd;
+    }
+    option.lastIndex = Math.max(valueEnd, start);
+  }
+  return output + segment.slice(last);
+}
+
+// Applies `option` only inside each `command` on a line, so docker run -p 8080:80 or
+// mkdir -p dir elsewhere on the line is never touched
+function redactCommandOptions(line, command, option) {
+  let output = '';
+  let last = 0;
+  command.lastIndex = 0;
+  let match;
+  while ((match = command.exec(line))) {
+    if (match.index < last) continue;
+    const stop = line.slice(match.index + match[0].length).search(COMMAND_END);
+    const end = stop === -1 ? line.length : match.index + match[0].length + stop;
+    output += line.slice(last, match.index) + redactOptionValues(line.slice(match.index, end), option);
+    last = end;
+    command.lastIndex = end;
+  }
+  return output + line.slice(last);
+}
+
+// Physical lines grouped into logical lines: a line ending in "\" is joined with the
+// next one, newline, "\" and indentation kept byte for byte
+function logicalLines(text) {
+  const groups = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    current = current === null ? line : `${current}\n${line}`;
+    if (!CONTINUED_LINE.test(line)) {
+      groups.push(current);
+      current = null;
+    }
+  }
+  if (current !== null) groups.push(current);
+  return groups;
+}
+
+const redactCommandLines = (text) => logicalLines(text).map((line) =>
+  redactCommandOptions(redactCommandOptions(line, CURL_COMMAND, CURL_USER_OPTION), DOCKER_LOGIN_COMMAND, DOCKER_PASSWORD_OPTION)
+).join('\n');
 
 /**
  * redactCredentials(text) -> text with credentials replaced by REDACTED (best effort):
@@ -179,17 +323,34 @@ function redactAssignments(text) {
  * (b) private key blocks and every token matching SECRET_PATTERNS (agents/files.js)
  * (c) the value of KEY=value, KEY: value and key = "value" when the key contains TOKEN,
  *     SECRET, PASSWORD, PASSWD, API_KEY or PRIVATE_KEY; ${{ ... }}, ${VAR} and $VAR
- *     references, empty values and version specifiers stay
- * Dependency names, versions and hosts are kept.
+ *     references, empty values and version specifiers stay. Inside a quoted string
+ *     (-H "X-Api-Key: value" https://...) the value ends at the closing quote.
+ * (d) Slack (hooks.slack.com/services/, /workflows/) and Discord (discord.com and
+ *     discordapp.com /api/webhooks/) webhook URLs: the path after that prefix
+ * (e) Authorization: and Proxy-Authorization: headers: the scheme word stays
+ *     (Authorization: Bearer REDACTED); the value ends at the closing quote when the
+ *     header is quoted, otherwise at the end of the line
+ * (f) Dockerfile ENV KEY value and ARG KEY value (space form) with a sensitive key:
+ *     the rest of the line
+ * (g) curl -u / --user / --oauth2-bearer values, and docker login -p / --password values
+ *     (only within a docker login command; --password-stdin stays). A command continued
+ *     with "\" at the end of a line is one command; the layout is kept byte for byte.
+ * In (d) to (g), ${{ ... }}, ${VAR} and $VAR references stay. Line-based (logical lines
+ * for (g)), so a value never runs past its line. Dependency names, versions and hosts are kept.
  */
 export function redactCredentials(text) {
   let output = String(text ?? '');
   output = output.replace(URL_USERINFO, (whole, scheme, userinfo) =>
     (SSH_SCHEME.test(scheme) && !userinfo.includes(':') ? whole : `${scheme}${REDACTED}@`));
+  output = output.replace(WEBHOOK_URL, (whole, prefix, rest) => (REFERENCE.test(rest) ? whole : `${prefix}${REDACTED}`));
   output = output.replace(PEM_BLOCK, REDACTED);
   for (const { regex, keepsLead } of SECRET_TOKENS) {
     output = output.replace(regex, (whole, lead) => `${keepsLead ? lead : ''}${REDACTED}`);
   }
+  output = redactAuthorizationHeaders(output);
+  output = redactCommandLines(output);
+  output = output.replace(DOCKER_ENV_SPACE, (whole, head, key, gap, value, tail) =>
+    (SENSITIVE_KEY.test(key) && !REFERENCE.test(value) ? `${head}${key}${gap}${REDACTED}${tail}` : whole));
   return redactAssignments(output);
 }
 
@@ -326,6 +487,30 @@ export async function detectPythonFrameworks(repoPath, projectFiles) {
 }
 
 // ---------------------------------------------------------------------------
+// Dockerfiles
+
+// Dockerfile, Dockerfile.<suffix> or <prefix>.Dockerfile, in any case
+const DOCKERFILE_NAME = /^(?:dockerfile(?:\..+)?|.+\.dockerfile)$/i;
+// ...but not documentation, text or images about one (Dockerfile.md, docs/Dockerfile.txt)
+const DOCUMENT_SUFFIX = /\.(?:md|markdown|txt|rst|adoc|html|htm|pdf|png|jpg|jpeg|gif|svg)$/i;
+const byDepthThenName = (a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * findDockerfiles(projectFiles) -> POSIX paths of every scanned Dockerfile at any depth
+ * (backend/Dockerfile, docker/Dockerfile.prod, api.Dockerfile), shallowest first, then
+ * alphabetical; a name whose last suffix is a documentation, text or image extension
+ * (Dockerfile.md) is not one. Names only: nothing is read. The one source for the analyzer's docker
+ * tool, its recommendation and the generator's existing configuration.
+ */
+export function findDockerfiles(projectFiles) {
+  return Object.keys(projectFiles)
+    .filter((key) => projectFiles[key] === 'file')
+    .map(toPosix)
+    .filter((name) => DOCKERFILE_NAME.test(path.posix.basename(name)) && !DOCUMENT_SUFFIX.test(name) && !isForbiddenFileName(name))
+    .sort(byDepthThenName);
+}
+
+// ---------------------------------------------------------------------------
 // Evidence
 
 const manifestText = (manifests, name) => manifests.find((manifest) => manifest.name === name)?.content ?? null;
@@ -355,11 +540,21 @@ export async function collectRepositoryEvidence(repoPath, projectFiles) {
     .map(toPosix)
     .filter((name) => /^\.github\/workflows\/[^/]+$/.test(name) && isFileIn(projectFiles, name))
     .sort();
+  // Dockerfiles at any depth (the first DOCKERFILE_NAME_CAP named, then a count of the
+  // rest, so they cannot crowd out the workflows; the first DOCKERFILE_EXCERPT_CAP
+  // excerpted); .dockerignore and Compose files top-level only
+  const dockerfiles = findDockerfiles(projectFiles);
+  const unlisted = dockerfiles.length - DOCKERFILE_NAME_CAP;
   const existingNames = [
-    ...['Dockerfile', '.dockerignore', ...COMPOSE_FILES].filter((name) => isFileIn(projectFiles, name)),
+    ...dockerfiles.slice(0, DOCKERFILE_NAME_CAP),
+    ...(unlisted > 0 ? [`… and ${unlisted} more ${unlisted === 1 ? 'Dockerfile' : 'Dockerfiles'}`] : []),
+    ...['.dockerignore', ...COMPOSE_FILES].filter((name) => isFileIn(projectFiles, name)),
     ...workflowFiles
   ];
-  const excerptNames = existingNames.filter((name) => name === 'Dockerfile' || (name.startsWith('.github/') && /\.ya?ml$/i.test(name)));
+  const excerptNames = [
+    ...dockerfiles.slice(0, DOCKERFILE_EXCERPT_CAP),
+    ...workflowFiles.filter((name) => /\.ya?ml$/i.test(name))
+  ];
   const { included: excerpts, omitted: excerptsOmitted } = await readCapped(repoPath, excerptNames, EXISTING_FILE_CAP, EXISTING_TOTAL_CAP);
 
   const packageJson = parsePackageJson(manifestText(manifests, 'package.json'));

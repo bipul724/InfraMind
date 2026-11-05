@@ -46,7 +46,7 @@ interface AgentProgressProps {
   currentStep: string;
   progress: number;
   status: SessionStatus;
-  // undefined until the first per-agent event (after the planner) arrives; then the
+  // undefined until the first per-agent event (after the analyzer) arrives; then the
   // messages of the agents that have finished so far
   messages?: AgentMessage[];
   errors?: string[];
@@ -61,17 +61,10 @@ interface AgentProgressProps {
 }
 
 // agent: the `agent` value of the agent's entry in state.messages; errorPrefix: the start
-// of the string the agent adds to state.errors on failure (server/agents/index.js)
+// of the string the agent adds to state.errors on failure (server/agents/index.js).
+// Sessions stored before B2.6 may also hold a planner message or a "Planner Agent Error:"
+// entry: no card matches them, so they only appear in the message list.
 const WORKFLOW_STEPS = [
-  {
-    id: 'plan',
-    agent: 'planner',
-    errorPrefix: 'Planner Agent Error:',
-    title: 'Planner Agent',
-    description: 'Asks the AI for an analysis plan from the repository name',
-    icon: Bot,
-    aiUsage: 'planner, 1 call'
-  },
   {
     id: 'analyze',
     agent: 'analyzer',
@@ -419,7 +412,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
             )}
           </CardTitle>
           <CardDescription>
-            Progress arrives after the clone, when the analysis starts and as each of the four agents finishes
+            Progress arrives after the clone, when the analysis starts and as each of the three agents finishes
           </CardDescription>
         </div>
         <Button
@@ -449,7 +442,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
 
         {showSharedRunning && (
           <p className="text-sm leading-6 text-muted-foreground">
-            The four agents run one after another. Each card updates when its agent finishes.
+            The three agents run one after another. Each card updates when its agent finishes.
           </p>
         )}
 
@@ -463,7 +456,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         )}
 
         {/* Workflow Steps */}
-        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {WORKFLOW_STEPS.map((step, index) => {
             const stepState = getStepState(step, index);
             const Icon = step.icon;

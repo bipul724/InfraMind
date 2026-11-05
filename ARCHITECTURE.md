@@ -1,6 +1,6 @@
 # InfraMind Architecture
 
-InfraMind takes a GitHub repository, clones it on the server, runs four agents in sequence (planner, analyzer, generator, verifier) and produces three files: a Dockerfile, a GitHub Actions workflow and a `.env.example`. This document describes how the parts fit together, as implemented in this repository.
+InfraMind takes a GitHub repository, clones it on the server, runs three agents in sequence (analyzer, generator, verifier) and produces three files: a Dockerfile, a GitHub Actions workflow and a `.env.example`. This document describes how the parts fit together, as implemented in this repository.
 
 Contents:
 
@@ -180,10 +180,10 @@ sequenceDiagram
     Note over J: at most ANALYSIS_CONCURRENCY jobs run and at most ANALYSIS_QUEUE_MAX wait. A queued job first sends progress 30%, Waiting for an analysis slot
     J->>B: progress 30%, Starting AI agent analysis
     J->>P: runAgentPipeline(owner/repo, clone path, onAgentDone)
-    loop after each of planner, analyzer, generator, verifier
-        P->>AI: generateText (planner x1, generator x3 to x6, verifier x1 or x0)
+    loop after each of analyzer, generator, verifier
+        P->>AI: generateText (analyzer x0, generator x3 to x6, verifier x1 or x0)
         P-->>J: onAgentDone: step, messages and errors so far
-        J->>B: progress 30%, 50%, 80%, 95%, analyzing, messages, errors
+        J->>B: progress 50%, 80%, 95%, analyzing, messages, errors
     end
     P-->>J: result
     J->>J: remove temp/session-id
@@ -204,12 +204,12 @@ Details:
 - Progress events go only to the Socket.IO room `session:<id>`. The latest one is kept in memory (set before it is emitted) and stored with the session (`server/utils/realtime.js`). The browser learns the session id only from the clone response, so it is not subscribed when the 10% and 25% events are sent; when it subscribes it receives the newest state.
 - `POST /api/analyze` answers 202 `{ success, sessionId, status: "analyzing" }` as soon as the session is claimed. The pipeline runs in an in-process job runner: at most `ANALYSIS_CONCURRENCY` (1-8, default 2) at once and at most `ANALYSIS_QUEUE_MAX` (0-100, default 20) waiting. When both are full the answer is 503 `{ error, code: "ANALYSIS_BUSY" }` with `Retry-After: 30`, given before the claim, so the session stays `cloned` and the same session can be retried without cloning again (`server/server.js`, `server/utils/jobs.js`).
 - The claim moves `cloned` to `analyzing` in one store operation that matches the id, the owner and `status = 'cloned'` (`claimForAnalysis` in `server/utils/sessionStore.js`). Of concurrent requests for one session, one gets 202 and the others 400 "Repository not ready for analysis"; the pipeline runs once.
-- The agents report progress after each agent: planner, analyzer, generator and verifier events carry 30%, 50%, 80% and 95% (the planner's 20% is shown as 30%, so progress never goes back), the step of the agent that finished, and the `messages` and `errors` so far (`onAgentDone` in `server/agents/index.js`, `runAnalysisJob` in `server/server.js`).
+- The agents report progress after each agent: analyzer, generator and verifier events carry 50%, 80% and 95%, after the 30% "Starting" event, with the step of the agent that finished and the `messages` and `errors` so far. Progress never goes back (`onAgentDone` in `server/agents/index.js`, `runAnalysisJob` in `server/server.js`).
 - The final `completed` event and `GET /api/files/:sessionId` carry the run's `messages` and `errors`, copied through an allow-list (`toAgentMessages`, `toErrorList` in `server/utils/sessionView.js`). The final event is the stored snapshot, so a late subscriber and a reopened session see which agents finished and why files are missing (`server/server.js`).
 - The browser completes a run from the `completed` event or, when events are missed (a dropped socket, a phone that slept), from polling `GET /api/status/:sessionId` every 5 s while the session is in flight, every 30 s after 10 minutes, stopping after 30 minutes with a message to reload. On `completed` the poller loads `GET /api/files/:sessionId` once (`client/src/hooks/use-session-poller.ts`, `client/src/components/AgentProgress.tsx`).
 - An AI failure inside an agent does not fail the session. The agent adds a fixed message to `errors` and the pipeline continues. The three files are generated independently: a failed AI call adds one `Generator Agent Error:` entry and the other files are kept. Only when all three fail does the session complete with no generated files, and then the verifier makes no AI call (`server/agents/index.js`).
 - Each generator reply is reduced to one raw file and validated before it is saved: a Dockerfile must consist of Dockerfile instructions, the workflow must parse as YAML and follow a fixed CI-only policy (read-only `permissions`, major-version action refs, no registry login or push), and `.env.example` must hold only comments and `KEY=value` lines without real-looking credentials. An invalid reply gets one repair call; if that fails too, the file is left out and `errors` gets `Generator Agent Error: <label>: the AI output did not pass validation` (`server/agents/files.js`, `server/agents/index.js`). Details in [README-AI-AGENTS.md](README-AI-AGENTS.md#generated-files-extraction-validation-repair).
-- The generator prompts carry the repository's top-level manifests (up to 8 KB each, 32 KB in total), an excerpt of an existing Dockerfile and workflows, evidence flags (entry points, tests, linters) and at most 300 file paths, within 24,000 characters per prompt. `.env` files are never read (`server/agents/grounding.js`, `server/agents/prompts.js`).
+- The generator prompts carry the repository's top-level manifests (up to 8 KB each, 32 KB in total), the names of existing Dockerfiles at any depth with excerpts of the first two, workflow excerpts, evidence flags (entry points, tests, linters) and at most 300 file paths, within 24,000 characters per prompt. `.env` files are never read (`server/agents/grounding.js`, `server/agents/prompts.js`).
 - The verifier sees each saved file up to 4,000 characters. Its review (`verificationResults`) is shown in the browser under "Review", as plain text, when a run completes and when a completed session is reopened (`client/src/components/AgentProgress.tsx`).
 - Results in the browser: `AgentProgress` keeps one `GET /api/files/:sessionId` response per session for the page load: the poller's when it delivered one, otherwise its own request after the `completed` event, or the dashboard's for a session that was already completed when opened. That response feeds the file viewer (one tab per file, plain text in `<pre><code>`, Copy and Download per file), the review and "Save to Account", which inserts every non-empty file in one `saved_files` insert and is then disabled for that session. Chrome removes the leading dot of a download name, so `.env.example` is saved as `env.example`, and the viewer says so. The cache and the saved state are cleared whenever the signed-in user changes, sign-out included, and a load still in flight then is dropped (`client/src/lib/resultCache.ts`, `client/src/contexts/AuthContext.tsx`, `client/src/components/GeneratedFilesView.tsx`, `client/src/components/AgentProgress.tsx`).
 - A failed clone or analysis sets the session to `failed` and emits a progress event with 0% and status `failed`. A failed analysis job is logged by the job runner, redacted; it is never an unhandled rejection (`server/server.js`, `server/utils/jobs.js`).
@@ -341,12 +341,12 @@ Further facts:
 
 ## 7. AI layer
 
-The planner, generator and verifier ask `server/ai/` for a *task*; the configuration decides which providers serve it, in which order. Supported providers: `gemini`, `groq`, `openrouter`, `novita`, all called in the OpenAI chat-completions format. There are no default model IDs: each provider used in a route needs `<NAME>_API_KEY` and `<NAME>_MODEL` (`server/ai/providers.js`, `server/ai/config.js`).
+The generator and verifier ask `server/ai/` for a *task*; the configuration decides which providers serve it, in which order. Supported providers: `gemini`, `groq`, `openrouter`, `novita`, all called in the OpenAI chat-completions format. There are no default model IDs: each provider used in a route needs `<NAME>_API_KEY` and `<NAME>_MODEL` (`server/ai/providers.js`, `server/ai/config.js`).
 
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
 | `AI_PROVIDERS` | none (required) | comma-separated provider names | Default fallback chain |
-| `AI_ROUTE_PLANNER`, `AI_ROUTE_GENERATOR`, `AI_ROUTE_VERIFIER` | `AI_PROVIDERS` | same | Per-task chain |
+| `AI_ROUTE_GENERATOR`, `AI_ROUTE_VERIFIER` | `AI_PROVIDERS` | same | Per-task chain |
 | `AI_TIMEOUT_MS` | 60000 | 1000-300000 | Timeout of one attempt |
 | `AI_CALL_BUDGET_MS` | 180000 | 1000-3600000, at least `AI_TIMEOUT_MS` | Total time for one call across all attempts and providers |
 | `AI_MAX_ATTEMPTS_PER_PROVIDER` | 2 | 1-5 | Attempts on one provider before falling back |
@@ -354,7 +354,7 @@ The planner, generator and verifier ask `server/ai/` for a *task*; the configura
 
 Retries, fallback and the circuit breaker are described with a diagram in [README-AI-AGENTS.md](README-AI-AGENTS.md#ai-provider-fallback).
 
-A run makes 4 to 8 AI calls: planner 1, generator 3 to 6 (one per file, plus one repair call for each file whose reply fails validation), verifier 0 or 1. Each call can make several attempts across providers. The agents use `generateText` only; the generator validates its replies itself rather than asking for JSON (`server/agents/index.js`, `server/agents/files.js`).
+A run makes 3 to 7 AI calls: generator 3 to 6 (one per file, plus one repair call for each file whose reply fails validation), verifier 0 or 1. Each call can make several attempts across providers. The agents use `generateText` only; the generator validates its replies itself rather than asking for JSON (`server/agents/index.js`, `server/agents/files.js`).
 
 ## 8. Startup checks and configuration
 

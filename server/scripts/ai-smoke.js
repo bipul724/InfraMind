@@ -54,11 +54,11 @@ let failed = false;
 for (const name of providers) {
   const provider = config.providers[name];
   const text = await probe(name, (client) =>
-    client.generateText({ task: 'planner', system: 'You are a health check.', prompt: 'Reply with the single word: pong', maxTokens: 1024 })
+    client.generateText({ task: 'verifier', system: 'You are a health check.', prompt: 'Reply with the single word: pong', maxTokens: 1024 })
   );
   const json = await probe(name, (client) =>
     client.generateObject({
-      task: 'planner',
+      task: 'verifier',
       system: 'You are a health check.',
       prompt: 'Return {"ok": true}.',
       schema: okSchema,

@@ -13,7 +13,7 @@ import { io as connectClient } from 'socket.io-client';
 import { authHeaders, closeFakes, getFakes, makeTempDir, pathExists, postJson, randomAlphanumeric, startServer } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
 import { DB_SKIP, adminQuery, createTestDatabase } from './db.js';
-import { FAKE_FILES, FAKE_LLM_CONTENT } from './fakeLlm.js';
+import { FAKE_FILES, FAKE_LLM_CONTENT, generatorKindOf } from './fakeLlm.js';
 import { FAULT_SECRET_MARKER } from './faultInjection.js';
 import { createFakeGit } from './fakeGit.js';
 
@@ -21,14 +21,16 @@ const RESTART_MESSAGE = 'The server restarted before this analysis finished. Ple
 const STALE_MESSAGE = 'The repository was cloned but analysis was not started within 1 hour. Please start again.';
 const BUSY_BODY = { error: 'The analysis service is busy. Please try again shortly.', code: 'ANALYSIS_BUSY' };
 const NOT_READY_BODY = { error: 'Repository not ready for analysis' };
-// What the pipeline produced before this batch for this fixture and the fake LLM
+// What the pipeline produced before B2.1 for this fixture and the fake LLM, less the
+// planner's message (B2.6 removed the planner)
 const EXPECTED_MESSAGES = [
-  ['planner', 'Created comprehensive analysis plan'],
   ['analyzer', 'Detected tech stack: node'],
   ['generator', 'Generated 3 of 3 files'],
   ['verifier', 'Review complete: see the review text']
 ];
-const isPlannerCall = (request) => request.body?.messages?.some((m) => m.role === 'system' && m.content.startsWith('You are a DevOps Planning Agent'));
+// The first AI call of a run (B2.6: the Dockerfile generator call; it was the planner's)
+const isFirstCall = (request) => generatorKindOf(request.body) === 'dockerfile';
+const isOldPlannerCall = (request) => request.body?.messages?.some((m) => m.role === 'system' && m.content.startsWith('You are a DevOps Planning Agent'));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(predicate, timeoutMs, label) {
@@ -179,19 +181,19 @@ for (const store of STORES) {
       const late = await subscribe(server, sessionId);
       await waitFor(() => late.events.length >= 1, 3000, 'the late snapshot');
       assert.equal(late.events[0].status, 'analyzing');
-      assert.deepEqual(late.events[0].messages.map((m) => m.agent), ['planner', 'analyzer']);
+      assert.deepEqual(late.events[0].messages.map((m) => m.agent), ['analyzer', 'generator']);
       late.socket.close();
 
       await waitForStatus(server, sessionId, 'completed', 30000);
       await waitFor(() => early.events.some((e) => e.status === 'completed'), 3000, 'the completed event');
       early.socket.close();
 
-      // E.4: per-agent events with 1, 2, 3, then 4 agents' messages, then completed
+      // E.4: per-agent events with 1, 2, then 3 agents' messages, then completed
       const withMessages = early.events.filter((e) => Array.isArray(e.messages));
       assert.deepEqual(withMessages.map((e) => [e.status, e.messages.length]), [
-        ['analyzing', 1], ['analyzing', 2], ['analyzing', 3], ['analyzing', 4], ['completed', 4]
+        ['analyzing', 1], ['analyzing', 2], ['analyzing', 3], ['completed', 3]
       ]);
-      assert.deepEqual(withMessages.slice(0, 4).map((e) => e.progress), [30, 50, 80, 95], 'the planner\'s 20 is held at the 30 already shown');
+      assert.deepEqual(withMessages.slice(0, 3).map((e) => e.progress), [50, 80, 95]);
       const progress = early.events.map((e) => e.progress);
       assert.deepEqual(progress, [...progress].sort((a, b) => a - b), `never backwards: ${progress}`);
       assert.equal(early.events.at(-1).status, 'completed');
@@ -237,8 +239,9 @@ for (const store of STORES) {
       assert.deepEqual(results.find((r) => r.status === 400).json, NOT_READY_BODY);
       await waitForStatus(server, sessionId, 'completed');
       await sleep(300);
-      assert.equal(fakes.llm.requests.filter(isPlannerCall).length, 1, 'one planner call: one pipeline run');
-      assert.equal(fakes.llm.requests.length, 5, 'planner, 3 generator calls, verifier');
+      assert.equal(fakes.llm.requests.filter(isFirstCall).length, 1, 'one Dockerfile generator call: one pipeline run');
+      assert.equal(fakes.llm.requests.length, 4, '3 generator calls, verifier');
+      assert.equal(fakes.llm.requests.filter(isOldPlannerCall).length, 0, 'no planner call (B2.6)');
       // Once claimed, the session can never be claimed again
       assert.equal((await analyze(server, sessionId)).status, 400);
     });
@@ -252,7 +255,7 @@ for (const store of STORES) {
       assert.equal(results.filter((r) => r.status === 400).length, 7);
       await waitForStatus(server, sessionId, 'completed');
       await sleep(300);
-      assert.equal(fakes.llm.requests.filter(isPlannerCall).length, 1);
+      assert.equal(fakes.llm.requests.filter(isFirstCall).length, 1);
     });
   });
 
@@ -400,12 +403,12 @@ for (const store of STORES) {
   describe(`B2.1 shutdown with a running job (${store.label} store)`, { skip: store.skip }, () => {
     test('SIGTERM exits within the 3 s cap; after a restart the session is failed (database store)', { timeout: 60000 }, async () => {
       fakes.llm.reset();
-      fakes.llm.setResponder((body) => (isPlannerCall({ body }) ? { hang: true } : undefined));
+      fakes.llm.setResponder((body) => (isFirstCall({ body }) ? { hang: true } : undefined));
       const ctx = await launch(store, { AI_TIMEOUT_MS: '30000', AI_CALL_BUDGET_MS: '60000' });
       try {
         const sessionId = await clone(ctx.server);
         assert.equal((await analyze(ctx.server, sessionId)).status, 202);
-        await waitFor(() => fakes.llm.requests.some(isPlannerCall), 5000, 'the planner call');
+        await waitFor(() => fakes.llm.requests.some(isFirstCall), 5000, 'the first generator call');
         assert.deepEqual((await metricsOf(ctx)).analysisJobs, { running: 1, queued: 0 });
 
         const started = Date.now();

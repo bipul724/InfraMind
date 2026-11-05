@@ -31,7 +31,7 @@ test('the key set after the import is the one sent, through the fetch stubbed at
     return new Response(JSON.stringify({ choices: [{ message: { content: 'lazy ok' } }] }), { status: 200 });
   };
 
-  const result = await generateText({ task: 'planner', system: 's', prompt: 'p' });
+  const result = await generateText({ task: 'verifier', system: 's', prompt: 'p' });
   assert.equal(result.text, 'lazy ok');
   assert.equal(result.provider, 'groq');
   assert.equal(requests.length, 1);
@@ -60,10 +60,10 @@ test('setDefaultAiCallSink applies to the next default client and is cleared by 
   const originalLog = console.log;
   console.log = (line) => lines.push(String(line));
   try {
-    await generateText({ task: 'planner', system: 's', prompt: 'p' });
+    await generateText({ task: 'verifier', system: 's', prompt: 'p' });
   } finally {
     console.log = originalLog;
   }
   assert.equal(records.length, 1);
-  assert.ok(lines.some((line) => line.startsWith('ai_call task=planner')));
+  assert.ok(lines.some((line) => line.startsWith('ai_call task=verifier')));
 });

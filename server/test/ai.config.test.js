@@ -1,7 +1,7 @@
 // Unit tests for loadAiConfig: validation, every problem reported, names but never values
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AiConfigError, describeAiRoutes, loadAiConfig } from '../ai/index.js';
+import { AiConfigError, TASKS, describeAiRoutes, describeRetiredAiVariables, loadAiConfig } from '../ai/index.js';
 import { PROVIDERS } from '../ai/providers.js';
 
 const MARK = 'VALUE_MARKER_7Q';
@@ -41,7 +41,7 @@ function assertNamesOnly(error, variables, env) {
 describe('valid configurations', () => {
   test('minimal: one provider; defaults for everything else', () => {
     const config = loadAiConfig({ AI_PROVIDERS: 'groq', GROQ_API_KEY: 'k', GROQ_MODEL: 'm' });
-    assert.deepEqual(config.routes, { planner: ['groq'], generator: ['groq'], verifier: ['groq'] });
+    assert.deepEqual(config.routes, { generator: ['groq'], verifier: ['groq'] });
     assert.equal(config.providers.groq.baseUrl, PROVIDERS.groq.defaultBaseUrl);
     assert.equal(config.providers.groq.jsonMode, 'json_object');
     assert.equal(config.providers.groq.model, 'm');
@@ -50,15 +50,14 @@ describe('valid configurations', () => {
     assert.equal(config.callBudgetMs, 180000);
     assert.equal(config.maxAttemptsPerProvider, 2);
     assert.equal(config.providers.gemini, undefined, 'providers outside every chain are not configured');
-    assert.ok(Object.isFrozen(config) && Object.isFrozen(config.routes.planner) && Object.isFrozen(config.providers.groq));
+    assert.ok(Object.isFrozen(config) && Object.isFrozen(config.routes.generator) && Object.isFrozen(config.providers.groq));
   });
 
   test('full: routes, base URLs, JSON modes, OpenRouter extras and limits', () => {
     const config = loadAiConfig({
       AI_PROVIDERS: ' Gemini , GROQ,openrouter ',
-      AI_ROUTE_PLANNER: 'groq',
       AI_ROUTE_GENERATOR: 'openrouter,gemini',
-      AI_ROUTE_VERIFIER: 'novita',
+      AI_ROUTE_VERIFIER: 'novita,groq',
       GEMINI_API_KEY: 'gk', GEMINI_MODEL: 'gm', GEMINI_BASE_URL: 'http://127.0.0.1:1234/x/', GEMINI_JSON_MODE: 'json_schema',
       GROQ_API_KEY: 'qk', GROQ_MODEL: 'qm', GROQ_JSON_MODE: 'prompt',
       OPENROUTER_API_KEY: 'ok', OPENROUTER_MODEL: 'om', OPENROUTER_DATA_COLLECTION: 'allow',
@@ -66,7 +65,7 @@ describe('valid configurations', () => {
       CLIENT_URL: 'https://app.example.test',
       AI_TIMEOUT_MS: '1000', AI_CALL_BUDGET_MS: '1000', AI_MAX_ATTEMPTS_PER_PROVIDER: '5'
     });
-    assert.deepEqual(config.routes, { planner: ['groq'], generator: ['openrouter', 'gemini'], verifier: ['novita'] });
+    assert.deepEqual(config.routes, { generator: ['openrouter', 'gemini'], verifier: ['novita', 'groq'] });
     assert.equal(config.providers.gemini.baseUrl, 'http://127.0.0.1:1234/x', 'http on 127.0.0.1 with a path is fine; trailing slash removed');
     assert.equal(config.providers.gemini.jsonMode, 'json_schema');
     assert.equal(config.providers.groq.jsonMode, 'prompt');
@@ -101,7 +100,6 @@ describe('valid configurations', () => {
     assert.ok(!JSON.stringify(config).includes(MARK));
     const lines = describeAiRoutes(config);
     assert.deepEqual(lines, [
-      'AI route planner: gemini(gem-model) → groq(groq-model)',
       'AI route generator: gemini(gem-model) → groq(groq-model)',
       'AI route verifier: gemini(gem-model) → groq(groq-model)'
     ]);
@@ -152,14 +150,32 @@ describe('invalid configurations: every problem, names only', () => {
       OPENROUTER_DATA_COLLECTION: `x${MARK}`,
       GROQ_JSON_MODE: `y${MARK}`,
       AI_TIMEOUT_MS: '10',
-      AI_ROUTE_PLANNER: 'groq,groq'
+      AI_ROUTE_VERIFIER: 'groq,groq'
     };
     const error = problemsFor(env);
     const expected = [
       'GEMINI_MODEL', 'GEMINI_BASE_URL', 'OPENROUTER_API_KEY', 'OPENROUTER_DATA_COLLECTION',
-      'GROQ_JSON_MODE', 'AI_TIMEOUT_MS', 'AI_ROUTE_PLANNER'
+      'GROQ_JSON_MODE', 'AI_TIMEOUT_MS', 'AI_ROUTE_VERIFIER'
     ];
     assertNamesOnly(error, expected, env);
     assert.ok(error.problems.length >= expected.length, error.problems.join(' | '));
+  });
+});
+
+describe('B2.6: AI_ROUTE_PLANNER is retired', () => {
+  test('the tasks are generator and verifier', () => {
+    assert.deepEqual(TASKS, ['generator', 'verifier']);
+  });
+
+  test('AI_ROUTE_PLANNER is neither read nor validated: even an invalid value loads', () => {
+    const config = loadAiConfig({ ...base(), AI_ROUTE_PLANNER: `nope,nope,${MARK}` });
+    assert.deepEqual(Object.keys(config.routes), ['generator', 'verifier']);
+  });
+
+  test('one warning names the variable, never its value; none when it is not set', () => {
+    const lines = describeRetiredAiVariables({ ...base(), AI_ROUTE_PLANNER: `gemini,${MARK}` });
+    assert.deepEqual(lines, ['AI_ROUTE_PLANNER is set but no longer used (the planner agent was removed); it can be removed']);
+    assert.ok(!lines.join('\n').includes(MARK));
+    assert.deepEqual(describeRetiredAiVariables(base()), []);
   });
 });

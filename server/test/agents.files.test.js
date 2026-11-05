@@ -251,7 +251,9 @@ describe('validateEnvExample', () => {
   const passing = {
     'keys and comments': '# Server\nPORT=3000\nHOST=0.0.0.0\n',
     'empty values, quotes and the guesses block': 'DATABASE_URL=\nGREETING="hello world"\n\n# Possibly needed (not found in the repository):\n# SENTRY_DSN=your-sentry-dsn\nLOG_LEVEL=info\n',
-    'placeholder secrets': 'OPENAI_API_KEY=your-openai-api-key\nGITHUB_TOKEN=your-github-token\nAWS_ACCESS_KEY_ID=your-aws-access-key-id\n'
+    'placeholder secrets': 'OPENAI_API_KEY=your-openai-api-key\nGITHUB_TOKEN=your-github-token\nAWS_ACCESS_KEY_ID=your-aws-access-key-id\n',
+    // B2.6: a webhook placeholder that does not have a real webhook's shape
+    'webhook placeholders': 'SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/path\nDISCORD_WEBHOOK_URL=your-discord-webhook-url\n'
   };
   for (const [name, text] of Object.entries(passing)) {
     test(`passes: ${name}`, () => assert.deepEqual(validateEnvExample(text), { ok: true, errors: [] }));
@@ -268,7 +270,12 @@ describe('validateEnvExample', () => {
     'a GitHub token': ['GITHUB_TOKEN=ghp_abcdefghijklmnop\n', /the value looks like a real secret/],
     'an AWS key id': ['AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n', /the value looks like a real secret/],
     'a private key': ['KEY=-----BEGIN PRIVATE KEY-----\n', /the value looks like a real secret/],
-    'a secret in a commented-out key': ['PORT=1\n# OPENAI_API_KEY=sk-live123456\n', /line 2: a comment contains a value that looks like a real secret/]
+    'a secret in a commented-out key': ['PORT=1\n# OPENAI_API_KEY=sk-live123456\n', /line 2: a comment contains a value that looks like a real secret/],
+    // B2.6: real Slack and Discord webhook shapes (fake ids)
+    'a Slack or Discord webhook URL': [
+      'SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T0FAKE0001/B0FAKE0002/MARKERWEBHOOK661\n# DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456789012345678/MARKERWEBHOOK662\n',
+      /line 1: the value looks like a real secret[\s\S]*line 2: a comment contains a value that looks like a real secret/
+    ]
   };
   for (const [name, [text, expected]] of Object.entries(failing)) {
     test(`fails: ${name}`, () => {

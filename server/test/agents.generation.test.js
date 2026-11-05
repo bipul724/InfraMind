@@ -9,6 +9,9 @@ import path from 'node:path';
 import { GENERATED_FILES, runAgentPipeline } from '../agents/index.js';
 import { resetDefaultAiClient, setDefaultAiCallSink } from '../ai/index.js';
 import {
+  DOCKERFILE_EXCERPT_CAP,
+  DOCKERFILE_NAME_CAP,
+  EXISTING_NAME_CAP,
   EXISTING_FILE_CAP,
   MANIFEST_FILE_CAP,
   MANIFEST_FILES,
@@ -101,11 +104,11 @@ beforeEach(() => {
 const NODE_REPO = { 'package.json': JSON.stringify({ name: 'n', scripts: { start: 'node index.js' } }), 'index.js': 'x' };
 
 describe('generator: one repair attempt, then honest failure', () => {
-  test('defaults: three files from chat-style replies, raw content only, 5 calls', async () => {
+  test('defaults: three files from chat-style replies, raw content only, 4 calls', async () => {
     const result = await run(await makeRepo(NODE_REPO));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.generatedFiles, { ...FAKE_FILES });
-    assert.equal(fake.requests.length, 5);
+    assert.equal(fake.requests.length, 4, '3 generator calls and the verifier (B2.6: no planner)');
     for (const content of Object.values(result.generatedFiles)) {
       assert.ok(!content.includes('Here is'), 'no prose in a saved file');
       assert.ok(!content.includes('```'), 'no fence in a saved file');
@@ -181,7 +184,7 @@ describe('generator: one repair attempt, then honest failure', () => {
     assert.equal(generatorRequests('dockerfile').length, 2);
   });
 
-  test('maximum call count: every file needs its repair -> 1 + 6 + 1 = 8 calls', async () => {
+  test('maximum call count: every file needs its repair -> 6 + 1 = 7 calls', async () => {
     const seen = new Set();
     fake.setResponder((body) => {
       const kind = generatorKindOf(body);
@@ -192,16 +195,16 @@ describe('generator: one repair attempt, then honest failure', () => {
     const result = await run(await makeRepo(NODE_REPO));
     assert.deepEqual(result.errors, []);
     assert.equal(Object.keys(result.generatedFiles).length, 3);
-    assert.equal(fake.requests.length, 8);
+    assert.equal(fake.requests.length, 7);
     for (const file of GENERATED_FILES) assert.equal(generatorRequests(file.key).length, 2);
   });
 
-  test('every reply invalid twice: 7 calls, no files, no verifier call', async () => {
+  test('every reply invalid twice: 6 calls, no files, no verifier call', async () => {
     fake.setResponder((body) => (generatorKindOf(body) ? replyWith('nothing useful') : undefined));
     const result = await run(await makeRepo(NODE_REPO));
     assert.deepEqual(result.generatedFiles, {});
     assert.deepEqual(result.errors, GENERATED_FILES.map((file) => `Generator Agent Error: ${file.label}: the AI output did not pass validation`));
-    assert.equal(fake.requests.length, 7);
+    assert.equal(fake.requests.length, 6);
     assert.equal(verifierRequests().length, 0);
   });
 });
@@ -299,7 +302,7 @@ describe('generator prompts: one file each, grounded in the repository', () => {
     const files = { ...PYTHON_REPO };
     for (const [name, marker] of Object.entries(markers)) files[name] = `SECRET=${marker}\n`;
     await run(await makeRepo(files));
-    assert.ok(fake.requestBodies.length >= 5);
+    assert.ok(fake.requestBodies.length >= 4);
     for (const body of fake.requestBodies) {
       for (const marker of Object.values(markers)) assert.ok(!body.includes(marker), `${marker} reached the AI`);
     }
@@ -468,7 +471,7 @@ describe('credentials in manifests and existing configuration are redacted (arch
     assert.deepEqual(result.errors, []);
     for (const file of GENERATED_FILES) assert.equal(generatorRequests(file.key).length, 2, file.key);
     assert.equal(verifierRequests().length, 1);
-    assert.equal(fake.requestBodies.length, 8);
+    assert.equal(fake.requestBodies.length, 7);
     for (const body of fake.requestBodies) {
       for (const marker of MARKERS) assert.ok(!body.includes(marker), `${marker} reached the AI`);
     }
@@ -493,6 +496,44 @@ describe('credentials in manifests and existing configuration are redacted (arch
     assert.ok(system.includes('--- requirements.txt ---\n--extra-index-url https://REDACTED@pypi.corp.example/simple\nflask==3.0.3\n'));
   });
 
+  // B2.6 (T-245, T-243): header, webhook, ENV and docker login credentials, in a top-level
+  // and a nested Dockerfile and a workflow, through the real pipeline and the fake LLM
+  test('B2.6: Bearer, webhook, ENV and docker login markers reach no request; both Dockerfiles are named and backend/Dockerfile is excerpted redacted', async () => {
+    const markers = ['MARKERBEARER601', 'MARKERSLACK602', 'MARKERENV603', 'MARKERDOCKER604'];
+    const repo = await makeRepo({
+      'package.json': JSON.stringify({ name: 'n', scripts: { start: 'node index.js' } }),
+      'index.js': 'x',
+      Dockerfile: 'FROM node:20\nENV API_TOKEN MARKERENV603\nCMD ["node", "index.js"]\n',
+      'backend/Dockerfile': 'FROM python:3.12-slim\nRUN docker login -u deploy -p MARKERDOCKER604 registry.example.com\nCMD ["python", "app.py"]\n',
+      '.github/workflows/deploy.yml': [
+        'name: deploy',
+        'on: push',
+        'jobs:',
+        '  d:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - run: curl -fsS -H "Authorization: Bearer abcDEF1234567890xyzMARKERBEARER601" https://api.example.com/deploy',
+        '      - run: curl -X POST https://hooks.slack.com/services/T0000/B0000/XXXXMARKERSLACK602XXXX',
+        ''
+      ].join('\n')
+    });
+    const result = await run(repo);
+    assert.deepEqual(result.errors, []);
+    assert.equal(fake.requestBodies.length, 4);
+    for (const body of fake.requestBodies) {
+      for (const marker of markers) assert.ok(!body.includes(marker), `${marker} reached the AI`);
+    }
+    assert.ok(result.techStack.tools.includes('docker'));
+    for (const file of GENERATED_FILES) {
+      const system = systemOf(generatorRequests(file.key)[0]);
+      assert.ok(system.includes('Existing container and CI configuration: Dockerfile, backend/Dockerfile, .github/workflows/deploy.yml'), file.key);
+      assert.ok(system.includes('--- Dockerfile (existing) ---\nFROM node:20\nENV API_TOKEN REDACTED\nCMD ["node", "index.js"]\n--- end of Dockerfile ---'), file.key);
+      assert.ok(system.includes('--- backend/Dockerfile (existing) ---\nFROM python:3.12-slim\nRUN docker login -u deploy -p REDACTED registry.example.com\nCMD ["python", "app.py"]\n--- end of backend/Dockerfile ---'), file.key);
+      assert.ok(system.includes('      - run: curl -fsS -H "Authorization: Bearer REDACTED" https://api.example.com/deploy\n'), file.key);
+      assert.ok(system.includes('      - run: curl -X POST https://hooks.slack.com/services/REDACTED\n'), file.key);
+    }
+  });
+
   test('a credential crossing the 8 KB cut is redacted before the cut, never half-shown', async () => {
     // The userinfo starts a few bytes before byte 8,192, so a plain cut would end inside it
     const filler = `${'#'.repeat(99)}\n`.repeat(81); // 8,100 bytes
@@ -506,5 +547,76 @@ describe('credentials in manifests and existing configuration are redacted (arch
     assert.ok(manifest.content.length <= MANIFEST_FILE_CAP);
     assert.ok(!manifest.content.includes('MARKERSE'), 'no part of the password');
     assert.ok(!manifest.content.includes('deploy:'), 'no part of the user name and password');
+  });
+});
+
+describe('T-243: nested Dockerfiles in the existing configuration', () => {
+  test(`three Dockerfiles: all named, the first ${DOCKERFILE_EXCERPT_CAP} (shallowest, then alphabetical) excerpted`, async () => {
+    const repo = await makeRepo({
+      'package.json': JSON.stringify({ name: 'n' }),
+      'docker/Dockerfile.prod': 'FROM node:20\nTHIRD_DOCKERFILE_MARKER\n',
+      'backend/Dockerfile': 'FROM python:3.12\nSECOND_DOCKERFILE_MARKER\n',
+      'api.Dockerfile': 'FROM golang:1.22\nFIRST_DOCKERFILE_MARKER\n',
+      '.github/workflows/ci.yml': 'name: old\nWORKFLOW_MARKER\n'
+    });
+    const evidence = await collectRepositoryEvidence(repo, await scanProjectStructure(repo));
+    assert.equal(DOCKERFILE_EXCERPT_CAP, 2);
+    assert.deepEqual(evidence.existingConfig.names, ['api.Dockerfile', 'backend/Dockerfile', 'docker/Dockerfile.prod', '.github/workflows/ci.yml']);
+    assert.deepEqual(evidence.existingConfig.excerpts.map((e) => e.name), ['api.Dockerfile', 'backend/Dockerfile', '.github/workflows/ci.yml']);
+
+    await run(repo);
+    const system = systemOf(generatorRequests('dockerfile')[0]);
+    assert.ok(system.includes('Existing container and CI configuration: api.Dockerfile, backend/Dockerfile, docker/Dockerfile.prod, .github/workflows/ci.yml'));
+    for (const marker of ['FIRST_DOCKERFILE_MARKER', 'SECOND_DOCKERFILE_MARKER', 'WORKFLOW_MARKER']) assert.ok(system.includes(marker), marker);
+    for (const body of fake.requestBodies) assert.ok(!body.includes('THIRD_DOCKERFILE_MARKER'), 'the third Dockerfile is named, never excerpted');
+  });
+
+  // Architect review of B2.6: many Dockerfiles must not crowd the workflows out of the names
+  test(`60 Dockerfiles and one workflow: ${DOCKERFILE_NAME_CAP} Dockerfiles named, a "more" line, the workflow kept, ${DOCKERFILE_EXCERPT_CAP} excerpted`, async () => {
+    const files = { 'package.json': '{}', '.dockerignore': '.env\n', '.github/workflows/ci.yml': 'name: ci\nWORKFLOW_MARKER_60\n' };
+    for (let i = 0; i < 60; i++) files[`services/svc${String(i).padStart(2, '0')}/Dockerfile`] = `FROM node:20\nDOCKERFILE_MARKER_${i}\n`;
+    const repo = await makeRepo(files);
+    const evidence = await collectRepositoryEvidence(repo, await scanProjectStructure(repo));
+    const expectedDockerfiles = Array.from({ length: 10 }, (_, i) => `services/svc${String(i).padStart(2, '0')}/Dockerfile`);
+    assert.equal(DOCKERFILE_NAME_CAP, 10);
+    assert.deepEqual(evidence.existingConfig.names, [...expectedDockerfiles, '… and 50 more Dockerfiles', '.dockerignore', '.github/workflows/ci.yml']);
+    assert.ok(evidence.existingConfig.names.length <= EXISTING_NAME_CAP);
+    assert.deepEqual(evidence.existingConfig.excerpts.map((e) => e.name), [expectedDockerfiles[0], expectedDockerfiles[1], '.github/workflows/ci.yml']);
+
+    await run(repo);
+    const system = systemOf(generatorRequests('dockerfile')[0]);
+    assert.ok(system.includes(`Existing container and CI configuration: ${expectedDockerfiles.join(', ')}, … and 50 more Dockerfiles, .dockerignore, .github/workflows/ci.yml`));
+    assert.ok(system.includes('WORKFLOW_MARKER_60'));
+    assert.ok(system.includes('DOCKERFILE_MARKER_0\n') && system.includes('DOCKERFILE_MARKER_1\n'));
+    for (let i = 2; i < 60; i++) assert.ok(!system.includes(`DOCKERFILE_MARKER_${i}\n`), `Dockerfile ${i} excerpted`);
+  });
+
+  test('exactly 11 Dockerfiles: the "more" line is singular', async () => {
+    const files = { 'package.json': '{}' };
+    for (let i = 0; i < 11; i++) files[`s${String(i).padStart(2, '0')}/Dockerfile`] = 'FROM node:20\n';
+    const repo = await makeRepo(files);
+    const { existingConfig } = await collectRepositoryEvidence(repo, await scanProjectStructure(repo));
+    assert.equal(existingConfig.names.length, 11);
+    assert.equal(existingConfig.names[10], '… and 1 more Dockerfile');
+  });
+
+  test('a symlinked backend/Dockerfile (or backend/ directory) pointing outside the repository is refused and never excerpted', async () => {
+    const outside = await makeRepo({ Dockerfile: 'FROM scratch\nOUTSIDE_DOCKERFILE_MARKER\n' });
+    const linkedFile = await makeRepo({ 'package.json': '{}', 'backend/': '' }, { symlinks: { 'backend/Dockerfile': path.join(outside, 'Dockerfile') } });
+    const linkedDir = await makeRepo({ 'package.json': '{}' }, { symlinks: { backend: outside } });
+
+    for (const repo of [linkedFile, linkedDir]) {
+      // The scan skips symlinks, so the pipeline never sees it
+      const result = await run(repo);
+      assert.ok(!result.techStack.tools.includes('docker'));
+      for (const body of fake.requestBodies) assert.ok(!body.includes('OUTSIDE_DOCKERFILE_MARKER'));
+      // A structure that lists it anyway: readRepoFile refuses it, so it is not excerpted
+      const claimed = { 'package.json': 'file', backend: 'directory', [path.join('backend', 'Dockerfile')]: 'file' };
+      const evidence = await collectRepositoryEvidence(repo, claimed);
+      assert.deepEqual(evidence.existingConfig.excerpts, []);
+      assert.ok(!JSON.stringify(evidence).includes('OUTSIDE_DOCKERFILE_MARKER'));
+      await assert.rejects(readRepoFile(repo, path.join('backend', 'Dockerfile'), { maxBytes: EXISTING_FILE_CAP }), /Refusing to read/);
+      fake.reset();
+    }
   });
 });

@@ -68,10 +68,10 @@ describe('per-agent results after a run with one failed generator call', { skip:
     await fs.mkdir(repo, { recursive: true });
     await fs.writeFile(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', scripts: { start: 'node index.js' } }));
 
-    // Call order: planner, Dockerfile, workflow, .env.example, verifier. Only the
-    // Dockerfile call fails, on every provider in the chain (400: no retry).
+    // Call order: Dockerfile, workflow, .env.example, verifier (B2.6: no planner). Only
+    // the Dockerfile call fails, on every provider in the chain (400: no retry).
     fakes.llm.reset();
-    fakes.llm.enqueue('gemini', {}, { status: 400 });
+    fakes.llm.enqueue('gemini', { status: 400 });
     fakes.llm.enqueue('groq', { status: 400 });
     fakes.llm.enqueue('openrouter', { status: 400 });
 
@@ -101,16 +101,16 @@ describe('per-agent results after a run with one failed generator call', { skip:
     assert.ok(completedEvent, JSON.stringify(liveEvents.map((e) => e.status)));
     assert.deepEqual(completedEvent.generatedFiles, ['githubActions', 'envExample']);
     assert.deepEqual(completedEvent.errors, [DOCKERFILE_ERROR]);
-    assert.deepEqual(completedEvent.messages.map((m) => m.agent), ['planner', 'analyzer', 'generator', 'verifier']);
+    assert.deepEqual(completedEvent.messages.map((m) => m.agent), ['analyzer', 'generator', 'verifier']);
     assert.equal(completedEvent.messages.find((m) => m.agent === 'generator').message, 'Generated 2 of 3 files');
     for (const message of completedEvent.messages) assert.deepEqual(Object.keys(message).sort(), ['agent', 'message', 'timestamp']);
   });
 
   test('B2.1: the per-agent event after the generator already reports its error', () => {
-    const afterGenerator = liveEvents.find((event) => event.status === 'analyzing' && event.messages?.length === 3);
+    const afterGenerator = liveEvents.find((event) => event.status === 'analyzing' && event.messages?.length === 2);
     assert.ok(afterGenerator);
     assert.deepEqual(afterGenerator.errors, [DOCKERFILE_ERROR]);
-    assert.equal(afterGenerator.messages[2].message, 'Generated 2 of 3 files');
+    assert.equal(afterGenerator.messages[1].message, 'Generated 2 of 3 files');
   });
 
   test('GET /api/files returns the messages and errors of the stored session', async () => {

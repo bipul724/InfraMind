@@ -1,6 +1,6 @@
 # InfraMind Server
 
-The Express + Socket.IO server in `server.js`. It verifies Supabase access tokens, runs the GitHub connection flow, clones repositories, runs the four-agent pipeline and serves the results. See [../ARCHITECTURE.md](../ARCHITECTURE.md) for the flows and [../README-AI-AGENTS.md](../README-AI-AGENTS.md) for the agents and AI providers.
+The Express + Socket.IO server in `server.js`. It verifies Supabase access tokens, runs the GitHub connection flow, clones repositories, runs the three-agent pipeline and serves the results. See [../ARCHITECTURE.md](../ARCHITECTURE.md) for the flows and [../README-AI-AGENTS.md](../README-AI-AGENTS.md) for the agents and AI providers.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ From `package.json`:
 
 ```
 server.js               Routes, the background analysis job, startup checks, cleanup
-agents/index.js         Planner, analyzer, generator, verifier
+agents/index.js         Analyzer, generator, verifier
 agents/files.js         Extraction of one raw file from an AI reply, and the file validators
 agents/grounding.js     Manifests, existing configuration and evidence flags read from the clone
 agents/prompts.js       Generator and verifier prompts, with the 24,000-character cap

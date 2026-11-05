@@ -34,6 +34,12 @@ interface SignUpFormData {
   confirmPassword: string;
 }
 
+// The thrown value's message when it has one, as `err.message || fallback` did with `any`
+const messageOf = (err: unknown, fallback: string): string => {
+  const message = (err as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message !== '' ? message : fallback;
+};
+
 export const Auth = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -75,8 +81,8 @@ export const Auth = () => {
 
       await login.withEmail(signInForm.email, signInForm.password);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
+    } catch (err) {
+      setError(messageOf(err, 'Failed to sign in'));
     } finally {
       setLoading(false);
     }
@@ -103,8 +109,8 @@ export const Auth = () => {
 
       await register(signUpForm.email, signUpForm.password, signUpForm.name);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Failed to create account');
+    } catch (err) {
+      setError(messageOf(err, 'Failed to create account'));
     } finally {
       setLoading(false);
     }
@@ -122,8 +128,8 @@ export const Auth = () => {
         await login.withGitHub();
       }
       // OAuth will redirect, so no need to navigate manually
-    } catch (err: any) {
-      setError(err.message || `Failed to sign in with ${provider}`);
+    } catch (err) {
+      setError(messageOf(err, `Failed to sign in with ${provider}`));
       setLoading(false);
     }
   };
@@ -185,7 +191,7 @@ export const Auth = () => {
               <CardDescription className="mx-auto max-w-[22rem]">
                 {activeTab === 'signin' 
                   ? 'Sign in to generate DevOps files for your repositories'
-                  : 'Create an account to analyze repositories with the four-agent pipeline'
+                  : 'Create an account to analyze repositories with the three-agent pipeline'
                 }
               </CardDescription>
             </CardHeader>
