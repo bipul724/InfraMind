@@ -4,7 +4,7 @@ How to configure and deploy InfraMind as it is implemented in this repository. F
 
 ## What you need
 
-- **Node.js** matching `server/package.json` `engines`: `^20.19 || ^22.12 || >=24.0`. The root `npm run dev` launcher, `concurrently` 10, requires Node.js 22 or later (its `engines`); on Node 20 use `npm run dev:client` and `npm run dev:server`
+- **Node.js 24** for both Render services. Local and CI runs also use Node 22: the client declares `^22.12 || >=24`, and the server declares `^20.19 || ^22.12 || >=24.0`. Use Node 22.18 or later on the 22 line for the client tests, which run TypeScript through Node's default type stripping. The root development launcher requires Node 22 or later
 - **`git`** on the server machine: clones run the `git` binary (`server/utils/git.js`)
 - **A Supabase project:** Auth, and Postgres for `saved_files` and (optionally) `github_connections`
 - **A GitHub OAuth App** for repository access, separate from the GitHub sign-in provider in Supabase
@@ -173,79 +173,107 @@ Set `VITE_API_URL` to the server's actual URL whenever the port is not 10000. Th
 
 ## Deployment on Render
 
-`render.yaml` defines two services. It defines no environment groups; every secret is set per service in the Render dashboard.
+`render.yaml` defines `inframind-backend` as a Node web service (`runtime: node`) and `inframind-frontend` as a static site (`runtime: static`). Both builds use Node 24. The owner applies the Supabase SQL migrations in filename order, runs `npm run db:deploy` in `server/`, and then deploys the Blueprint. The backend build generates the Prisma client but never applies migrations.
+
+At the first Blueprint deploy, Render asks for each `sync: false` setting below. The supplied values stay in the service dashboard afterwards; update them there for later deployments. The frontend's `VITE_*` values are inlined during its build, so changing them requires a rebuild.
+
+| Service | Fixed in the Blueprint | Prompted at the first deploy |
+|---|---|---|
+| Backend | `NODE_VERSION=24`, `NODE_ENV=production`, `PORT=10000`, `SESSION_STORE=database`, `GITHUB_TOKEN_STORE=supabase`, `OPENROUTER_DATA_COLLECTION=deny` | `CLIENT_URL`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`; `GITHUB_TOKEN_ENC_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI`; `DATABASE_URL`; `AI_PROVIDERS`; `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_API_KEY`, `GROQ_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`; `METRICS_TOKEN` |
+| Frontend | `NODE_VERSION=24` | `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` |
+
+The Blueprint prompts for all three supported deployment providers' key/model pairs. Startup requires the pairs for providers actually used by the generator or verifier routes; model IDs have no default. `METRICS_TOKEN` is optional in the server code, but the Blueprint asks for a 32-character-or-longer token so the owner can use the protected operator endpoints.
 
 ```mermaid
 flowchart TB
-    Repo["Git repository with render.yaml"]
-    YamlEnv["Set in render.yaml: NODE_VERSION 24, NODE_ENV production, PORT 10000"]
-    BackEnv["Set in the Render dashboard: SUPABASE_*, GITHUB_*, AI settings, SESSION_STORE, DATABASE_URL, CLIENT_URL, optional CORS_ALLOWED_ORIGINS, TRUST_PROXY, METRICS_TOKEN"]
-    FrontEnv["Set in the Render dashboard: VITE_API_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY"]
-    subgraph Render
-        Backend["inframind-backend, web, node. Build: cd server && npm ci --include=dev && npm run db:generate. Start: cd server && npm start. Health check: /health"]
-        Frontend["inframind-frontend, static, NODE_VERSION 18.0.0. Build: cd client && npm install && npm run build. Publish: client/dist. Rewrite all paths to /index.html"]
+    Repo["Repository: render.yaml"]
+    Owner["Owner: configure Auth, OAuth and environment"]
+    SQL["Apply Supabase SQL migrations in filename order"]
+    Prisma["Run server npm run db:deploy"]
+    Deploy["Deploy Blueprint after migrations"]
+    BackEnv["Backend prompts: CLIENT_URL, Supabase, GitHub, database, provider keys/models, metrics token"]
+    FrontEnv["Frontend prompts: API origin, Supabase URL, public anon key"]
+    subgraph Render["Render: Node 24 for both builds"]
+        Backend["inframind-backend: Node web service; npm ci --include=dev, db:generate; npm start; /health"]
+        Guard["Frontend: npm ci, check:deploy-env, npm run build"]
+        Frontend["inframind-frontend: static client/dist; SPA rewrite, cache and security headers"]
     end
-    Operator["Operator, manually before deploying"]
-    DB[("Postgres at DATABASE_URL")]
-    SB[("Supabase: supabase/migrations SQL for github_connections and saved_files")]
+    DB[("Postgres: sessions, generated files, AI call records")]
+    Supabase[("Supabase: Auth, saved_files, github_connections")]
 
-    Repo --> Backend
-    Repo --> Frontend
-    YamlEnv --> Backend
+    Owner --> SQL --> Prisma --> Deploy
+    Repo --> Deploy
+    Deploy --> Backend
+    Deploy --> Guard
     BackEnv --> Backend
-    FrontEnv -->|"inlined at build time"| Frontend
-    Operator -->|"npm run db:deploy"| DB
-    Operator -->|"run the SQL"| SB
-    Backend -->|"SESSION_STORE=database"| DB
+    FrontEnv --> Guard --> Frontend
+    Backend --> DB
+    Backend --> Supabase
+    Frontend -->|"Auth and saved files"| Supabase
+    Frontend -->|"API and Socket.IO"| Backend
 ```
 
-Source: `render.yaml`, `server/package.json` (`db:generate`, `db:deploy`, `start`), `server/server.js`, `supabase/migrations/20261103000000_github_connections.sql`, `client/src/lib/api.ts`, `client/src/lib/supabase.ts`.
+The backend command is `cd server && npm ci --include=dev && npm run db:generate`; the dev dependencies include the Prisma CLI. Its start command is `cd server && npm start`. The frontend command is `cd client && npm ci && npm run check:deploy-env && npm run build`, publishing `client/dist`. The owner's exact environment sources and post-deploy checks are in [the Render checklist](PRODUCTION-CHECKLIST.md#render-deployment-owner-t-161).
 
-Notes:
+### Frontend deployment guard
 
-- The backend build installs dev dependencies (`--include=dev`) so the Prisma CLI is available for `npm run db:generate`. The build never runs migrations: `render.yaml` says the owner runs `npm run db:deploy` deliberately before deploying.
-- `npm start` runs `node server.js`. Render's health check calls `/health`, a liveness check that returns `{ status: "ok", timestamp, uptime }`; it does not check the database, Supabase or the AI providers (`server/utils/performance.js`).
-- `render.yaml` sets no `VITE_*` variables for the frontend. Set them in the dashboard before the build, and rebuild after changing them.
-- Set `CLIENT_URL` on the backend to the frontend's origin, `https://<frontend host>` with no path or trailing slash. It is always an allowed CORS and Socket.IO origin and the target of the GitHub OAuth redirect; with `NODE_ENV=production` it must use https (`server/utils/config.js`, `server/server.js`).
-- Add any other frontend origin (a custom domain, a preview host) to `CORS_ALLOWED_ORIGINS`, comma-separated, each exactly `https://host[:port]`. `http://localhost:5173` is not allowed in production.
-- Set `GITHUB_REDIRECT_URI` to `https://<backend URL>/auth/github/callback` and use the same URL as the OAuth App's callback.
-- `TRUST_PROXY` is not set in `render.yaml`. Render's documentation does not state how many proxies sit in front of a web service, so the default 0 stays: until you set it, every visitor shares one IP for the per-IP limits (`preAuth`, `oauth`, `socketHandshake`), which can make busy periods hit 429 for everyone. After deploying, check which address the server sees (see [Checking the client IP](#checking-the-client-ip)) and set `TRUST_PROXY` to the smallest number that gives each visitor their own address. Never set it higher than the real number of proxies: entries further left in `X-Forwarded-For` come from the client and can be forged.
+`npm run check:deploy-env` reads only `process.env`; it never loads a `.env` file. Render runs it before the production build. It is separate from `npm run build`, so local and offline CI builds keep their existing behavior.
 
-Backend variables to set in the dashboard, at minimum:
+| Failure named by the guard | What to change in the frontend service |
+|---|---|
+| `NODE_ENV` is set to anything except `production` | Unset it or set `production`; `development` enables the error boundary's development details |
+| Any required `VITE_*` value is missing or empty | Set `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the service environment |
+| A URL is invalid, uses HTTP, or names `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `*.local` | Use the public HTTPS backend origin and Supabase project URL |
+| `VITE_API_URL` includes a path, query, fragment or trailing slash | Use only `https://<backend host>` because the app appends its endpoint paths |
+| The key is a JWT with `role=service_role` or starts with `sb_secret_` | Replace it with the project's public anon/publishable key; browser bundles must not contain a server secret |
 
-```bash
-SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...          # with GITHUB_TOKEN_STORE=supabase
-GITHUB_TOKEN_STORE=supabase
-GITHUB_TOKEN_ENC_KEY=...               # openssl rand -base64 32
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-GITHUB_REDIRECT_URI=https://<backend URL>/auth/github/callback
-CLIENT_URL=https://<frontend URL>
-AI_PROVIDERS=...
-<NAME>_API_KEY=...                     # for every provider in a chain
-<NAME>_MODEL=...
-SESSION_STORE=database
-DATABASE_URL=...
-METRICS_TOKEN=...                      # optional, 32+ characters
-ANALYSIS_CONCURRENCY=2                 # optional, analyses at once (1-8)
-ANALYSIS_QUEUE_MAX=20                  # optional, analyses waiting (0-100)
-CORS_ALLOWED_ORIGINS=...               # optional, more frontend origins
-TRUST_PROXY=...                        # optional, after checking the client IP (below)
-```
+The guard names a failing variable without printing its value. On success it prints each variable name and, for URLs, only the host. It never prints the anon key.
+
+### Static routes, caching and security headers
+
+The `/*` to `/index.html` rewrite serves application deep links such as `/dashboard?session=<id>`. Render checks for an existing resource before applying rewrites, and applies the first matching redirect/rewrite rule in list order. See [Render's rule matching and ordering](https://render.com/docs/redirects-rewrites#rule-matching-and-ordering). Existing `/assets/<hash>.js` files are therefore served normally. A missing `/assets/*` file still matches the SPA rewrite and returns `index.html` with HTTP 200.
+
+| Path | Header | Value |
+|---|---|---|
+| `/*` | `X-Content-Type-Options` | `nosniff` |
+| `/*` | `X-Frame-Options` | `DENY` |
+| `/*` | `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `/*` | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `/assets/*` | `Cache-Control` | `public, max-age=31536000, immutable` |
+| `/index.html` and `/` | `Cache-Control` | `no-cache` |
+
+Asset names are content-hashed, so the long asset cache can coexist with an HTML document that must be revalidated. Content-Security-Policy is deferred to T-605: its allowed API, Supabase, avatar and font origins need the real deployment hosts.
+
+### Optional backend settings
+
+These settings stay out of `render.yaml`; add an override in the backend dashboard only when needed. `server/.env.example` documents their defaults and validation.
+
+| Setting | Default and use |
+|---|---|
+| `TRUST_PROXY` | `0`; integer 0–3, chosen only after [checking the client IP](#checking-the-client-ip) |
+| `CORS_ALLOWED_ORIGINS` | No extra origins; comma-separated exact HTTP(S) origins. `CLIENT_URL` is always allowed; localhost:5173 is added automatically only outside production |
+| `ANALYSIS_CONCURRENCY`, `ANALYSIS_QUEUE_MAX` | `2` running and `20` queued per process; ranges 1–8 and 0–100 |
+| `RATE_LIMIT_<NAME>_MAX` | Existing fixed-window defaults from `server/utils/config.js`; counts 1–100000, limiting stays enabled |
+| `GITHUB_TIMEOUT_MS` | `10000` ms; range 1000–60000 |
+| `GITHUB_CONNECT_COMPLETION_TTL_MS` | `300000` ms; range 1000–300000 for pending connection completion IDs; invalid values warn and fall back |
+| `CLONE_TIMEOUT_MS`, `MAX_REPO_SIZE_MB` | `120000` ms and `200` MB; positive integer overrides, invalid values fall back |
+| `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` | `60000` ms, `180000` ms and `2`; the total call budget must be at least the per-attempt timeout |
+| `AI_ROUTE_GENERATOR`, `AI_ROUTE_VERIFIER` | Use `AI_PROVIDERS` unless overridden with a provider chain |
+| `<NAME>_BASE_URL`, `<NAME>_JSON_MODE` | Provider registry URL and `json_object`; optional proxy endpoint or JSON-mode override |
+| `DATABASE_POOL_MAX` | `5` connections per process; range 1–20 |
+| `DATABASE_SSL_CA_FILE`, `DATABASE_SSL_INSECURE_SKIP_VERIFY` | System trust and `false`; supply a CA file for verified TLS when needed. Skipping verification logs a warning |
+
+Remove `AI_ROUTE_PLANNER` from an existing environment: the planner was removed and its setting only causes a warning. Other provider support in the registry, such as Novita, remains optional; configure its key/model if a route uses it.
 
 ### Checking the client IP
 
-With `TRUST_PROXY` unset, make a request to the backend and read its access-log line in Render's logs: `requestLogger` logs the `ip` of every request (`server/utils/security.js`). If it is a Render-internal address that does not change between your devices, try `TRUST_PROXY=1`, redeploy, and compare again with a second device or network: the logged `ip` should then be each device's public address (for example the one `curl https://ifconfig.me` shows). If it still is not, try 2, then 3. The value is a startup error outside 0-3, and `true` is never accepted.
+With `TRUST_PROXY` unset, make requests from two devices or networks and compare the `ip` in the backend access-log lines (`server/utils/security.js`). If both show a Render-internal address, try `TRUST_PROXY=1`, redeploy and compare again with the devices' public addresses. If necessary, try 2, then 3; choose the smallest value that reports the actual clients. Never trust more proxies than the real hop count, and never set boolean `true`: client-supplied entries farther left in `X-Forwarded-For` can be forged.
 
-In production the server warns at startup when `GITHUB_TOKEN_STORE=memory` or `SESSION_STORE=memory`, because both lose their data on every restart (`server/server.js`).
-
-Analyses run in the background inside the server process (`server/utils/jobs.js`): `POST /api/analyze` answers 202 at once, so no request is held open for the minutes an analysis can take, and the browser follows progress through Socket.IO, with status polling as the backstop. Run **one** backend instance: the job queue is in memory and not shared. A deploy or restart ends the analyses that are running or queued; with `SESSION_STORE=database` the next start marks them `failed` ("The server restarted before this analysis finished. Please run it again."), and the user starts them again. Each running analysis holds a clone in `temp/`; it is deleted when the analysis ends, and an unanalyzed clone after 1 hour.
+`/health` is a liveness check: HTTP 200 with `{ status: "ok", timestamp, uptime }` does not check the database, Supabase or AI providers. Startup validates the environment and, in database mode, checks database connectivity and schema. Run one backend instance: the analysis queue is in process memory. A restart or deploy ends running and queued analyses; with `SESSION_STORE=database`, the next start marks them failed with the restart message and the user starts again.
 
 ### Other frontend hosts
 
-The client is a static build (`cd client && npm run build`, output `client/dist`). Any static host works if it serves `index.html` for every path, as the Render rewrite does, and has the three `VITE_*` variables at build time. The server allows `CLIENT_URL`'s origin and the origins in `CORS_ALLOWED_ORIGINS` (plus `http://localhost:5173` outside production), for both CORS and Socket.IO.
+The static build is `client/dist`. A different static host needs the same three public build settings, the deployment guard, a deep-link fallback that serves existing assets first, and equivalent cache/security headers. The backend allows `CLIENT_URL` and any explicitly configured `CORS_ALLOWED_ORIGINS` for CORS and Socket.IO.
 
 ---
 

@@ -7,34 +7,60 @@ A checklist for an operator preparing a deployment. Nothing here is pre-ticked: 
 - [ ] After the first push, confirm every CI job is green in the repository's [Actions tab](https://github.com/bipul724/InfraMind/actions): `client` and `server` on Node 22 and 24, `server-db`, `e2e` and `audit`.
 - [ ] In the repository's GitHub settings, configure branch protection for `main` to require all CI jobs to pass before merging. Only the owner can enable these required checks.
 
-## Configuration the server requires
+## Render deployment (owner; T-161)
 
-The server exits at startup without these, listing every problem at once (`startServer` in `server/server.js`, `server/utils/config.js`):
+### Before the first Blueprint deploy
 
-- [ ] `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the same Supabase project as the client
-- [ ] `GITHUB_TOKEN_STORE=supabase` (with `memory`, every GitHub connection is lost on restart and the server warns in production)
-- [ ] `GITHUB_TOKEN_ENC_KEY`, generated with `openssl rand -base64 32` and stored safely: changing it makes existing connections unreadable
-- [ ] `SUPABASE_SERVICE_ROLE_KEY` on the server only, never in a `VITE_` variable
-- [ ] `AI_PROVIDERS`, and `<NAME>_API_KEY` plus `<NAME>_MODEL` for every provider in any chain
-- [ ] `SESSION_STORE=database` (with `memory`, every session and result is lost on restart and the server warns in production)
-- [ ] `DATABASE_URL`, and the migration applied with `npm run db:deploy` (`server/package.json`)
-- [ ] `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` of the repository-access OAuth App (the `.env.example` placeholders are refused), and `GITHUB_REDIRECT_URI`: `https://<backend URL>/auth/github/callback`
-- [ ] `CLIENT_URL` set to the frontend origin, `https://<frontend host>` with no path: an allowed CORS and Socket.IO origin and the GitHub OAuth redirect target
+- [ ] Apply the Supabase SQL migrations in filename order, including the read-only duplicate count before the saved-file limits migration as described in [Supabase](#supabase). Then run `npm run db:deploy` in `server/` against the production session database. Complete both migration steps before deploying; the Render build does not apply migrations.
+- [ ] Choose the production frontend HTTPS origin and backend HTTPS host. Set `CLIENT_URL` to the frontend origin, `https://<frontend host>`, with no path, query or trailing slash.
+- [ ] Set `GITHUB_REDIRECT_URI` to `https://<backend host>/auth/github/callback`. Copy that exact URL into the repository-access GitHub OAuth App's authorization callback setting; this is separate from the Supabase GitHub sign-in provider's callback.
+- [ ] In Supabase Auth URL Configuration, set the Site URL to the production frontend origin and include that frontend origin's dashboard/return paths in Redirect URLs, for example `https://<frontend host>/**`.
+- [ ] Remove `AI_ROUTE_PLANNER` if it is still set; the planner no longer exists and the server only warns about the retired setting.
+- [ ] Fill in the backend settings when the first Blueprint deploy prompts for its `sync: false` variables. Keep the server-only keys in the backend service:
 
-## Optional configuration (checked at startup when set)
+| Backend variable | Where its value comes from |
+|---|---|
+| `CLIENT_URL` | The frontend's public HTTPS origin, with no path or trailing slash |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | The same project's URL and public anon/publishable key in Supabase Project Settings → API Keys |
+| `SUPABASE_SERVICE_ROLE_KEY` | That project's server-only service-role key in Supabase API settings; never copy it into the frontend |
+| `GITHUB_TOKEN_ENC_KEY` | Generate with `openssl rand -base64 32`; store it safely because replacing it makes existing GitHub connections unreadable |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | The repository-access GitHub OAuth App's settings |
+| `GITHUB_REDIRECT_URI` | `https://<backend host>/auth/github/callback`, exactly matching that OAuth App's callback |
+| `DATABASE_URL` | Supabase dashboard → Connect → Session pooler connection string (port 5432), with the database password |
+| `AI_PROVIDERS` | The chosen ordered provider chain, such as `gemini,groq,openrouter` |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini provider dashboard's key and a current model ID |
+| `GROQ_API_KEY`, `GROQ_MODEL` | The Groq provider dashboard's key and a current model ID |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | The OpenRouter provider dashboard's key and a current model ID |
+| `METRICS_TOKEN` | At least 32 random characters, for example generated with `openssl rand -hex 32`; send it only in `X-Metrics-Token` when using operator endpoints |
 
-- [ ] `CORS_ALLOWED_ORIGINS` lists every other frontend origin that must call the API; `http://localhost:5173` is not allowed in production (`server/utils/config.js`)
-- [ ] `TRUST_PROXY` set to the number of proxies in front of the server, after checking the logged client IP ([DEPLOYMENT-GUIDE.md](DEPLOYMENT-GUIDE.md#checking-the-client-ip)); with the default 0 behind Render, every visitor shares one IP for the per-IP rate limits
-- [ ] The default rate limits suit your traffic, or `RATE_LIMIT_<NAME>_MAX` is set ([README.md](README.md#api))
-- [ ] `METRICS_TOKEN` (32+ characters) if you want `/api/metrics` and `/api/analytics`; without it both answer 404, and a shorter value stops the server from starting (`server/utils/config.js`)
-- [ ] `GITHUB_TIMEOUT_MS` (default 10000) if GitHub calls need a different timeout (`server/github.js`)
-- [ ] Optional limits: `CLONE_TIMEOUT_MS` (default 120000), `MAX_REPO_SIZE_MB` (default 200) (`server/utils/git.js`); `AI_TIMEOUT_MS`, `AI_CALL_BUDGET_MS`, `AI_MAX_ATTEMPTS_PER_PROVIDER` (`server/ai/config.js`); `DATABASE_POOL_MAX` (`server/db/config.js`); `ANALYSIS_CONCURRENCY` (default 2) and `ANALYSIS_QUEUE_MAX` (default 20) (`server/utils/config.js`)
+- [ ] Fill in the frontend prompts: `VITE_API_URL` is the public backend HTTPS origin without a path, query, fragment or trailing slash; `VITE_SUPABASE_URL` is the same Supabase project URL; `VITE_SUPABASE_ANON_KEY` is its public anon/publishable key. A service-role JWT or an `sb_secret_` key must never enter the browser bundle.
+- [ ] Confirm the Blueprint's fixed backend settings: Node 24, `NODE_ENV=production`, `PORT=10000`, `SESSION_STORE=database`, `GITHUB_TOKEN_STORE=supabase`, and `OPENROUTER_DATA_COLLECTION=deny`. The frontend also builds on Node 24.
+- [ ] Leave frontend `NODE_ENV` unset or set it to `production`. The frontend build runs `npm ci`, then `npm run check:deploy-env`, then `npm run build`; the guard fails for missing/local/non-HTTPS public settings, an API URL containing a path, query, fragment or trailing slash, a wrong `NODE_ENV`, or a secret key. It names the variable without exposing its value.
+- [ ] Keep later changes in each service's dashboard: `sync: false` prompts only at the first Blueprint deploy. Rebuild the frontend whenever a `VITE_*` value changes.
 
-## Client build
+### Optional backend overrides and client-IP check
 
-- [ ] `VITE_API_URL` set to the backend URL (without it the client uses `http://localhost:10000`, `client/src/lib/api.ts`)
-- [ ] `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set before the build (Vite inlines them)
-- [ ] The host serves `index.html` for every path (the Render static service rewrites `/*` to `/index.html`, `render.yaml`)
+- [ ] Leave `TRUST_PROXY` at its default 0 until comparing the backend access log's `ip` from two devices or networks. If it shows an internal proxy address, try 1, then 2 or 3 only as needed, redeploying and comparing with the real public client addresses. Choose the smallest correct hop count; never use boolean `true` or trust more proxies than are present. See [Checking the client IP](DEPLOYMENT-GUIDE.md#checking-the-client-ip).
+- [ ] Add `CORS_ALLOWED_ORIGINS` only for additional frontend origins, each an exact HTTP(S) origin with no path, wildcard or trailing slash. `CLIENT_URL` is always allowed; localhost:5173 is automatically added only outside production.
+- [ ] Review `ANALYSIS_CONCURRENCY=2` (range 1–8) and `ANALYSIS_QUEUE_MAX=20` (range 0–100), per process. Keep one backend instance because its queue is in memory.
+- [ ] Review optional rate-limit counts and timeouts only if defaults do not suit the deployment: `RATE_LIMIT_<NAME>_MAX`, `GITHUB_TIMEOUT_MS=10000`, `GITHUB_CONNECT_COMPLETION_TTL_MS=300000`, `CLONE_TIMEOUT_MS=120000`, `MAX_REPO_SIZE_MB=200`, `AI_TIMEOUT_MS=60000`, `AI_CALL_BUDGET_MS=180000`, `AI_MAX_ATTEMPTS_PER_PROVIDER=2`, `DATABASE_POOL_MAX=5`, and the optional database TLS CA/verification settings. They stay out of the Blueprint; validation and defaults are listed in [Optional backend settings](DEPLOYMENT-GUIDE.md#optional-backend-settings).
+
+### After deploying
+
+- [ ] Confirm `GET /health` is HTTP 200 with `{ status: "ok", timestamp, uptime }`. This is liveness only; it checks no database or provider.
+- [ ] Open and refresh `/dashboard?session=<id>` for an owned analysis: the static host serves the app, and after sign-in it opens the requested result.
+- [ ] Use the real hashed JavaScript asset path from the deployed HTML and confirm `Cache-Control: public, max-age=31536000, immutable`.
+- [ ] Confirm both `/index.html` and `/` return `Cache-Control: no-cache`.
+- [ ] Check the static responses with `curl -I`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy: camera=(), microphone=(), geolocation=()` are present. Replace the placeholders below with the deployed hosts and an existing hashed asset:
+
+```bash
+curl -I "https://<backend host>/health"
+curl -I "https://<frontend host>/"
+curl -I "https://<frontend host>/index.html"
+curl -I "https://<frontend host>/assets/<hash>.js"
+```
+
+Render serves existing files before rewrites and uses the first matching redirect/rewrite rule. The SPA fallback also returns `index.html` with HTTP 200 for a missing asset path; it does not provide a separate missing-asset 404. See [Render rule matching and ordering](https://render.com/docs/redirects-rewrites#rule-matching-and-ordering). Content-Security-Policy is deferred to T-605 after the real API, Supabase, avatar and font origins are known.
 
 ## Supabase
 

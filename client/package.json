@@ -3,13 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "^22.12 || >=24"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "test": "node --test src/lib/*.test.ts && vitest run",
-    "test:components": "vitest run"
+    "test": "node --test src/lib/*.test.ts scripts/*.test.mjs && vitest run",
+    "test:components": "vitest run",
+    "check:deploy-env": "node scripts/check-deploy-env.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.0.5",

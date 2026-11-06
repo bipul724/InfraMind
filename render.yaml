@@ -2,13 +2,14 @@ services:
   # Backend API Service
   - type: web
     name: inframind-backend
-    env: node
+    runtime: node
     # --include=dev keeps the Prisma CLI available although NODE_ENV=production;
     # db:generate writes the Prisma client to server/generated/. Migrations are never run
     # here: the owner runs `npm run db:deploy` deliberately before deploying.
     buildCommand: cd server && npm ci --include=dev && npm run db:generate
     startCommand: cd server && npm start
     plan: free
+    # sync: false prompts once at the first Blueprint deploy; values stay in the dashboard afterwards.
     envVars:
       - key: NODE_VERSION
         value: "24"
@@ -16,21 +17,87 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: SESSION_STORE
+        value: database
+      - key: GITHUB_TOKEN_STORE
+        value: supabase
+      - key: OPENROUTER_DATA_COLLECTION
+        value: deny
+      - key: CLIENT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GITHUB_TOKEN_ENC_KEY
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_REDIRECT_URI
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: AI_PROVIDERS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
+      - key: METRICS_TOKEN
+        sync: false
     healthCheckPath: /health
-
-
-
   # Frontend Static Site
   - type: web
     name: inframind-frontend
-    env: static
-    buildCommand: cd client && npm install && npm run build
+    runtime: static
+    buildCommand: cd client && npm ci && npm run check:deploy-env && npm run build
     staticPublishPath: ./client/dist
-    plan: free
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
+    # CSP waits for T-605, when the API, Supabase, avatar and font origins are known.
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      # Vite hashes asset names, so a changed file gets a new URL instead of stale content.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      - path: /
+        name: Cache-Control
+        value: no-cache
     envVars:
       - key: NODE_VERSION
-        value: 18.0.0 
+        value: "24"
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false

@@ -50,8 +50,10 @@ Diagrams:
 
 ## Technology
 
-- **Client** (`client/`): React 18, TypeScript, Vite, Tailwind CSS with shadcn/ui components, React Router, `socket.io-client`, `@supabase/supabase-js` (`client/package.json`)
+- **Client** (`client/`): Node.js `^22.12 || >=24`, React 18, TypeScript, Vite, Tailwind CSS with shadcn/ui components, React Router, `socket.io-client`, `@supabase/supabase-js` (`client/package.json`)
 - **Server** (`server/`): Node.js (`^20.19 || ^22.12 || >=24.0`), Express 4, Socket.IO 4, Prisma 7 with the `pg` driver adapter, zod, helmet, express-rate-limit (`server/package.json`). Clones run the `git` binary through `child_process.execFile` (`server/utils/git.js`); `git` must be installed on the server.
+
+Render builds both services on Node 24; CI checks Node 22 and 24. For local tests on Node 22, use 22.18 or later because the client lib tests rely on default TypeScript type stripping. Node 24 runs the same commands.
 
 ## Quick start (local)
 
@@ -74,7 +76,7 @@ cp client/.env.example client/.env.local
 npm run dev
 ```
 
-`npm run dev` runs both through `concurrently` 10, whose `engines` require Node.js 22 or later (root `package.json`); on Node 20, start them separately with `npm run dev:client` and `npm run dev:server`.
+`npm run dev` runs both through `concurrently` 10, whose `engines` require Node.js 22 or later (root `package.json`). Use Node 24 for the complete local setup, matching the Render builds.
 
 The client runs on `http://localhost:5173` (`client/vite.config.ts`). The server listens on `PORT`, or 10000 without it (`server/utils/port.js`); 10000 is also the client's fallback for `VITE_API_URL` (`client/src/lib/api.ts`), `server/.env.example` and `render.yaml`. If you set another `PORT`, set `VITE_API_URL` to match.
 
