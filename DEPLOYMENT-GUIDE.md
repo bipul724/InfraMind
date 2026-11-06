@@ -45,6 +45,12 @@ The client uses the columns `id`, `user_id`, `name`, `type`, `repo_url`, `conten
 
 **`public.github_connections`** (needed only with `GITHUB_TOKEN_STORE=supabase`). Apply `supabase/migrations/20261103000000_github_connections.sql`. It creates the table, enables RLS with no policies and revokes all access from `anon` and `authenticated`, so only the service-role key can use it.
 
+Apply Supabase migrations in filename order: `20261103000000_github_connections.sql`, `20261104000000_saved_files.sql`, then `20261106000000_saved_files_limits.sql`. Before the limits migration, run and record the [read-only duplicate count](PRODUCTION-CHECKLIST.md#supabase). The limits migration removes only later copies of a file with the same user, name, repository URL (including null) and content digest, keeping the earliest `(created_at, id)`.
+
+The limits migration requires PostgreSQL 15 or later. It defaults `user_id` to `auth.uid()`, limits new or changed rows to a 1–255-character name, one of `dockerfile`, `github-actions` or `env`, an optional repository URL of at most 2,048 characters, and at most 100,000 content bytes. New inserts are refused when a user already has 500 files; existing rows are not pruned to reach that limit. Existing rows that violate a new shape check stay stored because those checks are added `NOT VALID`; exact duplicate copies are the only rows removed. The three RLS policies and the authenticated role's `select`, `insert`, `delete` privileges remain the same. The plain `content_sha256` column is backfilled with the UTF8 SHA-256 digest; the insert trigger always recomputes it, including when a client supplies a hash. It is not a generated column because PostgreSQL marks `convert_to` stable. Save uses conflict-ignore inserts, so saving the same files again adds nothing; Saved Files loads pages of 50.
+
+After applying it, perform the real-project Save-twice, two-user RLS and Load more checks in [PRODUCTION-CHECKLIST.md](PRODUCTION-CHECKLIST.md#supabase). These are owner steps; local tests use a throwaway PostgreSQL 17 container.
+
 The session tables (`analysis_sessions`, `generated_files`, `ai_calls`) are created by Prisma, not by Supabase SQL; see [section 4](#4-session-database-session_storedatabase).
 
 ### 1.3 URL configuration (redirects)

@@ -866,6 +866,7 @@ const ANALYSIS_BUSY_BODY = { error: 'The analysis service is busy. Please try ag
 const ANALYSIS_BUSY_RETRY_AFTER_SECONDS = 30;
 const NOT_READY_BODY = { error: 'Repository not ready for analysis' };
 const ANALYSIS_FAILED_MESSAGE = 'Analysis failed';
+const NO_FILES_GENERATED_MESSAGE = 'No files could be generated. Please try again.';
 
 // Test-only hooks (test/faultInjection.js), set by startServer under NODE_ENV=test only
 let testHooks = {};
@@ -927,8 +928,8 @@ app.post('/api/analyze', limiters.analysis, async (req, res) => {
 
 // The background part of an analysis: the pipeline, the stored result and the final
 // event. The clone directory is removed as soon as the pipeline is done with it, on
-// success and on failure. Any failure marks the session failed and is rethrown, so the
-// job runner logs it (redacted).
+// success and on failure. Thrown failures mark the session failed and are rethrown, so
+// the job runner logs them (redacted).
 async function runAnalysisJob({ sessionId, fullName, userId }) {
   const startedAt = Date.now();
   let lastProgress = 30;
@@ -962,6 +963,23 @@ async function runAnalysisJob({ sessionId, fullName, userId }) {
       await removeSessionDirectory(sessionId);
     }
 
+    const generatedFileNames = Object.keys(result.generatedFiles);
+    if (generatedFileNames.length === 0) {
+      await sessionStore.update(sessionId, { status: 'failed', error: NO_FILES_GENERATED_MESSAGE });
+      performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - startedAt, { outcome: 'failed', files: 0 });
+      // Failed-session updates accept no diagnostics, so preserve them in the final
+      // progress snapshot that both stores already persist for late subscribers.
+      await emitProgress(sessionId, {
+        step: 'Analysis failed',
+        progress: 0,
+        status: 'failed',
+        error: NO_FILES_GENERATED_MESSAGE,
+        messages: toAgentMessages(result.messages),
+        errors: toErrorList(result.errors)
+      });
+      return;
+    }
+
     // Store analysis results: the session and its files, in one transaction
     try {
       await sessionStore.saveResult(sessionId, result);
@@ -970,7 +988,6 @@ async function runAnalysisJob({ sessionId, fullName, userId }) {
       throw error;
     }
 
-    const generatedFileNames = Object.keys(result.generatedFiles);
     performanceMonitor.trackAgentSession(sessionId, 'analysis', Date.now() - startedAt, { outcome: 'ok', files: generatedFileNames.length });
     // messages and errors ride on the final event too, so the stored snapshot that late
     // subscribers receive carries them

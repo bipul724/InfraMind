@@ -50,6 +50,7 @@ function progress(payload: Omit<ProgressPayload, 'sessionId'>): void {
 describe('AgentGenerationForm with AgentProgress', () => {
   const requests = vi.fn<typeof fetch>();
   let polledStatus: 'analyzing' | 'completed' | 'failed';
+  let pollError: string;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -57,11 +58,12 @@ describe('AgentGenerationForm with AgentProgress', () => {
     socket.listeners.clear();
     requests.mockReset();
     polledStatus = 'analyzing';
+    pollError = 'Generator fixture failed';
     requests.mockImplementation(async (input) => {
       const path = requestPath(input);
       if (path === '/api/clone-repo') return Response.json({ sessionId: SESSION_ID });
       if (path === '/api/analyze') return Response.json({ sessionId: SESSION_ID, status: 'analyzing' }, { status: 202 });
-      if (path === `/api/status/${SESSION_ID}`) return Response.json({ sessionId: SESSION_ID, status: polledStatus, error: 'Generator fixture failed' });
+      if (path === `/api/status/${SESSION_ID}`) return Response.json({ sessionId: SESSION_ID, status: polledStatus, error: pollError });
       if (path === `/api/files/${SESSION_ID}`) return Response.json(files);
       throw new Error(`Unexpected component request: ${path}`);
     });
@@ -148,6 +150,18 @@ describe('AgentGenerationForm with AgentProgress', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
     expect(screen.getByText('Generator fixture failed')).toBeTruthy();
     expect(screen.getByText('Analysis failed')).toBeTruthy();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(requests.mock.calls.filter(([input]) => requestPath(input) === `/api/files/${SESSION_ID}`)).toHaveLength(0);
+  });
+
+  it('shows the fixed empty-run failure message without calling onComplete', async () => {
+    const onComplete = await start();
+    pollError = 'No files could be generated. Please try again.';
+    polledStatus = 'failed';
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
+
+    expect(screen.getByText(pollError)).toBeTruthy();
     expect(onComplete).not.toHaveBeenCalled();
     expect(requests.mock.calls.filter(([input]) => requestPath(input) === `/api/files/${SESSION_ID}`)).toHaveLength(0);
   });

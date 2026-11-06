@@ -88,7 +88,16 @@ test('2. a full public run completes once, downloads base names, and saves its f
   await page.getByRole('button', { name: 'Save to Account', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Saved Files', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Download Dockerfile from public/smoke-run', exact: true })).toBeVisible();
+  const savedDockerfile = page.getByRole('button', { name: 'Download Dockerfile from public/smoke-run', exact: true });
+  await expect(savedDockerfile).toHaveCount(1);
+  // Reload clears the browser's saved marker so the second save exercises database de-duplication.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Analysis Result', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save to Account', exact: true }).click();
+  await expect(page.getByText('These files are already in your account', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Saved Files', exact: true }).click();
+  await expect(savedDockerfile).toHaveCount(1);
 });
 
 test('3. a connected user can select and analyze a private repository', async ({ page, request }) => {

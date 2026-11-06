@@ -347,7 +347,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
     }
   };
 
-  // Every non-empty file in one insert, once per session
+  // Save every non-empty file together, reporting existing copies after a reload instead of adding them again.
   const handleSaveFiles = async () => {
     if (!sessionId || !resultFiles || saved || saving) return;
     if (!user?.id) {
@@ -379,11 +379,15 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({
         throw new Error('No generated files to save');
       }
 
-      await SavedFilesAPI.saveFiles(requests);
+      const { saved: inserted, alreadySaved } = await SavedFilesAPI.saveFiles(requests);
       succeeded = true;
       toast({
-        title: 'Files saved',
-        description: `${requests.length} file${requests.length === 1 ? '' : 's'} saved to your account. They are listed under Saved Files.`,
+        title: inserted.length === 0 ? 'Already saved' : 'Files saved',
+        description: inserted.length === 0
+          ? 'These files are already in your account'
+          : alreadySaved > 0
+            ? `Saved ${inserted.length} files; ${alreadySaved} were already in your account`
+            : `${inserted.length} file${inserted.length === 1 ? '' : 's'} saved to your account. They are listed under Saved Files.`,
       });
     } catch (error) {
       console.error('Save error:', error);

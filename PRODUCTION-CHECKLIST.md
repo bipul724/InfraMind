@@ -40,9 +40,26 @@ The server exits at startup without these, listing every problem at once (`start
 
 - [ ] Live `public.saved_files` table and policies compared with `supabase/migrations/20261104000000_saved_files.sql`, then the migration applied (SQL Editor or `supabase db push`); a policy with another name is not replaced by it
 - [ ] `supabase/migrations/20261103000000_github_connections.sql` applied
+- [ ] Before applying the saved-file limits migration, run the read-only query below in the Supabase SQL Editor and record `duplicate_rows_to_remove`. It counts only later copies of the same user's file, matching the migration's delete.
+- [ ] Apply `supabase/migrations/20261106000000_saved_files_limits.sql` after `20261104000000_saved_files.sql` (PostgreSQL 15 or later). It removes the counted copies, keeps the earliest `(created_at, id)`, and adds limits and de-duplication with a trigger-computed UTF8 SHA-256 digest; existing rows that violate a new shape check remain stored.
+- [ ] On the real Supabase project, save a completed result twice and confirm that only one set remains, verify that user B cannot see or delete user A's saved files, and verify Load more beyond 50 files (T-408).
 - [ ] Site URL and Redirect URLs include the production frontend URL
 - [ ] Google and GitHub sign-in providers configured, if you offer them
 - [ ] Confirm-email setting decided, custom SMTP configured
+
+
+Run this before the limits migration; it reads rows without changing them:
+
+```sql
+select coalesce(sum(copies - 1), 0)::bigint as duplicate_rows_to_remove
+from (
+  select count(*) as copies
+  from public.saved_files
+  group by user_id, name, repo_url,
+    encode(sha256(convert_to(content, 'UTF8')), 'hex')
+  having count(*) > 1
+) as duplicate_groups;
+```
 
 ## GitHub
 

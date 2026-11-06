@@ -19,6 +19,7 @@ import { createFakeGit } from './fakeGit.js';
 
 const RESTART_MESSAGE = 'The server restarted before this analysis finished. Please run it again.';
 const STALE_MESSAGE = 'The repository was cloned but analysis was not started within 1 hour. Please start again.';
+const EMPTY_RUN_MESSAGE = 'No files could be generated. Please try again.';
 const BUSY_BODY = { error: 'The analysis service is busy. Please try again shortly.', code: 'ANALYSIS_BUSY' };
 const NOT_READY_BODY = { error: 'Repository not ready for analysis' };
 // What the pipeline produced before B2.1 for this fixture and the fake LLM, less the
@@ -427,9 +428,8 @@ for (const store of STORES) {
     });
   });
 
-  // B4.2 (T-403): an AI provider failure never throws out of the pipeline. Each generator
-  // records a fixed public error, the verifier is skipped, and the run completes with no
-  // files; only a throw (the describe above) fails a session.
+  // Each generator records a fixed public error instead of throwing. An empty run
+  // fails without saving a completed result, while retaining its diagnostics.
   describe(`B4.2 every AI call fails (${store.label} store)`, { skip: store.skip }, () => {
     let ctx;
     before(async () => { ctx = await launch(store); });
@@ -438,30 +438,98 @@ for (const store of STORES) {
       await ctx?.server.stop();
     });
 
-    test('completed with no files and one sanitized error per file; no review call; the directory is removed', { timeout: 60000 }, async () => {
-      const { server } = ctx;
+    test('failed with no files and one sanitized error per file; no review call; the directory is removed', { timeout: 60000 }, async () => {
+      const { server, db } = ctx;
       fakes.llm.reset();
       // 400 on every provider (no retry), with a body that must never reach the user
       const providerBody = { error: { message: `provider said no ${FAULT_SECRET_MARKER}` } };
       fakes.llm.setResponder(() => ({ status: 400, body: providerBody }));
       const sessionId = await clone(server);
-      assert.equal((await analyze(server, sessionId)).status, 202);
+      const watcher = await subscribe(server, sessionId);
+      try {
+        assert.equal((await analyze(server, sessionId)).status, 202);
+        const status = await waitFor(async () => {
+          const current = await statusOf(server, sessionId);
+          return ['completed', 'failed'].includes(current.status) ? current : null;
+        }, 30000, 'the empty-run terminal status');
+        assert.equal(status.status, 'failed');
+        assert.equal(status.error, EMPTY_RUN_MESSAGE);
+        assert.equal(status.completedAt, undefined, 'an empty run was never saved as completed');
+        assert.equal(await pathExists(cloneDir(server, sessionId)), false, 'the clone directory is removed');
 
-      await waitForStatus(server, sessionId, 'completed');
-      assert.equal(await pathExists(cloneDir(server, sessionId)), false, 'the clone directory is removed');
-      const response = await fetch(`${server.baseUrl}/api/files/${sessionId}`, { headers: authHeaders(tokenA()) });
-      assert.equal(response.status, 200);
-      const text = await response.text();
-      const listing = JSON.parse(text);
-      assert.deepEqual(listing.files, {});
-      const generatorErrors = listing.errors.filter((error) => error.startsWith('Generator Agent Error: '));
-      assert.equal(generatorErrors.length, 3, JSON.stringify(listing.errors));
-      assert.ok(!text.includes(FAULT_SECRET_MARKER) && !text.includes('provider said no'), 'the provider body is not shown');
-      const download = await fetch(`${server.baseUrl}/api/files/${sessionId}/dockerfile`, { headers: authHeaders(tokenA()) });
-      assert.equal(download.status, 404);
-      assert.ok(fakes.llm.requests.length > 0, 'the generators did call the AI');
-      assert.ok(fakes.llm.requests.every((request) => generatorKindOf(request.body)), 'no verifier call without files');
+        await waitFor(() => watcher.events.some((event) => event.status === 'failed'), 3000, 'the empty-run failed event');
+        const failed = watcher.events.find((event) => event.status === 'failed');
+        assert.equal(failed.error, EMPTY_RUN_MESSAGE);
+        assert.equal(watcher.events.some((event) => event.status === 'completed'), false);
+        const generatorErrors = failed.errors.filter((error) => error.startsWith('Generator Agent Error: '));
+        assert.equal(generatorErrors.length, 3, JSON.stringify(failed.errors));
+        assert.deepEqual(failed.messages.map((message) => [message.agent, message.message]), [['analyzer', 'Detected tech stack: node']]);
+        const text = JSON.stringify(failed);
+        assert.ok(!text.includes(FAULT_SECRET_MARKER) && !text.includes('provider said no'), 'the provider body is not shown');
+
+        for (const route of [`/api/files/${sessionId}`, `/api/files/${sessionId}/dockerfile`]) {
+          const response = await fetch(`${server.baseUrl}${route}`, { headers: authHeaders(tokenA()) });
+          assert.equal(response.status, 400);
+          assert.deepEqual(await response.json(), { error: 'Analysis not completed' });
+        }
+        await waitForIdle(ctx);
+        const analytics = await (await fetch(`${server.baseUrl}/api/analytics`, { headers: { 'X-Metrics-Token': ctx.metricsToken } })).json();
+        assert.deepEqual(analytics.phases.analysis.outcomes, { failed: 1 });
+
+        const late = await subscribe(server, sessionId);
+        try {
+          await waitFor(() => late.events.length > 0, 3000, 'the failed snapshot');
+          assert.equal(late.events[0].status, 'failed');
+          assert.equal(late.events[0].error, EMPTY_RUN_MESSAGE);
+          assert.deepEqual(late.events[0].errors, failed.errors);
+          assert.deepEqual(late.events[0].messages, failed.messages);
+        } finally {
+          late.socket.close();
+        }
+        if (db) {
+          const { rows: [stored] } = await adminQuery('SELECT last_progress FROM analysis_sessions WHERE id = $1', [sessionId], db.name);
+          assert.deepEqual(stored.last_progress.errors, failed.errors);
+          assert.deepEqual(stored.last_progress.messages, failed.messages);
+        }
+        assert.ok(fakes.llm.requests.length > 0, 'the generators did call the AI');
+        assert.ok(fakes.llm.requests.every((request) => generatorKindOf(request.body)), 'no verifier call without files');
+      } finally {
+        watcher.socket.close();
+      }
     });
+  });
+
+  describe(`B4.5 partial generation (${store.label} store)`, { skip: store.skip }, () => {
+    let ctx;
+    before(async () => { ctx = await launch(store); });
+    after(async () => {
+      fakes.llm.setResponder(null);
+      await ctx?.server.stop();
+    });
+
+    for (const failedKinds of [['dockerfile'], ['dockerfile', 'githubActions']]) {
+      test(`${3 - failedKinds.length} generated files still complete with the per-file errors`, { timeout: 60000 }, async () => {
+        const { server } = ctx;
+        fakes.llm.reset();
+        fakes.llm.setResponder((body) => failedKinds.includes(generatorKindOf(body))
+          ? { status: 400, body: { error: { message: `provider said no ${FAULT_SECRET_MARKER}` } } }
+          : undefined);
+        const sessionId = await clone(server);
+        assert.equal((await analyze(server, sessionId)).status, 202);
+        await waitForStatus(server, sessionId, 'completed');
+
+        const response = await fetch(`${server.baseUrl}/api/files/${sessionId}`, { headers: authHeaders(tokenA()) });
+        assert.equal(response.status, 200);
+        const listing = await response.json();
+        const expectedFiles = Object.fromEntries(Object.entries(FAKE_FILES).filter(([kind]) => !failedKinds.includes(kind)));
+        assert.deepEqual(listing.files, expectedFiles);
+        assert.equal(listing.errors.filter((error) => error.startsWith('Generator Agent Error: ')).length, failedKinds.length);
+        assert.ok(listing.messages.some((message) => message.agent === 'generator' && message.message === `Generated ${3 - failedKinds.length} of 3 files`));
+        assert.equal(listing.verificationResults, FAKE_LLM_CONTENT);
+        assert.ok(!JSON.stringify(listing).includes(FAULT_SECRET_MARKER));
+        assert.ok(fakes.llm.requests.some((request) => generatorKindOf(request.body) === null), 'partial files are reviewed');
+      });
+    }
   });
 
   describe(`B2.1 shutdown with a running job (${store.label} store)`, { skip: store.skip }, () => {

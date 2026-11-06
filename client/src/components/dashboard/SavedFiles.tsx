@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { SavedFilesAPI, SavedFile } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,22 +13,39 @@ export const SavedFiles: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [files, setFiles] = useState<SavedFile[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Only the newest operation can update this view, so StrictMode and user changes cannot revive stale rows.
+  const requestIdRef = useRef(0);
+  const loadingRef = useRef(false);
+  const deletingRef = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    requestIdRef.current++;
+    loadingRef.current = false;
+    deletingRef.current = false;
+  }, []);
 
-  // Loaded once per signed-in user, and again from the Refresh button
+  // Refresh starts at the first page; later pages append by id so overlapping responses never duplicate a row.
   const userId = user?.id;
-  const fetchSavedFiles = useCallback(async () => {
+  const fetchSavedFiles = useCallback(async (offset = 0) => {
     if (!userId) return;
 
+    const requestId = ++requestIdRef.current;
+    loadingRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      const savedFiles = await SavedFilesAPI.getSavedFiles();
-      setFiles(savedFiles);
+      const page = await SavedFilesAPI.getSavedFiles({ offset });
+      if (requestId !== requestIdRef.current) return;
+      setFiles(previous => offset === 0
+        ? page.files
+        : [...new Map([...previous, ...page.files].map(file => [file.id, file])).values()]);
+      setHasMore(page.hasMore);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       console.error('Error fetching saved files:', err);
       setError('Failed to fetch your saved files');
       toast({
@@ -37,30 +54,50 @@ export const SavedFiles: React.FC = () => {
         variant: 'destructive',
       });
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, [userId, toast]);
 
   useEffect(() => {
+    setFiles([]);
+    setHasMore(false);
+    setError(null);
+    setDeletingId(null);
+    setLoading(false);
+    invalidateRequests();
     void fetchSavedFiles();
-  }, [fetchSavedFiles]);
+    return invalidateRequests;
+  }, [fetchSavedFiles, invalidateRequests]);
+
+  const requestPage = (offset = 0) => {
+    if (loadingRef.current || deletingRef.current) return;
+    void fetchSavedFiles(offset);
+  };
 
   // Saved under its base name: the workflow is stored as .github/workflows/ci.yml and
   // downloads as ci.yml
   const handleDownload = (file: SavedFile) => downloadTextFile(file.name, file.content);
 
   const handleDelete = async (file: SavedFile) => {
+    if (loadingRef.current || deletingRef.current || !userId) return;
     if (!window.confirm(`Delete ${file.name}? This cannot be undone.`)) return;
 
+    const requestId = ++requestIdRef.current;
+    deletingRef.current = true;
     setDeletingId(file.id);
     try {
       await SavedFilesAPI.deleteFile(file.id);
+      if (requestId !== requestIdRef.current) return;
       setFiles(prev => prev.filter(f => f.id !== file.id));
       toast({
         title: 'File deleted',
         description: `${file.name} has been removed from your account.`,
       });
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       console.error('Error deleting file:', err);
       toast({
         title: 'Delete Failed',
@@ -68,7 +105,10 @@ export const SavedFiles: React.FC = () => {
         variant: 'destructive',
       });
     } finally {
-      setDeletingId(null);
+      if (requestId === requestIdRef.current) {
+        deletingRef.current = false;
+        setDeletingId(null);
+      }
     }
   };
 
@@ -131,7 +171,7 @@ export const SavedFiles: React.FC = () => {
           <CardTitle>Saved Files</CardTitle>
           <CardDescription>Files you've saved to your account</CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchSavedFiles} disabled={loading} className="shrink-0">
+        <Button variant="outline" size="sm" onClick={() => requestPage()} disabled={loading || deletingId !== null} className="shrink-0">
           <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -210,7 +250,7 @@ export const SavedFiles: React.FC = () => {
                     size="icon"
                     className="h-10 w-10 hover:border-destructive/30 hover:bg-destructive/[0.06] hover:text-destructive"
                     onClick={() => handleDelete(file)}
-                    disabled={deletingId === file.id}
+                    disabled={deletingId !== null || loading}
                     title="Delete"
                     aria-label={savedFileLabel('Delete', file.name, file.repoUrl)}
                   >
@@ -220,6 +260,14 @@ export const SavedFiles: React.FC = () => {
               </li>
             ))}
           </ul>
+        )}
+        {hasMore && (
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" onClick={() => requestPage(files.length)} disabled={loading || deletingId !== null}>
+              {loading && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}
+              Load more
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>

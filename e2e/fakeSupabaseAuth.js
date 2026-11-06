@@ -75,15 +75,41 @@ export async function startBrowserSupabase({ verifier, postgrest, origin, connec
         if (url.pathname === '/rest/v1/saved_files') {
           if (!user || req.headers.apikey !== verifier.anonKey) return send(401, { message: 'JWT invalid' });
           if (req.method === 'POST') {
-            const rows = Array.isArray(body) ? body : [body];
+            const rows = (Array.isArray(body) ? body : [body]).map((row) => ({ ...row, user_id: row.user_id === undefined ? user.id : row.user_id }));
             if (rows.some((row) => row.user_id !== user.id)) return send(403, { message: 'row-level security' });
-            const inserted = rows.map((row) => ({ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }));
+            const conflictColumns = 'user_id,name,repo_url,content_sha256';
+            const ignoreDuplicates = url.searchParams.get('on_conflict') === conflictColumns
+              && (req.headers.prefer || '').split(',').some((value) => value.trim() === 'resolution=ignore-duplicates');
+            const inserted = [];
+            for (const row of rows) {
+              const owned = [...savedRows, ...inserted].filter((candidate) => candidate.user_id === user.id);
+              if (owned.length >= 500) return send(400, { code: '23514', message: 'saved_files limit reached (500 per user)' });
+              if (typeof row.name !== 'string' || [...row.name].length < 1 || [...row.name].length > 255
+                || !['dockerfile', 'github-actions', 'env'].includes(row.type)
+                || (row.repo_url != null && (typeof row.repo_url !== 'string' || [...row.repo_url].length > 2048))) {
+                return send(400, { code: '23514', message: 'saved_files shape check failed' });
+              }
+              if (typeof row.content !== 'string' || Buffer.byteLength(row.content, 'utf8') > 100000) {
+                return send(400, { code: '23514', message: 'saved_files_content_size_check' });
+              }
+              const content_sha256 = crypto.createHash('sha256').update(row.content, 'utf8').digest('hex');
+              const duplicate = owned.some((candidate) => candidate.name === row.name
+                && (candidate.repo_url ?? null) === (row.repo_url ?? null) && candidate.content_sha256 === content_sha256);
+              if (duplicate) {
+                if (ignoreDuplicates) continue;
+                return send(409, { code: '23505', message: 'saved_files_unique_file' });
+              }
+              inserted.push({ ...row, repo_url: row.repo_url ?? null, content_sha256, id: crypto.randomUUID(), created_at: new Date().toISOString() });
+            }
             savedRows.push(...inserted);
             return send(201, inserted);
           }
           if (req.method === 'GET') {
             const limit = Number(url.searchParams.get('limit') || 50);
-            return send(200, savedRows.filter((row) => row.user_id === user.id).slice(-limit).reverse());
+            const offset = Number(url.searchParams.get('offset') || 0);
+            const rows = savedRows.filter((row) => row.user_id === user.id).sort((left, right) =>
+              right.created_at.localeCompare(left.created_at) || right.id.localeCompare(left.id));
+            return send(200, rows.slice(offset, offset + limit));
           }
           if (req.method === 'DELETE') {
             const id = url.searchParams.get('id')?.replace(/^eq\./, '');
