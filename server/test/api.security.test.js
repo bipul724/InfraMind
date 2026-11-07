@@ -18,12 +18,28 @@ import {
   pathExists,
   postJson,
   randomAlphanumeric,
-  startServer
+  startServer,
+  waitForLog
 } from './helpers.js';
+
+// Capture complete lines from each pipe separately so waits cannot match old output or a partial line.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+  return { logs: () => `${completeLines(server.output.stdout.slice(stdout))}\n${completeLines(server.output.stderr.slice(stderr))}` };
+}
 
 const RUN_NETWORK = process.env.RUN_NETWORK_TESTS === '1';
 
 // B1.2: every /api/* call now needs a verified Supabase token (user A from the fake)
+const servers = [];
+async function launch(options) {
+  const server = await startServer(options);
+  servers.push(server);
+  return server;
+}
+
 let fakes;
 let authA;
 before(async () => {
@@ -42,7 +58,7 @@ const listDir = async (dir) => {
 
 describe('removed endpoints, input validation and body handling', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   test('GET /api/sessions is gone', async () => {
@@ -107,7 +123,7 @@ describe('removed endpoints, input validation and body handling', () => {
 
 describe('authenticated clone path (repositoryData)', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   const repositoryData = { fullName: 'octocat/Hello-World', name: 'Hello-World', owner: { login: 'octocat' } };
@@ -173,13 +189,13 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
   before(async () => {
     const deadPort = await getFreePort();
     const proxy = `http://127.0.0.1:${deadPort}`;
-    server = await startServer({ envOverrides: { HTTPS_PROXY: proxy, https_proxy: proxy, CLONE_TIMEOUT_MS: '20000' } });
+    server = await launch({ envOverrides: { HTTPS_PROXY: proxy, https_proxy: proxy, CLONE_TIMEOUT_MS: '20000' } });
   });
   after(async () => { await server?.stop(); });
 
   test('returns only the public error, marks the session failed and removes its directory', async () => {
     const token = 'ghp_' + randomAlphanumeric(24);
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
 
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
       repoUrl: 'https://github.com/octocat/Hello-World',
@@ -189,7 +205,7 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
     assert.equal(response.status, 502);
     assert.deepEqual(response.json, { error: 'Failed to clone repository', code: 'CLONE_FAILED' });
 
-    const newLogs = server.logs().slice(logStart);
+    const newLogs = await waitForLog(requestLogs, 'repo=octocat/Hello-World:');
     const match = newLogs.match(/Clone failed \[CLONE_FAILED\] session=([0-9a-f-]{36})/);
     assert.ok(match, 'server should log one redacted clone failure line');
     const sessionId = match[1];
@@ -217,7 +233,7 @@ describe('clone failure handling (offline: git is pointed at an unreachable prox
 
 describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set RUN_NETWORK_TESTS=1' }, () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   test('clones a public repository into temp/<id>/repo without exposing the path', { timeout: 120000 }, async () => {
@@ -237,16 +253,17 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
 
   test('a missing repository with a fake token is a 404 and leaks nothing', { timeout: 120000 }, async () => {
     const token = 'ghp_' + randomAlphanumeric(24);
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
+    const repoName = `inframind-nonexistent-${randomAlphanumeric(12)}`;
     const response = await postJson(server.baseUrl, '/api/clone-repo', {
-      repoUrl: `https://github.com/octocat/inframind-nonexistent-${randomAlphanumeric(12)}`,
+      repoUrl: `https://github.com/octocat/${repoName}`,
       authToken: token
     }, authA);
 
     assert.equal(response.status, 404, response.text);
     assert.deepEqual(response.json, { error: 'Repository not found or access denied', code: 'REPO_NOT_FOUND' });
 
-    const newLogs = server.logs().slice(logStart);
+    const newLogs = await waitForLog(requestLogs, `repo=octocat/${repoName}:`);
     const match = newLogs.match(/Clone failed \[REPO_NOT_FOUND\] session=([0-9a-f-]{36})/);
     assert.ok(match, 'server should log one redacted clone failure line');
     const sessionId = match[1];
@@ -277,7 +294,8 @@ describe('network: real clones against github.com', { skip: !RUN_NETWORK && 'set
 });
 
 // Runs last: covers the output of every server spawned above
-test('no server log ever contains a GitHub access token issued in this file', () => {
+test('no server log ever contains a GitHub access token issued in this file', async () => {
+  for (const server of servers) await server.stop();
   assert.ok(allCapturedLogs.length > 0);
   assert.ok(fakes.github.issuedTokens.length > 0, 'a real connection was made above');
   for (const { output } of allCapturedLogs) {

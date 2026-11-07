@@ -8,11 +8,19 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { io as connectClient } from 'socket.io-client';
-import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer } from './helpers.js';
+import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer, waitForLog } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
 import { DB_SKIP, createTestDatabase } from './db.js';
 import { FAKE_FILES, FAKE_LLM_CONTENT } from './fakeLlm.js';
 import { VALIDATORS } from '../agents/files.js';
+
+// Capture complete lines from each pipe separately so waits cannot match old output or a partial line.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+  return { logs: () => `${completeLines(server.output.stdout.slice(stdout))}\n${completeLines(server.output.stderr.slice(stderr))}` };
+}
 
 const DOCKERFILE_ERROR = 'Generator Agent Error: Dockerfile: AI providers are unavailable';
 
@@ -162,6 +170,7 @@ describe('per-agent results after a run with one failed generator call', { skip:
   });
 
   test('analytics after one failed clone and one successful analysis', { timeout: 60000 }, async () => {
+    const requestLogs = logsFromNow(server);
     const clone = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Spoon-Knife' }, authHeaders(fakes.tokens.A));
     assert.equal(clone.status, 502);
 
@@ -173,6 +182,9 @@ describe('per-agent results after a run with one failed generator call', { skip:
     assert.equal(analytics.phases.analysis.count, 1);
     assert.deepEqual(analytics.phases.analysis.outcomes, { ok: 1 });
 
+    await waitForLog(server, `Session ${sessionId} - analysis completed`);
+    await waitForLog(server, "outcome: 'ok', files: 2");
+    await waitForLog(requestLogs, "outcome: 'failed'");
     const agentLines = server.logs().split('\n').filter((line) => line.includes('AGENT [performance]'));
     assert.equal(agentLines.length, 2, 'one line per tracked phase');
     assert.match(agentLines.join('\n'), /analysis completed[^\n]*outcome: 'ok', files: 2/);

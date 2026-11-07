@@ -15,7 +15,8 @@ import {
   pathExists,
   postJson,
   runServerExpectingExit,
-  startServer
+  startServer,
+  waitForLog
 } from './helpers.js';
 import { USER_A, USER_B } from './fakeSupabase.js';
 import { DB_SKIP, TEST_DATABASE_URL, createTestDatabase, startTcpProxy } from './db.js';
@@ -232,7 +233,7 @@ describe('database sessions: restart, ownership, recovery and cleanup', { skip: 
       assert.equal(body.status, 'failed');
       assert.equal(body.error, RESTART_MESSAGE);
     }
-    assert.ok(server.logs().includes('Interrupted sessions marked failed: 2'));
+    await waitForLog(server, 'Interrupted sessions marked failed: 2');
   });
 
   test('4. expired, orphaned and (B2.1) finished sessions\' temp directories are removed; nothing else is touched', async () => {
@@ -346,7 +347,7 @@ test('SESSION_STORE=memory in production starts with a warning (no database need
     GITHUB_REDIRECT_URI: 'https://api.example.test/auth/github/callback'
   } });
   spawned.push(server);
-  assert.ok(server.logs().includes('SESSION_STORE=memory: analysis sessions and results are lost on every restart'));
+  await waitForLog(server, 'SESSION_STORE=memory: analysis sessions and results are lost on every restart');
 });
 
 // Runs last: every server spawned in this file

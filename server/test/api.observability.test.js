@@ -2,10 +2,18 @@
 // (SERVER-FIX D.4). git is pointed at an unreachable proxy, so a clone fails offline.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
-import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer } from './helpers.js';
+import { authHeaders, closeFakes, getFakes, getFreePort, postJson, randomAlphanumeric, startServer, waitForLog } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
+
+// Capture complete lines from each pipe separately so waits cannot match old output or a partial line.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+  return { logs: () => `${completeLines(server.output.stdout.slice(stdout))}\n${completeLines(server.output.stderr.slice(stderr))}` };
+}
 
 let fakes;
 let server;
@@ -56,7 +64,7 @@ describe('GET /api/metrics', () => {
 
 describe('clone analytics', () => {
   test('a failed clone is recorded as a clone phase with outcome failed, and its log line identifies nobody', { timeout: 60000 }, async () => {
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
     const clone = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }, authHeaders(fakes.tokens.A));
     assert.equal(clone.status, 502);
 
@@ -66,9 +74,21 @@ describe('clone analytics', () => {
     assert.deepEqual(json.phases.clone.outcomes, { failed: 1 });
     assert.equal(json.phases.analysis, undefined);
 
-    const lines = server.logs().slice(logStart).split('\n').filter((line) => line.includes('AGENT [performance]'));
+    const logs = await waitForLog(requestLogs, "outcome: 'failed'");
+    const lines = logs.split('\n').filter((line) => line.includes('AGENT [performance]'));
     assert.equal(lines.length, 1, 'one analytics log line');
-    const agentsLog = await fs.readFile(path.join(server.cwd, 'logs', 'agents.log'), 'utf8');
+    const session = lines[0].match(/Session ([0-9a-f-]{36}) - clone completed/);
+    assert.ok(session, 'the clone analytics line identifies its session');
+    // The file append is asynchronous, so wait for its complete record before checking redaction.
+    const agentsLog = await waitForLog({ logs: () => {
+      try {
+        const text = fs.readFileSync(path.join(server.cwd, 'logs', 'agents.log'), 'utf8');
+        return text.slice(0, text.lastIndexOf('\n') + 1);
+      } catch (error) {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+      }
+    } }, `"message":"[performance] Session ${session[1]} - clone completed"`);
     for (const text of [lines.join('\n'), agentsLog]) {
       for (const forbidden of ['octocat', 'Hello-World', 'github.com', USER_A.id, USER_A.email, 'Failed to clone']) {
         assert.ok(!text.includes(forbidden), `analytics log must not contain ${forbidden}`);
