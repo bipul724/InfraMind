@@ -32,6 +32,9 @@ export async function startHarness() {
     const clientDir = await fs.realpath(process.env.E2E_CLIENT_DIR || path.join(root, 'client'));
     const helper = await import(pathToFileURL(path.join(serverDir, 'test/helpers.js')).href);
     const { createFakeGit } = await import(pathToFileURL(path.join(serverDir, 'test/fakeGit.js')).href);
+    const { GITHUB_USER_A } = await import(pathToFileURL(path.join(serverDir, 'test/fakeGitHub.js')).href);
+    const cspModule = process.env.E2E_CSP_MODULE || path.join(root, 'client/scripts/csp.mjs');
+    const { buildCsp } = await import(pathToFileURL(cspModule).href);
     const { FAKE_FILES, generatorKindOf, chatReply, replyWith } = await import(pathToFileURL(path.join(serverDir, 'test/fakeLlm.js')).href);
     const fakes = await helper.getFakes();
     cleanup.push(() => helper.closeFakes());
@@ -54,11 +57,14 @@ export async function startHarness() {
     const browserAuth = await startBrowserSupabase({
       verifier: fakes.supabase, postgrest: fakes.postgrest, origin,
       connectGitHub: async () => {
-        const result = await helper.connectGitHubFor(server, fakes.tokens.A);
+        const result = await helper.connectGitHubFor(server, fakes.tokens.A, {
+          githubUser: { ...GITHUB_USER_A, avatar_url: 'https://avatars.githubusercontent.com/u/5001' }
+        });
         if (result.claim?.status !== 200) throw new Error(`GitHub fixture connection failed: ${result.claim?.status}`);
       }
     });
     cleanup.push(() => browserAuth.close());
+    const csp = buildCsp({ apiOrigin: server.baseUrl, supabaseOrigin: browserAuth.url });
     const api = async (route, body) => {
       const response = await fetch(`${server.baseUrl}${route}`, {
         method: body ? 'POST' : 'GET',
@@ -90,7 +96,10 @@ export async function startHarness() {
     const client = await preview({
       root: clientDir, configFile: path.join(clientDir, 'vite.config.ts'), envDir: false,
       mode: 'e2e', logLevel: 'warn', build: { outDir },
-      preview: { host: '127.0.0.1', port, strictPort: true }
+      preview: {
+        host: '127.0.0.1', port, strictPort: true,
+        headers: { 'Content-Security-Policy': csp }
+      }
     });
     cleanup.push(() => new Promise((resolve, reject) => {
       client.httpServer.closeAllConnections();
@@ -99,9 +108,10 @@ export async function startHarness() {
     const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'inframind-e2e-'));
     cleanup.push(() => fs.rm(stateDir, { recursive: true, force: true }));
     const statePath = path.join(stateDir, 'state.json');
-    await fs.writeFile(statePath, JSON.stringify({ origin, serverOrigin: server.baseUrl, authOrigin: browserAuth.url, sessionId, marker }));
+    await fs.writeFile(statePath, JSON.stringify({ origin, serverOrigin: server.baseUrl, authOrigin: browserAuth.url, sessionId, marker, csp }));
     process.env.INFRAMIND_E2E_STATE = statePath;
     console.log(`E2E local client=${origin} server=${server.baseUrl} browser-auth=${browserAuth.url}`);
+    console.log(`E2E CSP: ${csp}`);
   } catch (error) {
     await stopHarness();
     throw error;

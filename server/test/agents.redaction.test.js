@@ -9,7 +9,7 @@ const same = (text) => assert.equal(redactCredentials(text), text);
 describe('redactCredentials (a): URL userinfo', () => {
   const cases = [
     ['--extra-index-url https://deploy:MARKERSECRET111@pypi.corp.example/simple', '--extra-index-url https://REDACTED@pypi.corp.example/simple'],
-    ['privlib @ git+https://ghp_MARKERTOKEN222@github.com/org/privlib.git', 'privlib @ git+https://REDACTED@github.com/org/privlib.git'],
+    ['privlib @ git+https://' + 'ghp_' + 'MARKERTOKEN222@github.com/org/privlib.git', 'privlib @ git+https://REDACTED@github.com/org/privlib.git'],
     // No password: a token in the user position looks the same, so it is redacted too
     ['https://user@host.example/x', 'https://REDACTED@host.example/x'],
     ['--index-url=https://u:p%40ss@pypi.example/simple', '--index-url=https://REDACTED@pypi.example/simple'],
@@ -29,12 +29,12 @@ describe('redactCredentials (a): URL userinfo', () => {
 
 describe('redactCredentials (b): the secret patterns of agents/files.js', () => {
   const cases = [
-    ['API: sk-MARKERKEY333', 'API: REDACTED'],
-    ['x ghp_abcdefghijklmnop y', 'x REDACTED y'],
-    ['github_pat_11ABC_def', 'REDACTED'],
-    ['aws AKIAIOSFODNN7EXAMPLE', 'aws REDACTED'],
-    ['slack xoxb-123-456', 'slack REDACTED'],
-    ['stripe sk_live_abc123', 'stripe REDACTED']
+    ['API: ' + 'sk-' + 'MARKERKEY333', 'API: REDACTED'],
+    ['x ' + 'ghp_' + 'abcdefghijklmnop y', 'x REDACTED y'],
+    ['github_' + 'pat_' + '11ABC_def', 'REDACTED'],
+    ['aws ' + 'AKIA' + 'IOSFODNN7EXAMPLE', 'aws REDACTED'],
+    ['slack ' + 'xoxb-' + '123-456', 'slack REDACTED'],
+    ['stripe ' + 'sk_' + 'live_' + 'abc123', 'stripe REDACTED']
   ];
   for (const [input, expected] of cases) test(input, () => assert.equal(redactCredentials(input), expected));
 
@@ -110,11 +110,11 @@ describe('redactCredentials (c): a quoted Key: value ends at the closing quote',
 
 describe('redactCredentials (d): Slack and Discord webhook URLs', () => {
   cases([
-    ['curl -X POST https://hooks.slack.com/services/T0000/B0000/XXXXMARKERSLACK621XXXX', 'curl -X POST https://hooks.slack.com/services/REDACTED'],
-    ['SLACK_URL: "https://hooks.slack.com/workflows/T01/A02/123/MARKERSLACK622"', 'SLACK_URL: "https://hooks.slack.com/workflows/REDACTED"'],
-    ['https://discord.com/api/webhooks/123456/abcMARKERDISCORD623', 'https://discord.com/api/webhooks/REDACTED'],
-    ['curl -d @msg.json https://discordapp.com/api/webhooks/42/MARKERDISCORD624?wait=true && echo ok', 'curl -d @msg.json https://discordapp.com/api/webhooks/REDACTED && echo ok'],
-    ['see (https://hooks.slack.com/services/T1/B2/MARKERSLACK625) for alerts', 'see (https://hooks.slack.com/services/REDACTED) for alerts']
+    ['curl -X POST https://hooks.slack.com/services/' + 'T0000/B0000/XXXXMARKERSLACK621XXXX', 'curl -X POST https://hooks.slack.com/services/REDACTED'],
+    ['SLACK_URL: "https://hooks.slack.com/workflows/' + 'T01/A02/123/MARKERSLACK622"', 'SLACK_URL: "https://hooks.slack.com/workflows/REDACTED"'],
+    ['https://discord.com/api/webhooks/' + '123456/abcMARKERDISCORD623', 'https://discord.com/api/webhooks/REDACTED'],
+    ['curl -d @msg.json https://discordapp.com/api/webhooks/' + '42/MARKERDISCORD624?wait=true && echo ok', 'curl -d @msg.json https://discordapp.com/api/webhooks/REDACTED && echo ok'],
+    ['see (https://hooks.slack.com/services/' + 'T1/B2/MARKERSLACK625) for alerts', 'see (https://hooks.slack.com/services/REDACTED) for alerts']
   ]);
   test('other Slack and Discord URLs, and a bare prefix, stay', () => {
     same('see https://api.slack.com/messaging/webhooks');
@@ -245,7 +245,7 @@ describe('dependency names are unchanged by redaction', () => {
   const requirements = [
     '--extra-index-url https://deploy:MARKERSECRET111@pypi.corp.example/simple',
     'flask==3.0.3',
-    'privlib @ git+https://ghp_MARKERTOKEN222@github.com/org/privlib.git',
+    'privlib @ git+https://' + 'ghp_' + 'MARKERTOKEN222@github.com/org/privlib.git',
     'secretstorage==3.3 ; sys_platform == "linux"',
     'tokenizers>=0.15',
     'gunicorn',

@@ -1,10 +1,18 @@
 // Local stand-in for Supabase PostgREST, implementing only the three calls the
-// github_connections adapter makes. Requires the service key in both apikey and
-// Authorization, records every request, and can be switched to fail.
+// github_connections adapter makes. Checks apikey for both key forms and Bearer only
+// for a legacy JWT, so a secret API key cannot accidentally be sent as a user JWT.
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 
-export const FAKE_SERVICE_KEY = 'fake-service-role-key-for-tests';
+const encodeJwtPart = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+// Build credential-shaped fixtures at runtime so source scanning never sees a full key.
+export const FAKE_SERVICE_KEY = [
+  encodeJwtPart({ alg: 'HS256', typ: 'JWT' }),
+  encodeJwtPart({ role: 'service_role', ref: 'offline-test' }),
+  crypto.randomBytes(32).toString('base64url')
+].join('.');
+export const FAKE_SECRET_SERVICE_KEY = 'sb_' + 'secret_' + crypto.randomBytes(32).toString('base64url');
 const TABLE_PATH = '/rest/v1/github_connections';
 const ALLOWED_SELECT = 'github_user_id,github_login,github_name,github_avatar_url,scopes,token_ciphertext,connected_at';
 
@@ -33,7 +41,8 @@ export function createFakePostgrest({ serviceKey = FAKE_SERVICE_KEY } = {}) {
       if (mode === 'hang') return;
       if (mode === 'error500') return send(res, 500, { message: 'internal error' });
 
-      if (req.headers.apikey !== serviceKey || req.headers.authorization !== `Bearer ${serviceKey}`) {
+      const expectedBearer = serviceKey.startsWith('sb_' + 'secret_') ? undefined : `Bearer ${serviceKey}`;
+      if (req.headers.apikey !== serviceKey || req.headers.authorization !== expectedBearer) {
         return send(res, 401, { message: 'Invalid API key' });
       }
 

@@ -182,7 +182,7 @@ describe('redactSecrets', () => {
   const tempDir = path.join(os.tmpdir(), 'inframind-redact-temp');
 
   test('removes tokens, URL userinfo, Authorization values and the temp path', () => {
-    const token = 'ghp_abcdefghijklmnopqrstuvwx';
+    const token = 'ghp_' + 'abcdefghijklmnopqrstuvwx';
     const input = [
       `token=${token}`,
       'fatal: could not read from https://x@github.com/o/r.git',

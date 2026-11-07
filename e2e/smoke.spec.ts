@@ -7,6 +7,7 @@ interface HarnessState {
   authOrigin: string;
   sessionId: string;
   marker: string;
+  csp: string;
 }
 
 function state(): HarnessState {
@@ -15,9 +16,50 @@ function state(): HarnessState {
   return JSON.parse(fs.readFileSync(filename, 'utf8'));
 }
 
+interface CspViolation {
+  directive: string;
+  blockedURI: string;
+  sourceFile: string;
+  lineNumber: number;
+  disposition: string;
+}
+
+declare global {
+  interface Window {
+    __inframindReportCsp: (violation: CspViolation) => Promise<void>;
+  }
+}
+
 const test = base.extend({
   page: async ({ page }, use, testInfo) => {
     const blocked: string[] = [];
+    const cspViolations: CspViolation[] = [];
+    const cspConsole: string[] = [];
+    const documentPolicies: string[] = [];
+    const fixture = state();
+    page.on('response', (response) => {
+      if (response.request().isNavigationRequest() && new URL(response.url()).origin === fixture.origin) {
+        documentPolicies.push(response.headers()['content-security-policy'] ?? '');
+      }
+    });
+    page.on('console', (message) => {
+      if (/Content Security Policy|Content-Security-Policy/i.test(message.text())) cspConsole.push(message.text());
+    });
+    await page.exposeBinding('__inframindReportCsp', (_source, violation: CspViolation) => {
+      cspViolations.push(violation);
+    });
+    // Install before navigation so policy violations from initial rendering and later pages are retained.
+    await page.addInitScript(() => {
+      document.addEventListener('securitypolicyviolation', (event) => {
+        void window.__inframindReportCsp({
+          directive: event.effectiveDirective,
+          blockedURI: event.blockedURI,
+          sourceFile: event.sourceFile,
+          lineNumber: event.lineNumber,
+          disposition: event.disposition,
+        });
+      });
+    });
     // Deny every off-machine request before navigation, including fonts and profile images.
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
@@ -25,14 +67,24 @@ const test = base.extend({
       blocked.push(route.request().url());
       return route.abort('blockedbyclient');
     });
-    await page.routeWebSocket('**/*', (route) => {
-      if (new URL(route.url()).hostname === '127.0.0.1') route.connectToServer();
-      else { blocked.push(route.url()); route.close(); }
+    // Leave local sockets native so Chrome enforces connect-src on the application's Socket.IO transport.
+    await page.routeWebSocket((url) => url.hostname !== '127.0.0.1', (route) => {
+      blocked.push(route.url());
+      route.close();
     });
-    await use(page);
-    const unique = [...new Set(blocked)].sort();
-    console.log(`Blocked external requests [${testInfo.title}]: ${JSON.stringify(unique)}`);
-    await testInfo.attach('blocked-external-requests', { body: JSON.stringify(unique, null, 2), contentType: 'application/json' });
+    try {
+      await use(page);
+    } finally {
+      const unique = [...new Set(blocked)].sort();
+      console.log(`Blocked external requests [${testInfo.title}]: ${JSON.stringify(unique)}`);
+      console.log(`CSP violations [${testInfo.title}]: ${JSON.stringify({ events: cspViolations.length, console: cspConsole.length })}`);
+      await testInfo.attach('blocked-external-requests', { body: JSON.stringify(unique, null, 2), contentType: 'application/json' });
+      await testInfo.attach('csp-violations', { body: JSON.stringify({ events: cspViolations, console: cspConsole }, null, 2), contentType: 'application/json' });
+      expect(cspViolations, 'securitypolicyviolation events').toEqual([]);
+      expect(cspConsole, 'CSP console messages').toEqual([]);
+      expect(documentPolicies.length, 'a real preview document supplied a CSP header').toBeGreaterThan(0);
+      for (const policy of documentPolicies) expect(policy).toBe(fixture.csp);
+    }
   }
 });
 

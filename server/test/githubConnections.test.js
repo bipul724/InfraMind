@@ -10,10 +10,11 @@ import {
   describeConnectionStoreConfigProblem,
   describeEncryptionKeyProblem,
   encryptToken,
-  parseEncryptionKey
+  parseEncryptionKey,
+  supabaseServiceHeaders
 } from '../utils/githubConnections.js';
 import { redactUrl } from '../utils/logger.js';
-import { startFakePostgrest, FAKE_SERVICE_KEY } from './fakePostgrest.js';
+import { startFakePostgrest, FAKE_SERVICE_KEY, FAKE_SECRET_SERVICE_KEY } from './fakePostgrest.js';
 
 const USER_A = '11111111-1111-4111-8111-111111111111';
 const USER_B = '22222222-2222-4222-8222-222222222222';
@@ -139,7 +140,7 @@ describe('GITHUB_TOKEN_ENC_KEY validation', () => {
   });
 
   test('describeConnectionStoreConfigProblem names variables, never values', () => {
-    const serviceKey = 'sk-' + crypto.randomBytes(8).toString('hex');
+    const serviceKey = 'not-a-service-key-' + crypto.randomBytes(8).toString('hex');
     const badKey = crypto.randomBytes(31).toString('base64');
     const cases = [
       [{}, 'GITHUB_TOKEN_STORE'],
@@ -147,15 +148,72 @@ describe('GITHUB_TOKEN_ENC_KEY validation', () => {
       [{ GITHUB_TOKEN_STORE: 'memory' }, 'GITHUB_TOKEN_ENC_KEY'],
       [{ GITHUB_TOKEN_STORE: 'memory', GITHUB_TOKEN_ENC_KEY: badKey }, 'GITHUB_TOKEN_ENC_KEY'],
       [{ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT }, 'SUPABASE_SERVICE_ROLE_KEY'],
-      [{ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: '  ' }, 'SUPABASE_SERVICE_ROLE_KEY']
+      [{ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: '  ' }, 'SUPABASE_SERVICE_ROLE_KEY'],
+      [{ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: serviceKey }, 'SUPABASE_SERVICE_ROLE_KEY']
     ];
     for (const [env, variable] of cases) {
       const problem = describeConnectionStoreConfigProblem(env);
       assert.ok(problem && problem.includes(variable), `${JSON.stringify(Object.keys(env))} -> ${problem}`);
       assert.ok(!problem.includes(KEY_TEXT) && !problem.includes(badKey) && !problem.includes('postgres'));
+      assert.ok(!problem.includes(serviceKey));
     }
     assert.equal(describeConnectionStoreConfigProblem({ GITHUB_TOKEN_STORE: 'memory', GITHUB_TOKEN_ENC_KEY: KEY_TEXT }), null);
-    assert.equal(describeConnectionStoreConfigProblem({ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: serviceKey }), null);
+    assert.equal(describeConnectionStoreConfigProblem({ GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: FAKE_SERVICE_KEY }), null);
+  });
+});
+
+describe('Supabase service-key headers and startup validation', () => {
+  test('a legacy JWT keeps both apikey and Bearer', () => {
+    assert.deepEqual(supabaseServiceHeaders(FAKE_SERVICE_KEY), {
+      apikey: FAKE_SERVICE_KEY, Authorization: `Bearer ${FAKE_SERVICE_KEY}`
+    });
+  });
+
+  test('a secret API key sends only apikey, never Authorization', () => {
+    const headers = supabaseServiceHeaders(FAKE_SECRET_SERVICE_KEY);
+    assert.equal(headers.apikey, FAKE_SECRET_SERVICE_KEY);
+    assert.equal(Object.hasOwn(headers, 'Authorization'), false);
+  });
+
+  test('a secret prefix stays apikey-only even if its opaque value contains dots', () => {
+    const key = `${FAKE_SECRET_SERVICE_KEY}.opaque.parts`;
+    assert.equal(Object.hasOwn(supabaseServiceHeaders(key), 'Authorization'), false);
+  });
+
+  test('a publishable prefix never becomes a Bearer token even with three dot-separated parts', () => {
+    const key = 'sb_' + 'publishable_' + 'a.b.c';
+    assert.equal(Object.hasOwn(supabaseServiceHeaders(key), 'Authorization'), false);
+  });
+
+  for (const [label, key] of [
+    ['publishable key', 'sb_' + 'publishable_' + crypto.randomBytes(32).toString('base64url')],
+    ['publishable key with JWT-shaped dots', 'sb_' + 'publishable_' + 'a.b.c'],
+    ['other text', 'not-a-service-key-' + crypto.randomBytes(12).toString('hex')],
+    ['two JWT parts', FAKE_SERVICE_KEY.split('.').slice(0, 2).join('.')],
+    ['four JWT parts', `${FAKE_SERVICE_KEY}.extra`],
+    ['empty JWT part', FAKE_SERVICE_KEY.replace(/\.[^.]+\./, '..')]
+  ]) {
+    test(`rejects a ${label} at startup without exposing it`, () => {
+      const problem = describeConnectionStoreConfigProblem({
+        GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: key
+      });
+      assert.match(problem, /^SUPABASE_SERVICE_ROLE_KEY must be /);
+      assert.ok(!problem.includes(key));
+      assert.throws(() => createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, serviceRoleKey: key }),
+        (error) => error.message.startsWith('SUPABASE_SERVICE_ROLE_KEY') && !error.message.includes(key));
+    });
+  }
+
+  for (const [label, key] of [['legacy JWT', FAKE_SERVICE_KEY], ['secret API key', FAKE_SECRET_SERVICE_KEY]]) {
+    test(`accepts a ${label} for the Supabase store`, () => {
+      assert.equal(describeConnectionStoreConfigProblem({
+        GITHUB_TOKEN_STORE: 'supabase', GITHUB_TOKEN_ENC_KEY: KEY_TEXT, SUPABASE_SERVICE_ROLE_KEY: key
+      }), null);
+    });
+  }
+
+  test('memory mode needs no service key', () => {
+    assert.equal(describeConnectionStoreConfigProblem({ GITHUB_TOKEN_STORE: 'memory', GITHUB_TOKEN_ENC_KEY: KEY_TEXT }), null);
   });
 });
 
@@ -205,140 +263,142 @@ describe('memory adapter', () => {
   });
 });
 
-describe('supabase adapter (fake PostgREST)', () => {
-  let fake;
-  let store;
-  before(async () => {
-    fake = await startFakePostgrest();
-    store = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: FAKE_SERVICE_KEY });
-  });
-  after(async () => { await fake.close(); });
+for (const [keyForm, serviceKey] of [['legacy JWT', FAKE_SERVICE_KEY], ['secret API key', FAKE_SECRET_SERVICE_KEY]]) {
+  describe(`supabase adapter (${keyForm}, fake PostgREST)`, () => {
+    let fake;
+    let store;
+    before(async () => {
+      fake = await startFakePostgrest({ serviceKey });
+      store = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: serviceKey });
+    });
+    after(async () => { await fake.close(); });
 
-  test('refuses to start without a service key', () => {
-    assert.throws(() => createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url }));
-  });
+    test('refuses to start without a service key', () => {
+      assert.throws(() => createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url }));
+    });
 
-  test('put: upsert URL, Prefer header, both auth headers, ciphertext only', async () => {
-    const start = fake.requests.length;
-    await store.put(USER_A, record());
-    const [request] = fake.requests.slice(start);
-    assert.equal(request.method, 'POST');
-    assert.equal(request.url, '/rest/v1/github_connections?on_conflict=user_id');
-    assert.equal(request.headers.prefer, 'resolution=merge-duplicates,return=minimal');
-    assert.equal(request.headers.apikey, FAKE_SERVICE_KEY);
-    assert.equal(request.headers.authorization, `Bearer ${FAKE_SERVICE_KEY}`);
-    assert.equal(request.headers['content-type'], 'application/json');
+    test('put: upsert URL, Prefer header, key-form auth headers, ciphertext only', async () => {
+      const start = fake.requests.length;
+      await store.put(USER_A, record());
+      const [request] = fake.requests.slice(start);
+      assert.equal(request.method, 'POST');
+      assert.equal(request.url, '/rest/v1/github_connections?on_conflict=user_id');
+      assert.equal(request.headers.prefer, 'resolution=merge-duplicates,return=minimal');
+      assert.equal(request.headers.apikey, serviceKey);
+      assert.equal(request.headers.authorization, keyForm === 'legacy JWT' ? `Bearer ${serviceKey}` : undefined);
+      assert.equal(request.headers['content-type'], 'application/json');
 
-    const body = JSON.parse(request.body);
-    assert.equal(body.user_id, USER_A);
-    assert.equal(body.github_user_id, 5001);
-    assert.equal(body.github_login, 'octo-a');
-    assert.match(body.token_ciphertext, /^v1:/);
-    assert.equal('accessToken' in body, false);
-    assert.equal('access_token' in body, false);
-    for (const text of [request.body, request.url, JSON.stringify(request.headers)]) {
-      assert.ok(!text.includes(TOKEN), 'no plaintext token anywhere in the request');
-      assert.ok(!text.includes(Buffer.from(TOKEN).toString('base64')));
+      const body = JSON.parse(request.body);
+      assert.equal(body.user_id, USER_A);
+      assert.equal(body.github_user_id, 5001);
+      assert.equal(body.github_login, 'octo-a');
+      assert.match(body.token_ciphertext, /^v1:/);
+      assert.equal('accessToken' in body, false);
+      assert.equal('access_token' in body, false);
+      for (const text of [request.body, request.url, JSON.stringify(request.headers)]) {
+        assert.ok(!text.includes(TOKEN), 'no plaintext token anywhere in the request');
+        assert.ok(!text.includes(Buffer.from(TOKEN).toString('base64')));
+      }
+    });
+
+    test('get: filter and select columns; decrypts', async () => {
+      const start = fake.requests.length;
+      const loaded = await store.get(USER_A);
+      const [request] = fake.requests.slice(start);
+      assert.equal(request.method, 'GET');
+      assert.equal(
+        request.url,
+        `/rest/v1/github_connections?user_id=eq.${USER_A}&select=github_user_id,github_login,github_name,github_avatar_url,scopes,token_ciphertext,connected_at`
+      );
+      assert.equal(request.headers.apikey, serviceKey);
+      assert.equal(request.headers.authorization, keyForm === 'legacy JWT' ? `Bearer ${serviceKey}` : undefined);
+      assert.equal(loaded.accessToken, TOKEN);
+      assert.equal(loaded.login, 'octo-a');
+      assert.equal(await store.get(USER_B), null);
+    });
+
+    test('a row copied to another user is unreadable: get returns null, deletes it and logs only the user id', async () => {
+      fake.rows.set(USER_B, { ...fake.rows.get(USER_A), user_id: USER_B });
+      const start = fake.requests.length;
+      const { result, lines } = await captureWarnings(() => store.get(USER_B));
+      assert.equal(result, null);
+      assert.equal(fake.rows.has(USER_B), false);
+      const methods = fake.requests.slice(start).map((r) => r.method);
+      assert.deepEqual(methods, ['GET', 'DELETE']);
+      assert.deepEqual(lines, [`github connection unreadable for user ${USER_B}`]);
+      assert.equal((await store.get(USER_A)).accessToken, TOKEN, "A's own row is untouched");
+    });
+
+    test('delete: filter, key-form auth headers', async () => {
+      const start = fake.requests.length;
+      await store.delete(USER_A);
+      const [request] = fake.requests.slice(start);
+      assert.equal(request.method, 'DELETE');
+      assert.equal(request.url, `/rest/v1/github_connections?user_id=eq.${USER_A}`);
+      assert.equal(request.headers.apikey, serviceKey);
+      assert.equal(request.headers.authorization, keyForm === 'legacy JWT' ? `Bearer ${serviceKey}` : undefined);
+      assert.equal(fake.rows.has(USER_A), false);
+    });
+
+    test('a non-UUID user id never reaches PostgREST', async () => {
+      const start = fake.requests.length;
+      for (const userId of ['not-a-uuid', `${USER_A}&user_id=neq.${USER_B}`, `${USER_A},${USER_B}`, '*']) {
+        await assert.rejects(store.get(userId), TypeError);
+        await assert.rejects(store.put(userId, record()), TypeError);
+        await assert.rejects(store.delete(userId), TypeError);
+      }
+      assert.equal(fake.requests.length, start);
+    });
+
+    test('a wrong service key is a store failure, not "no connection"', async () => {
+      const wrongKey = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: `${serviceKey}wrong` });
+      const { lines } = await captureWarnings(() => assert.rejects(wrongKey.get(USER_A), StoreUnavailableError));
+      assert.ok(lines.every((line) => !line.includes('wrong')));
+    });
+
+    for (const operation of ['get', 'put', 'delete']) {
+      test(`HTTP 500 on ${operation} is StoreUnavailableError`, async () => {
+        fake.setMode('error500');
+        try {
+          const { lines } = await captureWarnings(() =>
+            assert.rejects(store[operation](USER_A, record()), (error) => error instanceof StoreUnavailableError && error.code === 'GITHUB_STORE_UNAVAILABLE')
+          );
+          assert.deepEqual(lines, ['GitHub connection store request failed: HTTP 500']);
+        } finally {
+          fake.setMode('ok');
+        }
+      });
     }
-  });
 
-  test('get: filter and select columns; decrypts', async () => {
-    const start = fake.requests.length;
-    const loaded = await store.get(USER_A);
-    const [request] = fake.requests.slice(start);
-    assert.equal(request.method, 'GET');
-    assert.equal(
-      request.url,
-      `/rest/v1/github_connections?user_id=eq.${USER_A}&select=github_user_id,github_login,github_name,github_avatar_url,scopes,token_ciphertext,connected_at`
-    );
-    assert.equal(request.headers.apikey, FAKE_SERVICE_KEY);
-    assert.equal(request.headers.authorization, `Bearer ${FAKE_SERVICE_KEY}`);
-    assert.equal(loaded.accessToken, TOKEN);
-    assert.equal(loaded.login, 'octo-a');
-    assert.equal(await store.get(USER_B), null);
-  });
-
-  test('a row copied to another user is unreadable: get returns null, deletes it and logs only the user id', async () => {
-    fake.rows.set(USER_B, { ...fake.rows.get(USER_A), user_id: USER_B });
-    const start = fake.requests.length;
-    const { result, lines } = await captureWarnings(() => store.get(USER_B));
-    assert.equal(result, null);
-    assert.equal(fake.rows.has(USER_B), false);
-    const methods = fake.requests.slice(start).map((r) => r.method);
-    assert.deepEqual(methods, ['GET', 'DELETE']);
-    assert.deepEqual(lines, [`github connection unreadable for user ${USER_B}`]);
-    assert.equal((await store.get(USER_A)).accessToken, TOKEN, "A's own row is untouched");
-  });
-
-  test('delete: filter, both auth headers', async () => {
-    const start = fake.requests.length;
-    await store.delete(USER_A);
-    const [request] = fake.requests.slice(start);
-    assert.equal(request.method, 'DELETE');
-    assert.equal(request.url, `/rest/v1/github_connections?user_id=eq.${USER_A}`);
-    assert.equal(request.headers.apikey, FAKE_SERVICE_KEY);
-    assert.equal(request.headers.authorization, `Bearer ${FAKE_SERVICE_KEY}`);
-    assert.equal(fake.rows.has(USER_A), false);
-  });
-
-  test('a non-UUID user id never reaches PostgREST', async () => {
-    const start = fake.requests.length;
-    for (const userId of ['not-a-uuid', `${USER_A}&user_id=neq.${USER_B}`, `${USER_A},${USER_B}`, '*']) {
-      await assert.rejects(store.get(userId), TypeError);
-      await assert.rejects(store.put(userId, record()), TypeError);
-      await assert.rejects(store.delete(userId), TypeError);
-    }
-    assert.equal(fake.requests.length, start);
-  });
-
-  test('a wrong service key is a store failure, not "no connection"', async () => {
-    const wrongKey = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: 'wrong' });
-    const { lines } = await captureWarnings(() => assert.rejects(wrongKey.get(USER_A), StoreUnavailableError));
-    assert.ok(lines.every((line) => !line.includes('wrong')));
-  });
-
-  for (const operation of ['get', 'put', 'delete']) {
-    test(`HTTP 500 on ${operation} is StoreUnavailableError`, async () => {
-      fake.setMode('error500');
+    test('a timeout is StoreUnavailableError', async () => {
+      const hanging = createConnectionStore({
+        kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: serviceKey, timeoutMs: 100
+      });
+      fake.setMode('hang');
       try {
-        const { lines } = await captureWarnings(() =>
-          assert.rejects(store[operation](USER_A, record()), (error) => error instanceof StoreUnavailableError && error.code === 'GITHUB_STORE_UNAVAILABLE')
-        );
-        assert.deepEqual(lines, ['GitHub connection store request failed: HTTP 500']);
+        const started = Date.now();
+        const { lines } = await captureWarnings(() => assert.rejects(hanging.get(USER_A), StoreUnavailableError));
+        assert.ok(Date.now() - started < 2000);
+        assert.deepEqual(lines, ['GitHub connection store request failed: timeout']);
       } finally {
         fake.setMode('ok');
       }
     });
-  }
 
-  test('a timeout is StoreUnavailableError', async () => {
-    const hanging = createConnectionStore({
-      kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: FAKE_SERVICE_KEY, timeoutMs: 100
+    test('a network error is StoreUnavailableError', async () => {
+      const unreachable = createConnectionStore({
+        kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: 'http://127.0.0.1:9', serviceRoleKey: serviceKey
+      });
+      await captureWarnings(() => assert.rejects(unreachable.put(USER_A, record()), StoreUnavailableError));
     });
-    fake.setMode('hang');
-    try {
-      const started = Date.now();
-      const { lines } = await captureWarnings(() => assert.rejects(hanging.get(USER_A), StoreUnavailableError));
-      assert.ok(Date.now() - started < 2000);
-      assert.deepEqual(lines, ['GitHub connection store request failed: timeout']);
-    } finally {
-      fake.setMode('ok');
-    }
-  });
 
-  test('a network error is StoreUnavailableError', async () => {
-    const unreachable = createConnectionStore({
-      kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: 'http://127.0.0.1:9', serviceRoleKey: FAKE_SERVICE_KEY
+    test('a malformed body is StoreUnavailableError', async () => {
+      const fetchImpl = async () => new Response('not json', { status: 200 });
+      const odd = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: serviceKey, fetchImpl });
+      await captureWarnings(() => assert.rejects(odd.get(USER_A), StoreUnavailableError));
     });
-    await captureWarnings(() => assert.rejects(unreachable.put(USER_A, record()), StoreUnavailableError));
   });
-
-  test('a malformed body is StoreUnavailableError', async () => {
-    const fetchImpl = async () => new Response('not json', { status: 200 });
-    const odd = createConnectionStore({ kind: 'supabase', encryptionKey: KEY_TEXT, supabaseUrl: fake.url, serviceRoleKey: FAKE_SERVICE_KEY, fetchImpl });
-    await captureWarnings(() => assert.rejects(odd.get(USER_A), StoreUnavailableError));
-  });
-});
+}
 
 describe('one-time token stores (tickets and OAuth states)', () => {
   const clock = () => {

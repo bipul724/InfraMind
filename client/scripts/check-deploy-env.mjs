@@ -22,6 +22,10 @@ function publicHttpsUrl(name, value) {
     failures.push(`${name} must be a valid HTTPS URL.`);
     return null;
   }
+  if (url.username || url.password) {
+    failures.push(`${name} must not contain credentials.`);
+    return null;
+  }
   const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
   if (['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(hostname) || hostname.endsWith('.local')) {
     failures.push(`${name} must use a public host.`);
