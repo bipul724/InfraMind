@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { io as connectClient } from 'socket.io-client';
-import { authHeaders, closeFakes, getFakes, makeTempDir, pathExists, postJson, randomAlphanumeric, startServer } from './helpers.js';
+import { authHeaders, closeFakes, getFakes, makeTempDir, pathExists, postJson, randomAlphanumeric, startServer, waitForLog } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
 import { DB_SKIP, adminQuery, createTestDatabase } from './db.js';
 import { FAKE_FILES, FAKE_LLM_CONTENT, generatorKindOf } from './fakeLlm.js';
@@ -267,7 +267,7 @@ for (const store of STORES) {
 
     test('one running, one queued, the third is 503 ANALYSIS_BUSY and stays cloned; a retry later is accepted', { timeout: 90000 }, async () => {
       const { server } = ctx;
-      assert.ok(server.logs().includes('🧵 Analysis jobs: 1 at once, 1 queued at most'));
+      await waitForLog(server, '🧵 Analysis jobs: 1 at once, 1 queued at most');
       fakes.llm.reset();
       fakes.llm.setDelay(400);
       const [s1, s2, s3] = [await clone(server), await clone(server), await clone(server)];
@@ -319,7 +319,7 @@ for (const store of STORES) {
 
     test('double clicks (two concurrent requests, three times): one 202 and one 400 each; afterwards both slots are free', { timeout: 90000 }, async () => {
       const { server } = ctx;
-      assert.ok(server.logs().includes('🧵 Analysis jobs: 1 at once, 1 queued at most'));
+      await waitForLog(server, '🧵 Analysis jobs: 1 at once, 1 queued at most');
       fakes.llm.reset();
       fakes.llm.setDelay(50);
       for (let round = 1; round <= 3; round++) {
@@ -344,7 +344,7 @@ for (const store of STORES) {
 
     test('a claim that throws answers 503 SESSION_STORE_UNAVAILABLE, leaves the session cloned, and the next session gets 202', { timeout: 60000 }, async () => {
       const { server, db } = ctx;
-      assert.ok(server.logs().includes('🧵 Analysis jobs: 1 at once, 0 queued at most'));
+      await waitForLog(server, '🧵 Analysis jobs: 1 at once, 0 queued at most');
       fakes.llm.reset();
       fakes.llm.setDelay(50);
       const broken = await clone(server);
@@ -403,7 +403,10 @@ for (const store of STORES) {
       fakes.llm.reset();
       const sessionId = await clone(server);
       const watcher = await subscribe(server, sessionId);
-      const logStart = server.logs().length;
+      const stdoutStart = server.output.stdout.length;
+      const stderrStart = server.output.stderr.length;
+      const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+      const jobLogs = { logs: () => `${completeLines(server.output.stdout.slice(stdoutStart))}\n${completeLines(server.output.stderr.slice(stderrStart))}` };
       assert.equal((await analyze(server, sessionId)).status, 202);
 
       await waitForStatus(server, sessionId, 'failed');
@@ -415,12 +418,11 @@ for (const store of STORES) {
       watcher.socket.close();
       assert.equal(await pathExists(cloneDir(server, sessionId)), false, 'removed on failure too');
 
-      await sleep(200);
+      await waitForLog(jobLogs, `analysis job finished: session=${sessionId} outcome=failed`);
       const metrics = await metricsOf(ctx);
       assert.equal(metrics.unhandledRejections, 0, 'the job rejection was caught by the runner');
       assert.deepEqual(metrics.analysisJobs, { running: 0, queued: 0, reserved: 0 });
-      const logs = server.logs().slice(logStart);
-      assert.match(logs, new RegExp(`analysis job finished: session=${sessionId} outcome=failed`));
+      const logs = jobLogs.logs();
       assert.ok(!logs.includes(FAULT_SECRET_MARKER), 'logged redacted');
       assert.ok(!logs.includes('Unhandled rejection'));
       const analytics = await (await fetch(`${server.baseUrl}/api/analytics`, { headers: { 'X-Metrics-Token': ctx.metricsToken } })).json();
@@ -617,7 +619,7 @@ describe('B2.1 startup cleanup of clone directories and stale cloned sessions (d
       assert.equal(stale.error, STALE_MESSAGE);
       assert.equal((await statusOf(server, ids.freshCloned)).status, 'cloned');
       assert.equal((await statusOf(server, ids.completed)).status, 'completed');
-      assert.ok(server.logs().includes('Stale cloned sessions failed: 1;'), server.logs());
+      await waitForLog(server, 'Stale cloned sessions failed: 1;');
 
       // The stale session's failure is also its snapshot, for a subscriber
       const watcher = await subscribe(server, ids.staleCloned);

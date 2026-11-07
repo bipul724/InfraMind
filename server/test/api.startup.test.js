@@ -3,7 +3,7 @@
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { closeFakes, runServerExpectingExit, startServer } from './helpers.js';
+import { closeFakes, runServerExpectingExit, startServer, waitForLog } from './helpers.js';
 import { FAKE_SERVICE_KEY, FAKE_SECRET_SERVICE_KEY } from './fakePostgrest.js';
 
 after(async () => { await closeFakes(); });
@@ -102,10 +102,11 @@ describe('a valid configuration still starts', () => {
     });
     try {
       assert.equal((await fetch(`${server.baseUrl}/health`)).status, 200);
+      await waitForLog(server, '🌐 Allowed origins: http://localhost:5173, https://admin.example.test, http://127.0.0.1:4173');
+      await waitForLog(server, '🌐 Trust proxy: 1');
+      await waitForLog(server, '🚦 Rate limits: preAuth 1000 per 5 min, user 120 per 1 min, githubProxy 60 per 1 min, clone 10 per 10 min, analysis 5 per 5 min, oauth 30 per 10 min, socketHandshake 10 per 1 min');
+      await waitForLog(server, '✅ Server startup complete!');
       const logs = server.logs();
-      assert.ok(logs.includes('🌐 Allowed origins: http://localhost:5173, https://admin.example.test, http://127.0.0.1:4173'), logs);
-      assert.ok(logs.includes('🌐 Trust proxy: 1'));
-      assert.ok(logs.includes('🚦 Rate limits: preAuth 1000 per 5 min, user 120 per 1 min, githubProxy 60 per 1 min, clone 10 per 10 min, analysis 5 per 5 min, oauth 30 per 10 min, socketHandshake 10 per 1 min'), logs);
       assert.ok(!logs.includes('dev-pilot'));
     } finally {
       await server.stop();
@@ -137,6 +138,7 @@ describe('Supabase service-key startup rule', () => {
       });
       try {
         assert.equal((await fetch(`${server.baseUrl}/health`)).status, 200);
+        await waitForLog(server, '✅ Server startup complete!');
         assert.ok(!server.logs().includes(key));
       } finally {
         await server.stop();

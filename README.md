@@ -2,6 +2,11 @@
 
 InfraMind generates DevOps files for a GitHub repository. A signed-in user picks a repository; the server clones it, runs three agents in sequence (analyzer, generator, verifier) and returns a Dockerfile, a GitHub Actions workflow and a `.env.example`. The files can be downloaded or saved to the user's account.
 
+## Live deployment
+
+- **Frontend:** [https://inframind-frontend.onrender.com](https://inframind-frontend.onrender.com)
+- **Backend:** [https://inframind-backend-bsl1.onrender.com](https://inframind-backend-bsl1.onrender.com)
+
 ## How it fits together
 
 ```mermaid

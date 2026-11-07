@@ -20,9 +20,25 @@ import {
   randomSecret,
   runServerExpectingExit,
   SERVER_DIR,
-  startServer
+  startServer,
+  waitForLog
 } from './helpers.js';
 import { USER_A } from './fakeSupabase.js';
+
+// Capture complete lines from each pipe separately so waits cannot match old output or a partial line.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+  return { logs: () => `${completeLines(server.output.stdout.slice(stdout))}\n${completeLines(server.output.stderr.slice(stderr))}` };
+}
+
+const servers = [];
+async function launch(options) {
+  const server = await startServer(options);
+  servers.push(server);
+  return server;
+}
 
 let fakes;
 let authA;
@@ -79,7 +95,7 @@ const PRE_AUTH_API_ROUTES = [['GET', '/api/metrics'], ['GET', '/api/analytics']]
 
 describe('anonymous and invalid-token access', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   for (const [method, route, body] of PROTECTED_ROUTES) {
@@ -158,7 +174,7 @@ describe('anonymous and invalid-token access', () => {
 
 describe('Supabase unavailable (fail closed)', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => {
     fakes.supabase.setMode('ok');
     await server?.stop();
@@ -188,7 +204,7 @@ describe('Supabase unavailable (fail closed)', () => {
 
 describe('CORS preflight', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   test('OPTIONS is answered without auth, allows Authorization and no longer allows X-GitHub-Token', async () => {
@@ -224,12 +240,13 @@ describe('session ownership (offline: clone fails through an unreachable proxy)'
   before(async () => {
     const deadPort = await getFreePort();
     const proxy = `http://127.0.0.1:${deadPort}`;
-    server = await startServer({ envOverrides: { HTTPS_PROXY: proxy, https_proxy: proxy } });
+    server = await launch({ envOverrides: { HTTPS_PROXY: proxy, https_proxy: proxy } });
 
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
     const clone = await postJson(server.baseUrl, '/api/clone-repo', { repoUrl: 'https://github.com/octocat/Hello-World' }, authA);
     assert.equal(clone.status, 502);
-    const match = server.logs().slice(logStart).match(/Clone failed \[CLONE_FAILED\] session=([0-9a-f-]{36})/);
+    const logs = await waitForLog(requestLogs, 'repo=octocat/Hello-World:');
+    const match = logs.match(/Clone failed \[CLONE_FAILED\] session=([0-9a-f-]{36})/);
     assert.ok(match, 'clone failure is logged with its session id');
     sessionId = match[1];
   });
@@ -308,7 +325,7 @@ describe('session ownership (offline: clone fails through an unreachable proxy)'
 
 describe('GitHub access without a stored connection (X-GitHub-Token is dead)', () => {
   let server;
-  before(async () => { server = await startServer(); });
+  before(async () => { server = await launch(); });
   after(async () => { await server?.stop(); });
 
   const repositoryData = { fullName: 'octocat/Hello-World', name: 'Hello-World', owner: { login: 'octocat' } };
@@ -355,7 +372,7 @@ describe('GitHub access without a stored connection (X-GitHub-Token is dead)', (
 describe('metrics and analytics', () => {
   describe('without METRICS_TOKEN', () => {
     let server;
-    before(async () => { server = await startServer(); });
+    before(async () => { server = await launch(); });
     after(async () => { await server?.stop(); });
 
     for (const route of ['/api/metrics', '/api/analytics']) {
@@ -384,7 +401,7 @@ describe('metrics and analytics', () => {
     const metricsToken = randomAlphanumeric(48);
     before(async () => {
       secretsThatMustNotBeLogged.push(metricsToken);
-      server = await startServer({ envOverrides: { METRICS_TOKEN: metricsToken } });
+      server = await launch({ envOverrides: { METRICS_TOKEN: metricsToken } });
     });
     after(async () => { await server?.stop(); });
 
@@ -424,14 +441,15 @@ describe('Supabase configuration startup checks', () => {
   }
 
   test('an http SUPABASE_URL on 127.0.0.1 is accepted (local development and tests)', async () => {
-    const server = await startServer();
+    const server = await launch();
     assert.ok(server.env.SUPABASE_URL.startsWith('http://127.0.0.1:'));
     await server.stop();
   });
 });
 
 // Runs last: covers the output of every server spawned in this file
-test('no server log ever contains a user token, a GitHub JWT or the metrics token', () => {
+test('no server log ever contains a user token, a GitHub JWT or the metrics token', async () => {
+  for (const server of servers) await server.stop();
   assert.ok(allCapturedLogs.length > 0);
   assert.ok(secretsThatMustNotBeLogged.length >= 3);
   for (const { output } of allCapturedLogs) {

@@ -4,7 +4,7 @@
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { authHeaders, closeFakes, getFakes, randomAlphanumeric, startConnectFlow, startServer } from './helpers.js';
+import { authHeaders, closeFakes, getFakes, randomAlphanumeric, startConnectFlow, startServer, waitForLog } from './helpers.js';
 import { FAULT_SECRET_MARKER } from './faultInjection.js';
 
 const servers = [];
@@ -44,10 +44,10 @@ describe('unhandledRejection: logged, counted, and the server keeps serving', ()
   test('after an unhandled rejection /health still answers', async () => {
     const metricsToken = randomAlphanumeric(48);
     const server = await launch({ TEST_FAULT_INJECTION: 'unhandled-rejection', METRICS_TOKEN: metricsToken });
-    assert.ok(server.logs().includes('test fault injection armed: unhandled-rejection'));
+    await waitForLog(server, 'test fault injection armed: unhandled-rejection');
 
     server.signal('SIGUSR2');
-    assert.ok(await waitFor(() => server.logs().includes('Unhandled rejection: TypeError: injected rejection')), server.logs());
+    await waitForLog(server, 'Unhandled rejection: TypeError: injected rejection', { timeoutMs: 5000 });
     assert.equal((await fetch(`${server.baseUrl}/health`)).status, 200);
     assert.equal(server.exited, null, 'the process is still running');
 

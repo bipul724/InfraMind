@@ -61,6 +61,17 @@ export async function pathExists(target) {
 // Every log line captured from every spawned server in this test process
 export const allCapturedLogs = [];
 
+// Wait for captured output because an HTTP or socket response can arrive before the child's log pipe.
+export async function waitForLog(server, text, { timeoutMs = 3000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const snapshot = server.logs();
+    if (snapshot.includes(text)) return snapshot;
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for log: ${text}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 // One fake Supabase (with PostgREST on the same origin), one fake LLM and one fake
 // GitHub per test process, shared by every spawned server
 let fakes = null;

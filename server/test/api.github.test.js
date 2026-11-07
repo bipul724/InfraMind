@@ -22,11 +22,20 @@ import {
   randomSecret,
   runServerExpectingExit,
   startConnectFlow,
-  startServer
+  startServer,
+  waitForLog
 } from './helpers.js';
 import { GITHUB_USER_A, GITHUB_USER_B, GRANTED_SCOPE } from './fakeGitHub.js';
 import { FAKE_SERVICE_KEY } from './fakePostgrest.js';
 import { buildCloneArgs } from '../utils/git.js';
+
+// Capture complete lines from each pipe separately so waits cannot match old output or a partial line.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  const completeLines = (text) => text.slice(0, text.lastIndexOf('\n') + 1);
+  return { logs: () => `${completeLines(server.output.stdout.slice(stdout))}\n${completeLines(server.output.stderr.slice(stderr))}` };
+}
 
 const CLIENT = 'http://localhost:5173';
 const PRODUCTION_URLS = { CLIENT_URL: 'https://app.example.test', GITHUB_REDIRECT_URI: 'https://api.example.test/auth/github/callback' };
@@ -382,7 +391,7 @@ describe('connect flow, status, listing and binding (memory store)', () => {
   test('6. a failed revocation still deletes the record and logs only the status', async () => {
     const user = newUser();
     await connect(server, user);
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
     fakes.github.setRevokeStatus(500);
     try {
       const response = await request(server.baseUrl, 'DELETE', '/api/github/connection', { headers: user.auth });
@@ -391,7 +400,7 @@ describe('connect flow, status, listing and binding (memory store)', () => {
       fakes.github.setRevokeStatus(204);
     }
     assert.deepEqual((await status(server, user)).json, { connected: false });
-    const newLogs = server.logs().slice(logStart);
+    const newLogs = await waitForLog(requestLogs, 'token revocation failed: HTTP 500\n');
     assert.ok(newLogs.includes('token revocation failed: HTTP 500'), newLogs);
   });
 
@@ -463,8 +472,11 @@ describe('connect flow, status, listing and binding (memory store)', () => {
     assert.ok(allowed.includes('authorization'));
   });
 
-  test('request logs redact ticket, code and state', () => {
-    const logs = server.logs();
+  test('request logs redact ticket, code and state', async () => {
+    const requestLogs = logsFromNow(server);
+    await startFlowFor(server, newUser());
+    await waitForLog(requestLogs, '/auth/github?ticket=REDACTED');
+    const logs = await waitForLog(requestLogs, '/auth/github/callback?code=REDACTED&state=REDACTED');
     assert.ok(logs.includes('/auth/github?ticket=REDACTED'), 'ticket is redacted');
     assert.ok(/\/auth\/github\/callback\?code=REDACTED&state=REDACTED/.test(logs), 'code and state are redacted');
   });
@@ -492,8 +504,7 @@ describe('B1.3b claim step (memory store)', () => {
   test('2. linking CSRF regression: the victim\'s token is never stored for the attacker, and is revoked', async () => {
     const attacker = newUser();
     const victim = newUser();
-    const stderrStart = server.output.stderr.length;
-    const stdoutStart = server.output.stdout.length;
+    const requestLogs = logsFromNow(server);
 
     // The attacker obtains a ticket; the victim's browser finishes the flow with the victim's GitHub account
     const flow = await startFlowFor(server, attacker, { githubUser: GITHUB_USER_B, callbackHeaders: victim.auth });
@@ -514,7 +525,7 @@ describe('B1.3b claim step (memory store)', () => {
     assert.equal(attackerListing.status, 401);
     assert.deepEqual(attackerListing.json, GITHUB_AUTH_REQUIRED_BODY);
 
-    const newLogs = `${server.output.stdout.slice(stdoutStart)}\n${server.output.stderr.slice(stderrStart)}`;
+    const newLogs = await waitForLog(requestLogs, 'github connect completion refused: account mismatch\n');
     assert.ok(newLogs.includes('github connect completion refused: account mismatch'));
     for (const leak of [attacker.id, attacker.email, victim.id, victim.email, GITHUB_USER_B.login]) {
       assert.ok(!newLogs.includes(leak), 'the mismatch log names nobody');
@@ -627,10 +638,11 @@ describe('B1.3b claim step (memory store)', () => {
   test('11. a completion id in a server URL is logged as complete=REDACTED', async () => {
     const completion = crypto.randomBytes(32).toString('hex');
     remember(completion);
+    const requestLogs = logsFromNow(server);
     await fetch(`${server.baseUrl}/auth/success?complete=${completion}`);
     // The request log line is written when the response finishes
-    await waitFor(() => server.logs().includes('/auth/success?complete=REDACTED'), 3000, 'the redacted request log line');
-    assert.ok(!server.logs().includes(completion));
+    const logs = await waitForLog(requestLogs, '/auth/success?complete=REDACTED');
+    assert.ok(!logs.includes(completion));
   });
 
   test('12. CORS allows the claim and the discard from the client origin', async () => {
@@ -656,17 +668,19 @@ describe('4. completion expiry (GITHUB_CONNECT_COMPLETION_TTL_MS=1000)', () => {
 
   test('an expired completion is revoked by the next sweep and can no longer be claimed', async () => {
     const user = newUser();
+    const completionLogs = logsFromNow(server);
     const flow = await startFlowFor(server, user);
     assert.match(flow.location, COMPLETE_LOCATION);
+    await waitForLog(completionLogs, '/auth/github/callback?code=REDACTED&state=REDACTED');
     await new Promise((resolve) => setTimeout(resolve, 1200));
     assert.ok(!fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 'not revoked before any sweep');
 
     // Any access to the completion store sweeps it: here an unrelated discard. The
     // test never sends this completion id anywhere before the revocation is seen.
-    assert.ok(!server.output.stdout.includes('github connect completion expired'));
+    assert.ok(!completionLogs.logs().includes('github connect completion expired'));
     assert.equal((await discard(server, { completion: crypto.randomBytes(32).toString('hex') })).status, 204);
     await waitFor(() => fakes.github.revokedViaTokenEndpoint().includes(flow.accessToken), 3000, 'the expiry revocation');
-    await waitFor(() => server.output.stdout.includes('github connect completion expired'), 3000, 'the expiry log line');
+    await waitForLog(completionLogs, 'github connect completion expired\n');
 
     const claim = await claimCompletion(server, user.token, flow.completion);
     assert.equal(claim.status, 400);
@@ -676,7 +690,7 @@ describe('4. completion expiry (GITHUB_CONNECT_COMPLETION_TTL_MS=1000)', () => {
 
   test('an out-of-range TTL falls back to 5 minutes with a warning', async () => {
     const tuned = await launch({ envOverrides: { GITHUB_CONNECT_COMPLETION_TTL_MS: '999' } });
-    assert.ok(tuned.logs().includes('GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer from 1000 to 300000; using the default'));
+    await waitForLog(tuned, 'GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer from 1000 to 300000; using the default\n');
     const user = newUser();
     const flow = await startFlowFor(tuned, user);
     await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -686,8 +700,8 @@ describe('4. completion expiry (GITHUB_CONNECT_COMPLETION_TTL_MS=1000)', () => {
   test('an invalid TTL is reported without its value', async () => {
     const value = `ttl-${randomAlphanumeric(12)}`;
     const tuned = await launch({ envOverrides: { GITHUB_CONNECT_COMPLETION_TTL_MS: value } });
-    assert.ok(tuned.logs().includes('GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer'));
-    assert.ok(!tuned.logs().includes(value));
+    const logs = await waitForLog(tuned, 'GITHUB_CONNECT_COMPLETION_TTL_MS must be an integer from 1000 to 300000; using the default\n');
+    assert.ok(!logs.includes(value));
   });
 });
 
@@ -703,7 +717,7 @@ describe('8. clone path with a stored connection (offline: git goes through an u
     const user = newUser();
     const { accessToken } = await connect(server, user);
     const start = fakes.github.requests.length;
-    const logStart = server.logs().length;
+    const requestLogs = logsFromNow(server);
 
     const response = await postJson(server.baseUrl, '/api/clone-repo', { repositoryData: { fullName: 'octo-a/private-one' } }, user.auth);
     assert.equal(response.status, 502, response.text);
@@ -713,7 +727,7 @@ describe('8. clone path with a stored connection (offline: git goes through an u
     assert.deepEqual(calls.map((c) => c.path), ['/repos/octo-a/private-one']);
     assert.equal(calls[0].headers.authorization, `token ${accessToken}`);
 
-    const newLogs = server.logs().slice(logStart);
+    const newLogs = await waitForLog(requestLogs, 'repo=octo-a/private-one:');
     assert.match(newLogs, /Clone failed \[CLONE_FAILED\] session=[0-9a-f-]{36} repo=octo-a\/private-one/);
     assert.ok(!newLogs.includes(accessToken));
     assert.ok(!response.text.includes(accessToken));
@@ -912,20 +926,21 @@ describe('12. startup refuses an invalid GitHub token store configuration', () =
   test('memory in production starts with a warning', async () => {
     // B1.4: production requires https CLIENT_URL and GITHUB_REDIRECT_URI
     const server = await launch({ envOverrides: { NODE_ENV: 'production', ...PRODUCTION_URLS } });
-    assert.ok(server.logs().includes('GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart'));
+    await waitForLog(server, 'GITHUB_TOKEN_STORE=memory: GitHub connections are lost on every restart. Use "supabase" in production.\n');
   });
 
   test('an invalid GITHUB_OAUTH_BASE_URL falls back to github.com with a warning that hides the value', async () => {
     const bad = `http://example-${randomAlphanumeric(6)}.test`;
     const server = await launch({ envOverrides: { GITHUB_OAUTH_BASE_URL: bad } });
+    const requestLogs = logsFromNow(server);
     const user = newUser();
     const { ticket } = (await request(server.baseUrl, 'POST', '/api/github/connect', { headers: user.auth })).json;
     remember(ticket);
     const start = await request(server.baseUrl, 'GET', `/auth/github?ticket=${ticket}`);
     remember(new URL(start.headers.get('location')).searchParams.get('state'));
     assert.ok(start.headers.get('location').startsWith('https://github.com/login/oauth/authorize?'));
-    assert.ok(server.logs().includes('GITHUB_OAUTH_BASE_URL must use https'));
-    assert.ok(!server.logs().includes(bad));
+    const logs = await waitForLog(requestLogs, 'GITHUB_OAUTH_BASE_URL must use https (http is allowed only for localhost or 127.0.0.1); using the default\n');
+    assert.ok(!logs.includes(bad));
   });
 });
 

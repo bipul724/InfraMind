@@ -9,7 +9,8 @@ import {
   makeTempDir,
   randomAlphanumeric,
   runServerExpectingExit,
-  startServer
+  startServer,
+  waitForLog
 } from './helpers.js';
 
 let fakes;
@@ -51,11 +52,12 @@ describe('startup log', () => {
   test('shows the two task routes with model names, and no key or base URL', async () => {
     const server = await startServer({ envOverrides: { AI_ROUTE_VERIFIER: 'openrouter' } });
     try {
+      await waitForLog(server, 'AI route generator: gemini(test-model-gemini) → groq(test-model-groq) → openrouter(test-model-openrouter)');
+      await waitForLog(server, 'AI route verifier: openrouter(test-model-openrouter)');
+      await waitForLog(server, '✅ Server startup complete!');
       const logs = server.logs();
       assert.ok(!logs.includes('AI route planner'), logs);
       assert.ok(!logs.includes('AI_ROUTE_PLANNER'), 'no retired-variable warning when it is not set');
-      assert.ok(logs.includes('AI route generator: gemini(test-model-gemini) → groq(test-model-groq) → openrouter(test-model-openrouter)'), logs);
-      assert.ok(logs.includes('AI route verifier: openrouter(test-model-openrouter)'));
       for (const variable of ['GEMINI_API_KEY', 'GROQ_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_BASE_URL', 'GROQ_BASE_URL', 'OPENROUTER_BASE_URL']) {
         assert.ok(!logs.includes(server.env[variable]), `${variable} value must not be printed`);
       }
@@ -72,6 +74,8 @@ describe('startup log', () => {
     try {
       const response = await fetch(`${server.baseUrl}/health`);
       assert.equal(response.status, 200);
+      await waitForLog(server, 'AI_ROUTE_PLANNER is set but no longer used (the planner agent was removed); it can be removed');
+      await waitForLog(server, '✅ Server startup complete!');
       const logs = server.logs();
       const warnings = logs.split('\n').filter((line) => line.includes('AI_ROUTE_PLANNER'));
       assert.deepEqual(warnings, ['⚠️ AI_ROUTE_PLANNER is set but no longer used (the planner agent was removed); it can be removed'], logs);
@@ -107,10 +111,11 @@ describe('NEW-01: AI configuration from .env', () => {
     const server = await startServer({ cwd, envOverrides: removed });
     try {
       for (const key of Object.keys(removed)) assert.equal(server.env[key], undefined, `${key} is not in the process env`);
-      const logs = server.logs();
       for (const task of ['generator', 'verifier']) {
-        assert.ok(logs.includes(`AI route ${task}: groq(${modelMarker})`), logs);
+        await waitForLog(server, `AI route ${task}: groq(${modelMarker})`);
       }
+      await waitForLog(server, '✅ Server startup complete!');
+      const logs = server.logs();
       assert.ok(!logs.includes(keyMarker), 'the key from .env is never printed');
     } finally {
       await server.stop();

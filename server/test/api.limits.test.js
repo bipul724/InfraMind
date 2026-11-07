@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { io as connectClient } from 'socket.io-client';
-import { authHeaders, closeFakes, getFakes, postJson, randomAlphanumeric, startServer } from './helpers.js';
+import { authHeaders, closeFakes, getFakes, postJson, randomAlphanumeric, startServer, waitForLog } from './helpers.js';
 
 let fakes;
 const servers = [];
@@ -22,6 +22,13 @@ async function launch(envOverrides) {
 }
 
 const get = (server, route, headers = {}) => fetch(`${server.baseUrl}${route}`, { headers });
+
+// Slice each pipe independently so newly captured stdout cannot move an existing stderr offset.
+function logsFromNow(server) {
+  const stdout = server.output.stdout.length;
+  const stderr = server.output.stderr.length;
+  return { logs: () => `${server.output.stdout.slice(stdout)}\n${server.output.stderr.slice(stderr)}` };
+}
 
 // A JWT-shaped token the fake Supabase does not know: verifying it costs one lookup
 const unknownToken = () => jwt.sign(
@@ -60,8 +67,8 @@ describe('preAuth: keyed by client IP behind TRUST_PROXY hops', () => {
     await assertRateLimited(await get(server, '/api/metrics', { 'X-Forwarded-For': '198.51.100.9, 203.0.113.10' }));
     // Another client behind the same proxy has its own bucket
     assert.equal((await get(server, '/api/metrics', { 'X-Forwarded-For': '198.51.100.7, 203.0.113.11' })).status, 404);
-    assert.ok(server.logs().includes('Rate limit preAuth exceeded for IP 203.0.113.10'));
-    assert.ok(!server.logs().includes('Rate limit preAuth exceeded for IP 198.51.100'), 'never the spoofable entry');
+    const logs = await waitForLog(server, 'Rate limit preAuth exceeded for IP 203.0.113.10');
+    assert.ok(!logs.includes('Rate limit preAuth exceeded for IP 198.51.100'), 'never the spoofable entry');
   });
 
   test('IPv6: three addresses in one /64 share a bucket (counted per /56); the third never reaches Supabase', async () => {
@@ -76,7 +83,7 @@ describe('preAuth: keyed by client IP behind TRUST_PROXY hops', () => {
     // A client in another /56 has its own bucket
     assert.equal((await from('2001:db8:1:100::a')).status, 401);
     // The 429 line still logs the full address
-    assert.ok(server.logs().includes('Rate limit preAuth exceeded for IP 2001:db8:1:2::c'), server.logs());
+    await waitForLog(server, 'Rate limit preAuth exceeded for IP 2001:db8:1:2::c');
   });
 
   test('a flood of fake tokens is throttled before Supabase is called', async () => {
@@ -118,7 +125,7 @@ describe('per-user limits: user A at the limit, user B from the same IP unaffect
       });
       await assertRateLimited(limited);
       assert.equal((await postJson(server.baseUrl, route, body, b.auth)).status, normalStatus, 'user B is not limited');
-      assert.ok(server.logs().includes(`exceeded for user ${a.id}`), 'user-keyed limits log the user id');
+      await waitForLog(server, `exceeded for user ${a.id}`);
     });
   }
 
@@ -146,12 +153,20 @@ describe('oauth: /auth/github, its callback and discard share a per-IP limit', (
       const response = await fetch(`${server.baseUrl}/auth/github?ticket=${ticket}`, { redirect: 'manual' });
       assert.equal(response.status, 302);
     }
+    const limitedLogs = logsFromNow(server);
     await assertRateLimited(await fetch(`${server.baseUrl}/auth/github?ticket=${ticket}`, { redirect: 'manual' }));
     // The same bucket also covers the callback and discard
+    const callbackLogs = logsFromNow(server);
     assert.equal((await fetch(`${server.baseUrl}/auth/github/callback?code=x&state=y`, { redirect: 'manual' })).status, 429);
+    const discardLogs = logsFromNow(server);
     assert.equal((await fetch(`${server.baseUrl}/auth/github/discard`, { method: 'POST' })).status, 429);
-    const logs = server.logs();
-    assert.ok(logs.includes('Rate limit oauth exceeded for IP'));
+    // Observe each warning's endpoint and the query-bearing access record before checking both pipes for leaked query data.
+    await waitForLog(limitedLogs, "endpoint: '/auth/github'");
+    await waitForLog(callbackLogs, "endpoint: '/auth/github/callback'");
+    await waitForLog(discardLogs, "endpoint: '/auth/github/discard'");
+    await waitForLog(limitedLogs, 'GET /auth/github?ticket=REDACTED');
+    await waitForLog(limitedLogs, 'status: 429');
+    const logs = await waitForLog(server, 'Rate limit oauth exceeded for IP');
     assert.ok(!logs.includes('TICKETMARKER'), 'no query string in any log line');
   });
 });
@@ -169,7 +184,7 @@ describe('socketHandshake: counted per IP before the token is verified', () => {
     assert.equal(fakes.supabase.callCount - callsBefore, 3);
     assert.equal(await attempt(), 'RATE_LIMITED');
     assert.equal(fakes.supabase.callCount - callsBefore, 3, 'the 4th handshake never reached Supabase');
-    assert.ok(server.logs().includes('Rate limit socketHandshake exceeded for IP'));
+    await waitForLog(server, 'Rate limit socketHandshake exceeded for IP');
   });
 
   test('IPv6: three handshakes from addresses in one /64 share a bucket; the third never reaches Supabase', async () => {
@@ -188,7 +203,7 @@ describe('socketHandshake: counted per IP before the token is verified', () => {
     assert.equal(await attempt('2001:db8:1:2::c'), 'RATE_LIMITED');
     assert.equal(fakes.supabase.callCount - callsBefore, 2, 'the third handshake never reached Supabase');
     assert.equal(await attempt('2001:db8:1:100::a'), 'AUTH_REQUIRED', 'another /56 has its own bucket');
-    assert.ok(server.logs().includes('Rate limit socketHandshake exceeded for IP 2001:db8:1:2::c'));
+    await waitForLog(server, 'Rate limit socketHandshake exceeded for IP 2001:db8:1:2::c');
   });
 });
 
@@ -219,7 +234,7 @@ describe('allowed origins: one list for CORS and Socket.IO', () => {
       assert.equal(health.status, 200, 'an unlisted origin is otherwise handled normally');
       assert.equal(health.headers.get('access-control-allow-origin'), null);
     }
-    assert.ok(server.logs().includes(`🌐 Allowed origins: http://localhost:5173, ${LISTED}`));
+    await waitForLog(server, `🌐 Allowed origins: http://localhost:5173, ${LISTED}`);
   });
 
   test('Socket.IO refuses an unlisted origin and accepts a listed one', async () => {
