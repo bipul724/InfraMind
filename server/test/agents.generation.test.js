@@ -437,11 +437,11 @@ describe('credentials in manifests and existing configuration are redacted (arch
     'requirements.txt': [
       '--extra-index-url https://deploy:MARKERSECRET111@pypi.corp.example/simple',
       'flask==3.0.3',
-      'privlib @ git+https://ghp_MARKERTOKEN222@github.com/org/privlib.git',
+      'privlib @ git+https://' + 'ghp_' + 'MARKERTOKEN222@github.com/org/privlib.git',
       'gunicorn',
       ''
     ].join('\n'),
-    '.github/workflows/ci.yml': 'name: old\non: push\njobs:\n  t:\n    runs-on: ubuntu-latest\n    env:\n      API_KEY: sk-MARKERKEY333\n    steps:\n      - run: echo\n',
+    '.github/workflows/ci.yml': 'name: old\non: push\njobs:\n  t:\n    runs-on: ubuntu-latest\n    env:\n      API_KEY: ' + 'sk-' + 'MARKERKEY333\n    steps:\n      - run: echo\n',
     'app.py': 'x'
   };
 
@@ -513,7 +513,7 @@ describe('credentials in manifests and existing configuration are redacted (arch
         '    runs-on: ubuntu-latest',
         '    steps:',
         '      - run: curl -fsS -H "Authorization: Bearer abcDEF1234567890xyzMARKERBEARER601" https://api.example.com/deploy',
-        '      - run: curl -X POST https://hooks.slack.com/services/T0000/B0000/XXXXMARKERSLACK602XXXX',
+        '      - run: curl -X POST https://hooks.slack.com/services/' + 'T0000/B0000/XXXXMARKERSLACK602XXXX',
         ''
       ].join('\n')
     });

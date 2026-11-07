@@ -2,7 +2,9 @@
 // prints values, and refuses to start until the list is empty. Spawned servers.
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { closeFakes, runServerExpectingExit, startServer } from './helpers.js';
+import { FAKE_SERVICE_KEY, FAKE_SECRET_SERVICE_KEY } from './fakePostgrest.js';
 
 after(async () => { await closeFakes(); });
 
@@ -109,4 +111,36 @@ describe('a valid configuration still starts', () => {
       await server.stop();
     }
   });
+});
+
+describe('Supabase service-key startup rule', () => {
+  for (const [label, key] of [
+    ['publishable key', 'sb_' + 'publishable_' + crypto.randomBytes(32).toString('base64url')],
+    ['publishable key with JWT-shaped dots', 'sb_' + 'publishable_' + 'a.b.c'],
+    ['other text', 'not-a-service-key-' + crypto.randomBytes(12).toString('hex')]
+  ]) {
+    test(`rejects a ${label} without printing it`, async () => {
+      const result = await runServerExpectingExit({
+        envOverrides: { GITHUB_TOKEN_STORE: 'supabase', SUPABASE_SERVICE_ROLE_KEY: key }
+      });
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /Configuration problems \(1\):/);
+      assert.match(result.stderr, /SUPABASE_SERVICE_ROLE_KEY must be /);
+      assert.ok(!`${result.stdout}\n${result.stderr}`.includes(key));
+    });
+  }
+
+  for (const [label, key] of [['legacy JWT', FAKE_SERVICE_KEY], ['secret API key', FAKE_SECRET_SERVICE_KEY]]) {
+    test(`starts with a ${label}`, async () => {
+      const server = await startServer({
+        envOverrides: { GITHUB_TOKEN_STORE: 'supabase', SUPABASE_SERVICE_ROLE_KEY: key }
+      });
+      try {
+        assert.equal((await fetch(`${server.baseUrl}/health`)).status, 200);
+        assert.ok(!server.logs().includes(key));
+      } finally {
+        await server.stop();
+      }
+    });
+  }
 });

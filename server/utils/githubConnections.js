@@ -23,6 +23,9 @@ const KEY_BYTES = 32;
 const FORMAT_VERSION = 'v1';
 const STANDARD_BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const STORE_KINDS = ['memory', 'supabase'];
+const SECRET_KEY_PREFIX = 'sb_secret_';
+const PUBLISHABLE_KEY_PREFIX = 'sb_publishable_';
+const SERVICE_KEY_FORMAT_PROBLEM = 'SUPABASE_SERVICE_ROLE_KEY must be a legacy JWT (three non-empty parts) or an sb_secret_ key';
 const TABLE_PATH = '/rest/v1/github_connections';
 const SELECT_COLUMNS = 'github_user_id,github_login,github_name,github_avatar_url,scopes,token_ciphertext,connected_at';
 
@@ -54,6 +57,26 @@ export function parseEncryptionKey(value) {
   return Buffer.from(value.trim(), 'base64');
 }
 
+const isLegacyJwt = (value) => !value.startsWith(PUBLISHABLE_KEY_PREFIX)
+  && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
+
+function describeServiceKeyProblem(value) {
+  if (typeof value !== 'string' || value.trim() === '') return 'SUPABASE_SERVICE_ROLE_KEY is not set';
+  const key = value.trim();
+  if (key.startsWith(PUBLISHABLE_KEY_PREFIX)) return SERVICE_KEY_FORMAT_PROBLEM;
+  if (isLegacyJwt(key) || key.startsWith(SECRET_KEY_PREFIX)) return null;
+  return SERVICE_KEY_FORMAT_PROBLEM;
+}
+
+// Secret API keys are not JWTs, so only a legacy JWT also belongs in the Bearer header.
+export function supabaseServiceHeaders(key) {
+  const value = key.trim();
+  return {
+    apikey: value,
+    ...(!value.startsWith(SECRET_KEY_PREFIX) && isLegacyJwt(value) ? { Authorization: `Bearer ${value}` } : {})
+  };
+}
+
 // Startup validation of the store configuration. Names variables, never values.
 export function describeConnectionStoreConfigProblem(env = process.env) {
   const kind = env.GITHUB_TOKEN_STORE;
@@ -62,9 +85,8 @@ export function describeConnectionStoreConfigProblem(env = process.env) {
   const keyProblem = describeEncryptionKeyProblem(env.GITHUB_TOKEN_ENC_KEY);
   if (keyProblem) return `GITHUB_TOKEN_ENC_KEY ${keyProblem} (generate one with: openssl rand -base64 32)`;
   if (kind === 'supabase') {
-    if (typeof env.SUPABASE_SERVICE_ROLE_KEY !== 'string' || env.SUPABASE_SERVICE_ROLE_KEY.trim() === '') {
-      return 'SUPABASE_SERVICE_ROLE_KEY is not set (required when GITHUB_TOKEN_STORE=supabase)';
-    }
+    const serviceProblem = describeServiceKeyProblem(env.SUPABASE_SERVICE_ROLE_KEY);
+    if (serviceProblem) return `${serviceProblem} (required when GITHUB_TOKEN_STORE=supabase)`;
   }
   return null;
 }
@@ -122,8 +144,7 @@ function createMemoryAdapter() {
 function createSupabaseAdapter({ supabaseUrl, serviceRoleKey, fetchImpl, timeoutMs }) {
   const endpoint = `${String(supabaseUrl || '').replace(/\/+$/, '')}${TABLE_PATH}`;
   const baseHeaders = {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
+    ...supabaseServiceHeaders(serviceRoleKey),
     Accept: 'application/json'
   };
 
@@ -237,9 +258,8 @@ export function createConnectionStore({
   if (kind === 'memory') {
     adapter = createMemoryAdapter();
   } else if (kind === 'supabase') {
-    if (typeof serviceRoleKey !== 'string' || serviceRoleKey.trim() === '') {
-      throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set');
-    }
+    const serviceProblem = describeServiceKeyProblem(serviceRoleKey);
+    if (serviceProblem) throw new Error(serviceProblem);
     adapter = createSupabaseAdapter({ supabaseUrl, serviceRoleKey: serviceRoleKey.trim(), fetchImpl, timeoutMs });
   } else {
     throw new Error('GITHUB_TOKEN_STORE must be "memory" or "supabase"');

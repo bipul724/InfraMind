@@ -195,10 +195,7 @@ describe('saved_files baseline before the limits migration', { skip: DB_SKIP }, 
       }
       const count = await db.client.query(`select count(*)::int as n from public.saved_files`);
       assert.equal(count.rows[0].n, 6);
-      const checklist = fs.readFileSync(path.join(SERVER_DIR, '..', 'PRODUCTION-CHECKLIST.md'), 'utf8');
-      const documentedQuery = checklist.match(/```sql\n([\s\S]*?)\n```/);
-      assert.ok(documentedQuery);
-      const duplicates = Number((await db.client.query(documentedQuery[1])).rows[0].duplicate_rows_to_remove);
+      const duplicates = Number((await db.client.query(duplicateCountQuery())).rows[0].duplicate_rows_to_remove);
       assert.equal(duplicates, 3);
       assert.equal((await db.client.query(`select count(*)::int as n from public.saved_files`)).rows[0].n, 6);
       console.log('B4.5 duplicate baseline authenticated A:', JSON.stringify({ rows: count.rows[0].n, duplicateRowsToRemove: duplicates }));
@@ -217,10 +214,11 @@ describe('saved_files baseline before the limits migration', { skip: DB_SKIP }, 
 });
 
 const LIMITS_MIGRATION_PATH = path.join(SERVER_DIR, '..', 'supabase', 'migrations', '20261106000000_saved_files_limits.sql');
-// Execute the owner's documented query so its duplicate count stays aligned with the migration.
+// Select the duplicate query by its output alias because the checklist also includes Prisma SQL.
 const duplicateCountQuery = () => {
   const checklist = fs.readFileSync(path.join(SERVER_DIR, '..', 'PRODUCTION-CHECKLIST.md'), 'utf8');
-  const query = checklist.match(/```sql\n([\s\S]*?)\n```/);
+  const query = [...checklist.matchAll(/```sql\n([\s\S]*?)\n```/g)]
+    .find((block) => /\bas\s+duplicate_rows_to_remove\b/i.test(block[1]));
   assert.ok(query, 'the production checklist includes the read-only duplicate query');
   return query[1];
 };

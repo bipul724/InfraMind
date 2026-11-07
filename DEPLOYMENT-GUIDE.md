@@ -25,10 +25,10 @@ The server refuses to start without the Supabase, GitHub token store, AI, sessio
 | Supabase value | Client variable | Server variable |
 |---|---|---|
 | Project URL | `VITE_SUPABASE_URL` | `SUPABASE_URL` |
-| Publishable (anon) key | `VITE_SUPABASE_ANON_KEY` | `SUPABASE_ANON_KEY` |
-| Secret (`service_role`) key | never | `SUPABASE_SERVICE_ROLE_KEY`, only with `GITHUB_TOKEN_STORE=supabase` |
+| Legacy `anon` JWT or new publishable key (`sb_publishable_` prefix) | `VITE_SUPABASE_ANON_KEY` | `SUPABASE_ANON_KEY` |
+| Legacy `service_role` JWT or new secret key (`sb_secret_` prefix) | never | `SUPABASE_SERVICE_ROLE_KEY`, only with `GITHUB_TOKEN_STORE=supabase` |
 
-The server uses the URL and anon key to verify user access tokens (`server/utils/auth.js`). It uses the service-role key only for `public.github_connections` (`server/utils/githubConnections.js`). The service-role key bypasses Row Level Security: never put it in a `VITE_` variable, because Vite bundles those into browser code.
+The server uses the URL and public anon/publishable key to verify user access tokens (`server/utils/auth.js`): `apikey` identifies the project and the signed-in user's JWT remains the Bearer token. Both server key forms work for `public.github_connections`: a legacy `service_role` JWT is sent in `apikey` and Bearer authorization, while a new secret key is sent only in `apikey` (`server/utils/githubConnections.js`). A publishable key is refused as `SUPABASE_SERVICE_ROLE_KEY` at startup. Both privileged key forms bypass Row Level Security; never put either in a `VITE_` variable, because Vite bundles those into browser code. Supabase documents [the key forms and their header requirements](https://supabase.com/docs/guides/getting-started/api-keys#known-limitations).
 
 ### 1.2 Database setup
 
@@ -95,7 +95,7 @@ The Email provider is enabled by default. With **Confirm email** on (the default
 This app is run by the InfraMind server (`server/github.js`). It requests the scope `repo,user:email`.
 
 1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**
-2. Authorization callback URL: the server's `/auth/github/callback`, for example `http://localhost:10000/auth/github/callback` locally (as in `server/.env.example`) or `https://<your-backend>/auth/github/callback` in production
+2. Use a separate repository-access OAuth App for production. Keep the local app's callback at `http://localhost:10000/auth/github/callback`; set the production app's callback to `https://inframind-backend-bsl1.onrender.com/auth/github/callback` and its homepage to `https://inframind-frontend.onrender.com`. Do not replace the local app's settings when deploying. GitHub currently permits multiple callback URLs, but InfraMind keeps local and production app credentials separate ([GitHub OAuth App setup](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)).
 3. Set on the server:
 
 ```bash
@@ -138,7 +138,7 @@ GEMINI_MODEL=<model id>
 
 With `SESSION_STORE=memory` every session and result is lost on restart. For production use `database`, which keeps sessions in Postgres through Prisma (`server/utils/sessionStore.js`).
 
-1. Set `DATABASE_URL`. `server/.env.example` describes the Supabase **Session pooler** string (port 5432)
+1. Set `DATABASE_URL` to the Supabase **Session pooler** string from the project's **Connect** dialog: port `5432`, user `postgres.<project-ref>`, and the pooler host supplied by the dialog. Add `?sslmode=require`. Percent-encode reserved characters in the password, for example `@` as `%40` and `#` as `%23`, or use an alphanumeric database password. Do not encode the entire URL. The shape is `postgresql://postgres.<project-ref>:<percent-encoded-password>@<session-pooler-host>:5432/postgres?sslmode=require`.
 2. Generate the Prisma client: `npm run db:generate` in `server/` (writes `server/generated/prisma`)
 3. Apply the migration **manually**: `npm run db:deploy` in `server/` (`prisma migrate deploy`). `npm run db:status` shows what is applied
 4. Start the server with `SESSION_STORE=database`
@@ -148,6 +148,80 @@ At startup the server checks that the database answers and that the schema exist
 Never run `npm run db:migrate:dev` against Supabase. It runs `server/scripts/assert-local-db.js` first, which refuses any `DATABASE_URL` host other than `localhost`, `127.0.0.1` or `::1`.
 
 TLS: for any non-local host the server always uses TLS and verifies the certificate. If verification fails, point `DATABASE_SSL_CA_FILE` at the CA certificate; `DATABASE_SSL_INSECURE_SKIP_VERIFY=true` turns verification off and logs a warning at startup (`server/db/config.js`).
+
+For this Render deployment, use the Session pooler rather than `db.<project-ref>.supabase.co`: the direct endpoint uses IPv6 without Supabase's IPv4 add-on and was unreachable from Render during the first deploy. Session pooling supports IPv4 and prepared statements. Copy its exact host rather than constructing one from the region; see [Supabase connection modes and SSL](https://supabase.com/docs/guides/database/connecting-to-postgres). See [the Render CA setup](#supabase-ca-secret-file) for certificate verification at runtime.
+
+### P3005: baseline an existing Supabase project
+
+The Supabase-owned `saved_files` and `github_connections` tables make the public schema non-empty before Prisma owns any tables. `npm run db:deploy` can therefore stop with P3005, "The database schema is not empty". The following procedure uses the repository's installed Prisma 7 CLI and its existing initial migration; it preserves the Supabase tables. See [Prisma baselining](https://www.prisma.io/docs/orm/prisma-migrate/workflows/baselining).
+
+1. In the Supabase SQL Editor, run this read-only check as the database owner. **All four results must be null.** If any exists, stop and inspect the existing schema and migration history before following this initial-baseline procedure.
+
+```sql
+select
+  to_regclass('public.analysis_sessions') as analysis_sessions,
+  to_regclass('public.generated_files') as generated_files,
+  to_regclass('public.ai_calls') as ai_calls,
+  to_regclass('public._prisma_migrations') as prisma_migrations;
+```
+
+2. As the database owner in the SQL Editor, run `set search_path = public;`, then the entire checked-in `server/prisma/migrations/20261103200038_init/migration.sql`. It creates `analysis_sessions`, `generated_files` and `ai_calls`, their constraints and indexes, and locks these tables away from browser roles. Do not mark the migration applied before its SQL has succeeded.
+3. From the repository root, run the following in **Bash** (`bash` first if your terminal uses zsh). The silent `read -s` prompt keeps the connection string out of shell history; the subshell discards it afterwards. Paste the complete Session pooler URL with its already percent-encoded password.
+
+```bash
+(
+  set +x
+  set -e
+  cd server
+  read -s -r -p 'DATABASE_URL (Session pooler, sslmode=require): ' DATABASE_URL
+  printf '\n'
+  export DATABASE_URL
+  npx prisma migrate resolve --applied 20261103200038_init
+)
+```
+
+4. `resolve` creates `_prisma_migrations` after the initial migration's own lockdown block has already run. Immediately run this additional lockdown in the SQL Editor:
+
+```sql
+alter table public._prisma_migrations enable row level security;
+revoke all on table public._prisma_migrations from public, anon, authenticated;
+```
+
+5. Verify all four tables have RLS enabled, no browser-role table grants remain, and the baseline is recorded. The first query must return four rows with `rls_enabled = true`; the second must return no rows; the third must show the initial migration with a non-null `finished_at` and null `rolled_back_at`.
+
+```sql
+select schemaname, tablename, rowsecurity as rls_enabled
+from pg_catalog.pg_tables
+where schemaname = 'public'
+  and tablename in ('analysis_sessions', 'generated_files', 'ai_calls', '_prisma_migrations')
+order by tablename;
+
+select table_name, grantee, privilege_type
+from information_schema.table_privileges
+where table_schema = 'public'
+  and table_name in ('analysis_sessions', 'generated_files', 'ai_calls', '_prisma_migrations')
+  and grantee in ('PUBLIC', 'anon', 'authenticated')
+order by table_name, grantee, privilege_type;
+
+select migration_name, finished_at, rolled_back_at
+from public._prisma_migrations
+where migration_name = '20261103200038_init';
+```
+
+6. Complete the normal deploy/status check before deploying Render. Again, use Bash and paste the URL at the silent prompt:
+
+```bash
+(
+  set +x
+  set -e
+  cd server
+  read -s -r -p 'DATABASE_URL (Session pooler, sslmode=require): ' DATABASE_URL
+  printf '\n'
+  export DATABASE_URL
+  npm run db:deploy
+  npm run db:status
+)
+```
 
 ---
 
@@ -177,6 +251,27 @@ Set `VITE_API_URL` to the server's actual URL whenever the port is not 10000. Th
 
 At the first Blueprint deploy, Render asks for each `sync: false` setting below. The supplied values stay in the service dashboard afterwards; update them there for later deployments. The frontend's `VITE_*` values are inlined during its build, so changing them requires a rebuild.
 
+### Use the actual service URLs
+
+Render may add a suffix to a service's public hostname even though its Blueprint name is unchanged. The first deploy assigned the backend `-bsl1`; use the URLs shown in each service's dashboard rather than deriving them from `name:`.
+
+| Public endpoint | This deployment |
+|---|---|
+| Frontend | `https://inframind-frontend.onrender.com` |
+| Backend | `https://inframind-backend-bsl1.onrender.com` |
+| Supabase project | `https://swpjtyojdwstwqznyhuh.supabase.co` |
+
+After the first deploy, or whenever a hostname changes, update all of these together:
+
+- Backend `CLIENT_URL`: the actual frontend origin, currently `https://inframind-frontend.onrender.com`.
+- Backend `GITHUB_REDIRECT_URI`: the actual backend callback, currently `https://inframind-backend-bsl1.onrender.com/auth/github/callback`.
+- Frontend `VITE_API_URL`: the actual backend origin without a trailing slash; `VITE_SUPABASE_URL`: the actual Supabase project URL. Use **Clear build cache & deploy** after changing `VITE_*` so the published bundle contains the new values.
+- The separate production GitHub OAuth App: homepage equals the frontend origin, callback exactly equals `GITHUB_REDIRECT_URI`.
+- Supabase Auth: Site URL equals the frontend origin; Redirect URLs include `https://inframind-frontend.onrender.com/**` (and any deliberately allowed development URLs).
+- The static CSP's API/Supabase origins: regenerate it with the command under [Static routes, caching and security headers](#static-routes-caching-and-security-headers), update the CSP header in `render.yaml`, and sync the Blueprint.
+
+### Blueprint settings and builds
+
 | Service | Fixed in the Blueprint | Prompted at the first deploy |
 |---|---|---|
 | Backend | `NODE_VERSION=24`, `NODE_ENV=production`, `PORT=10000`, `SESSION_STORE=database`, `GITHUB_TOKEN_STORE=supabase`, `OPENROUTER_DATA_COLLECTION=deny` | `CLIENT_URL`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`; `GITHUB_TOKEN_ENC_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI`; `DATABASE_URL`; `AI_PROVIDERS`; `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_API_KEY`, `GROQ_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`; `METRICS_TOKEN` |
@@ -194,9 +289,9 @@ flowchart TB
     BackEnv["Backend prompts: CLIENT_URL, Supabase, GitHub, database, provider keys/models, metrics token"]
     FrontEnv["Frontend prompts: API origin, Supabase URL, public anon key"]
     subgraph Render["Render: Node 24 for both builds"]
-        Backend["inframind-backend: Node web service; npm ci --include=dev, db:generate; npm start; /health"]
+        Backend["inframind-backend-bsl1.onrender.com: Node web service; npm ci --include=dev, db:generate; npm start; /health"]
         Guard["Frontend: npm ci, check:deploy-env, npm run build"]
-        Frontend["inframind-frontend: static client/dist; SPA rewrite, cache and security headers"]
+        Frontend["inframind-frontend.onrender.com: static client/dist; SPA rewrite, cache and CSP/security headers"]
     end
     DB[("Postgres: sessions, generated files, AI call records")]
     Supabase[("Supabase: Auth, saved_files, github_connections")]
@@ -224,6 +319,7 @@ The backend command is `cd server && npm ci --include=dev && npm run db:generate
 | `NODE_ENV` is set to anything except `production` | Unset it or set `production`; `development` enables the error boundary's development details |
 | Any required `VITE_*` value is missing or empty | Set `VITE_API_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the service environment |
 | A URL is invalid, uses HTTP, or names `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0` or `*.local` | Use the public HTTPS backend origin and Supabase project URL |
+| Either public URL contains a username or password | Remove URL credentials; use only the public API origin and Supabase project URL |
 | `VITE_API_URL` includes a path, query, fragment or trailing slash | Use only `https://<backend host>` because the app appends its endpoint paths |
 | The key is a JWT with `role=service_role` or starts with `sb_secret_` | Replace it with the project's public anon/publishable key; browser bundles must not contain a server secret |
 
@@ -239,10 +335,29 @@ The `/*` to `/index.html` rewrite serves application deep links such as `/dashbo
 | `/*` | `X-Frame-Options` | `DENY` |
 | `/*` | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `/*` | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `/*` | `Content-Security-Policy` | Generated by `client/scripts/csp.mjs` for the actual API and Supabase origins |
 | `/assets/*` | `Cache-Control` | `public, max-age=31536000, immutable` |
 | `/index.html` and `/` | `Cache-Control` | `no-cache` |
 
-Asset names are content-hashed, so the long asset cache can coexist with an HTML document that must be revalidated. Content-Security-Policy is deferred to T-605: its allowed API, Supabase, avatar and font origins need the real deployment hosts.
+Asset names are content-hashed, so the long asset cache can coexist with an HTML document that must be revalidated. The CSP limits scripts to the static site's own origin, permits the API's HTTPS and WSS connections, and allows the app's Supabase, Google Fonts and avatar sources. Supabase uses HTTPS for Auth and saved-file REST calls; no current client path opens a Supabase Realtime channel, so its WSS source is absent. The policy is tested against the real client with loopback fakes in the end-to-end suite. Regenerate its literal Blueprint value from the repository root whenever either backend or Supabase host changes:
+
+```bash
+node client/scripts/csp.mjs https://inframind-backend-bsl1.onrender.com https://swpjtyojdwstwqznyhuh.supabase.co
+```
+
+Copy the resulting single header into the frontend's `Content-Security-Policy` entry in `render.yaml`. If a production host changed, also update the expected production origins in `client/scripts/render-blueprint.test.mjs` so CI checks the new deployment binding, then run the client tests and sync the Blueprint. After merge and sync, check `curl -sI https://inframind-frontend.onrender.com/` and exercise sign-in, Connect GitHub, analysis and Saved Files with the browser console open; there should be no CSP violations.
+
+### Supabase CA secret file
+
+Download the database CA from Supabase **Database → Settings → SSL Configuration**. In the backend's Render **Environment → Secret Files**, add a file named **`supabase-ca.crt`** and paste the certificate contents there. Separately, under **Environment Variables**, add **`DATABASE_SSL_CA_FILE=/etc/secrets/supabase-ca.crt`**. The certificate is a file; the setting is an environment variable containing its path. Do not create a secret file named `DATABASE_SSL_CA_FILE` or paste the certificate into that environment variable. Render documents [the `/etc/secrets/<filename>` location](https://render.com/docs/configure-environment-variables#secret-files).
+
+The server reads this file for verified runtime TLS (`server/db/config.js:99`). Leave `DATABASE_SSL_INSECURE_SKIP_VERIFY` unset or `false`; disabling verification is not the CA setup.
+
+### Temporary memory-mode fallback
+
+For a temporary startup fallback, set both `SESSION_STORE=memory` and `GITHUB_TOKEN_STORE=memory` in the backend dashboard. This removes the startup need for `DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; the other required settings, including public Supabase Auth settings, GitHub OAuth credentials and `GITHUB_TOKEN_ENC_KEY`, still apply.
+
+Every backend session, generated result, pending job and GitHub connection held in memory disappears on a free-plan spin-down, restart or deploy; users must connect GitHub and start analyses again. Local cloned directories are ephemeral too. Supabase Auth accounts and files already saved to `public.saved_files` remain in Supabase. See [Render free-service state loss](https://render.com/docs/free). A later Blueprint sync resets the two store settings to `SESSION_STORE=database` and `GITHUB_TOKEN_STORE=supabase` from `render.yaml`; configure and baseline the database and set the service key before returning to those persistent modes.
 
 ### Optional backend settings
 
@@ -269,7 +384,7 @@ Remove `AI_ROUTE_PLANNER` from an existing environment: the planner was removed 
 
 With `TRUST_PROXY` unset, make requests from two devices or networks and compare the `ip` in the backend access-log lines (`server/utils/security.js`). If both show a Render-internal address, try `TRUST_PROXY=1`, redeploy and compare again with the devices' public addresses. If necessary, try 2, then 3; choose the smallest value that reports the actual clients. Never trust more proxies than the real hop count, and never set boolean `true`: client-supplied entries farther left in `X-Forwarded-For` can be forged.
 
-`/health` is a liveness check: HTTP 200 with `{ status: "ok", timestamp, uptime }` does not check the database, Supabase or AI providers. Startup validates the environment and, in database mode, checks database connectivity and schema. Run one backend instance: the analysis queue is in process memory. A restart or deploy ends running and queued analyses; with `SESSION_STORE=database`, the next start marks them failed with the restart message and the user starts again.
+`/health` is a liveness check: HTTP 200 with `{ status: "ok", timestamp, uptime }` does not check the database, Supabase or AI providers. Startup validates the environment and, in database mode, checks database connectivity and schema. Run one backend instance: the analysis queue is in process memory. Shutdown drops queued work and gives running work at most one second; database-mode sessions still unfinished at restart are marked failed at the next start and must be started again (`server/server.js:1169`, `:1327`).
 
 ### Other frontend hosts
 
@@ -287,6 +402,7 @@ The static build is `client/dist`. A different static host needs the same three 
 | `GITHUB_TOKEN_STORE is not set` / `must be "memory" or "supabase"` | Set `GITHUB_TOKEN_STORE` |
 | `GITHUB_TOKEN_ENC_KEY ...` | `openssl rand -base64 32` |
 | `SUPABASE_SERVICE_ROLE_KEY is not set (required when GITHUB_TOKEN_STORE=supabase)` | Set it, or use `memory` |
+| `SUPABASE_SERVICE_ROLE_KEY must be a legacy JWT (three non-empty parts) or an sb_secret_ key` | Use the legacy `service_role` JWT or new server secret key, not a public/publishable key |
 | `AI_PROVIDERS is not set ...`, `<NAME>_API_KEY is not set ...`, `<NAME>_MODEL is not set ...` | Fix the AI settings |
 | `SESSION_STORE is not set (use "memory" or "database")` | Set `SESSION_STORE` |
 | `DATABASE_URL ...` | Set a `postgres://` or `postgresql://` URL |
@@ -313,7 +429,9 @@ The static build is `client/dist`. A different static host needs the same three 
 | "Connect GitHub" ends on `/auth/success` with an error | `invalid_state` (cookie missing or expired), `connect_expired` (ticket older than 2 minutes), `access_denied`, or `github_auth_failed`; check `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` and `CLIENT_URL` (`server/server.js`) |
 | 503 `GITHUB_STORE_UNAVAILABLE` | The `github_connections` table or the service-role key is not reachable (`server/utils/githubConnections.js`) |
 | 503 `SESSION_STORE_UNAVAILABLE` | The session database is not reachable (`server/server.js`) |
-| 429 `RATE_LIMITED` for many users at once | Behind Render without `TRUST_PROXY`, every visitor shares one IP bucket; see [Checking the client IP](#checking-the-client-ip) |
+| 429 `RATE_LIMITED` for many users at once | Per-IP limits may be counting a proxy address; choose `TRUST_PROXY` only after [Checking the client IP](#checking-the-client-ip) |
+| Prisma P3005, "The database schema is not empty" | Follow [the checked initial-baseline procedure](#p3005-baseline-an-existing-supabase-project) when the Supabase tables exist but all four Prisma relations are absent |
+| The browser reports a CSP violation | Confirm the actual backend/Supabase origins, regenerate the policy with `client/scripts/csp.mjs`, update the Blueprint and expected-host fixture, and sync/redeploy |
 | 503 `GITHUB_RATE_LIMITED` | GitHub rate-limited this user's token; `Retry-After` says when to retry (`server/github.js`) |
 | 504 `GITHUB_UNAVAILABLE` | GitHub did not answer within `GITHUB_TIMEOUT_MS` (default 10 s) or could not be reached |
 | 503 `ANALYSIS_BUSY` on "Start AI Analysis" | `ANALYSIS_CONCURRENCY` analyses are running and `ANALYSIS_QUEUE_MAX` are waiting; `analysisJobs` in `/api/metrics` shows the counts. The cloned session can be retried (`server/server.js`) |

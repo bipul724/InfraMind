@@ -28,6 +28,7 @@ function expectFailure(variable, changes) {
   for (const [name, value] of Object.entries(result.env)) {
     if (value.trim()) assert.ok(!result.stderr.includes(value), `${name} leaked into the error output`);
   }
+  return result;
 }
 
 function jwt(payload) {
@@ -70,6 +71,14 @@ describe('check-deploy-env', () => {
   }
 
   for (const variable of ['VITE_API_URL', 'VITE_SUPABASE_URL']) {
+    for (const credentials of ['private-user@', ':private-password@', 'private-user:private-password@', 'private%40user:private%3Apassword@']) {
+      it(`rejects credentials in ${variable} without printing the URL or credentials`, () => {
+        const result = expectFailure(variable, { [variable]: `https://${credentials}api-private.example.com` });
+        assert.ok(!result.stderr.includes('private-user'));
+        assert.ok(!result.stderr.includes('private-password'));
+        assert.ok(!result.stderr.includes(credentials));
+      });
+    }
     for (const value of ['http://private-http.example.com', 'ws://private-ws.example.com', 'not-a-url-private-marker', 'https:missing-slashes.example.com']) {
       it(`rejects an invalid HTTPS URL in ${variable}: ${value.split(':')[0]}`, () => {
         expectFailure(variable, { [variable]: value });

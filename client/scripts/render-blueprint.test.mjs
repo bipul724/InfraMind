@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import yaml from 'js-yaml';
+import { buildCsp } from './csp.mjs';
 
 const blueprint = yaml.load(readFileSync(new URL('../../render.yaml', import.meta.url), 'utf8'));
 const backendPrompts = [
@@ -77,7 +78,7 @@ test('Blueprint installs reproducibly and runs the frontend guard before buildin
 
 test('Blueprint serves deep links and sends the static security and cache headers', () => {
   assert.deepEqual(frontend.routes, [{ type: 'rewrite', source: '/*', destination: '/index.html' }]);
-  const headers = frontend.headers.map(header => [header.path, header.name.toLowerCase(), header.value]);
+  const headers = frontend.headers.filter(header => header.name.toLowerCase() !== 'content-security-policy').map(header => [header.path, header.name.toLowerCase(), header.value]);
   assert.deepEqual(headers, [
     ['/*', 'x-content-type-options', 'nosniff'],
     ['/*', 'x-frame-options', 'DENY'],
@@ -87,4 +88,15 @@ test('Blueprint serves deep links and sends the static security and cache header
     ['/index.html', 'cache-control', 'no-cache'],
     ['/', 'cache-control', 'no-cache'],
   ]);
+});
+
+test('Blueprint CSP equals the generated policy for the actual production hosts', () => {
+  assert.deepEqual(frontend.headers.filter(header => header.name.toLowerCase() === 'content-security-policy'), [{
+    path: '/*',
+    name: 'Content-Security-Policy',
+    value: buildCsp({
+      apiOrigin: 'https://inframind-backend-bsl1.onrender.com',
+      supabaseOrigin: 'https://swpjtyojdwstwqznyhuh.supabase.co',
+    }),
+  }]);
 });

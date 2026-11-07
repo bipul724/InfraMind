@@ -11,32 +11,106 @@ A checklist for an operator preparing a deployment. Nothing here is pre-ticked: 
 
 ### Before the first Blueprint deploy
 
-- [ ] Apply the Supabase SQL migrations in filename order, including the read-only duplicate count before the saved-file limits migration as described in [Supabase](#supabase). Then run `npm run db:deploy` in `server/` against the production session database. Complete both migration steps before deploying; the Render build does not apply migrations.
-- [ ] Choose the production frontend HTTPS origin and backend HTTPS host. Set `CLIENT_URL` to the frontend origin, `https://<frontend host>`, with no path, query or trailing slash.
-- [ ] Set `GITHUB_REDIRECT_URI` to `https://<backend host>/auth/github/callback`. Copy that exact URL into the repository-access GitHub OAuth App's authorization callback setting; this is separate from the Supabase GitHub sign-in provider's callback.
-- [ ] In Supabase Auth URL Configuration, set the Site URL to the production frontend origin and include that frontend origin's dashboard/return paths in Redirect URLs, for example `https://<frontend host>/**`.
+- [ ] Apply the Supabase SQL migrations in filename order, including the read-only duplicate count before the saved-file limits migration as described in [Supabase](#supabase). Then run `npm run db:deploy` in `server/` against the production session database. If the existing Supabase tables cause P3005, complete [the baseline procedure](#prisma-p3005-owner-baseline) before retrying. Complete both migration steps before deploying; the Render build does not apply migrations.
+- [ ] Use a separate repository-access GitHub OAuth App for production and leave the local app's `http://localhost:10000/auth/github/callback` configuration intact. Keep the Supabase GitHub sign-in provider's OAuth App separate too. This is InfraMind's environment-separation policy; [GitHub currently allows up to 10 OAuth App callback URLs](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app).
+- [ ] Set `CLIENT_URL` to the actual frontend origin, currently `https://inframind-frontend.onrender.com`, with no path, query or trailing slash.
+- [ ] Set `GITHUB_REDIRECT_URI` to `https://inframind-backend-bsl1.onrender.com/auth/github/callback`. Copy that exact URL into the production repository-access OAuth App's callback setting, and set its homepage to `https://inframind-frontend.onrender.com`.
+- [ ] In Supabase Auth URL Configuration, set the Site URL to `https://inframind-frontend.onrender.com` and include `https://inframind-frontend.onrender.com/**` in Redirect URLs. The project URL is `https://swpjtyojdwstwqznyhuh.supabase.co`.
 - [ ] Remove `AI_ROUTE_PLANNER` if it is still set; the planner no longer exists and the server only warns about the retired setting.
 - [ ] Fill in the backend settings when the first Blueprint deploy prompts for its `sync: false` variables. Keep the server-only keys in the backend service:
 
 | Backend variable | Where its value comes from |
 |---|---|
 | `CLIENT_URL` | The frontend's public HTTPS origin, with no path or trailing slash |
-| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | The same project's URL and public anon/publishable key in Supabase Project Settings → API Keys |
-| `SUPABASE_SERVICE_ROLE_KEY` | That project's server-only service-role key in Supabase API settings; never copy it into the frontend |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | The same project's URL and either the legacy `anon` JWT or a new public key with the `sb_publishable_` prefix in Supabase Project Settings → API Keys |
+| `SUPABASE_SERVICE_ROLE_KEY` | Either the legacy `service_role` JWT or a new server-only key with the `sb_secret_` prefix; never a publishable key and never copied into the frontend |
 | `GITHUB_TOKEN_ENC_KEY` | Generate with `openssl rand -base64 32`; store it safely because replacing it makes existing GitHub connections unreadable |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | The repository-access GitHub OAuth App's settings |
 | `GITHUB_REDIRECT_URI` | `https://<backend host>/auth/github/callback`, exactly matching that OAuth App's callback |
-| `DATABASE_URL` | Supabase dashboard → Connect → Session pooler connection string (port 5432), with the database password |
+| `DATABASE_URL` | Supabase Connect → Session pooler string: port `5432`, user `postgres.<project-ref>`, the supplied pooler host, and `?sslmode=require`. Percent-encode reserved password characters or use an alphanumeric password; do not use the IPv6-only direct `db.<project-ref>.supabase.co` endpoint from this Render deployment |
 | `AI_PROVIDERS` | The chosen ordered provider chain, such as `gemini,groq,openrouter` |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | The Gemini provider dashboard's key and a current model ID |
 | `GROQ_API_KEY`, `GROQ_MODEL` | The Groq provider dashboard's key and a current model ID |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | The OpenRouter provider dashboard's key and a current model ID |
 | `METRICS_TOKEN` | At least 32 random characters, for example generated with `openssl rand -hex 32`; send it only in `X-Metrics-Token` when using operator endpoints |
 
-- [ ] Fill in the frontend prompts: `VITE_API_URL` is the public backend HTTPS origin without a path, query, fragment or trailing slash; `VITE_SUPABASE_URL` is the same Supabase project URL; `VITE_SUPABASE_ANON_KEY` is its public anon/publishable key. A service-role JWT or an `sb_secret_` key must never enter the browser bundle.
+- [ ] Fill in the frontend prompts: `VITE_API_URL=https://inframind-backend-bsl1.onrender.com`, `VITE_SUPABASE_URL=https://swpjtyojdwstwqznyhuh.supabase.co`, and `VITE_SUPABASE_ANON_KEY` set to the project's legacy `anon` JWT or new `sb_publishable_` key. Public URLs must contain no username/password; the API URL must have no path, query, fragment or trailing slash. A service-role JWT or an `sb_secret_` key must never enter the browser bundle.
 - [ ] Confirm the Blueprint's fixed backend settings: Node 24, `NODE_ENV=production`, `PORT=10000`, `SESSION_STORE=database`, `GITHUB_TOKEN_STORE=supabase`, and `OPENROUTER_DATA_COLLECTION=deny`. The frontend also builds on Node 24.
-- [ ] Leave frontend `NODE_ENV` unset or set it to `production`. The frontend build runs `npm ci`, then `npm run check:deploy-env`, then `npm run build`; the guard fails for missing/local/non-HTTPS public settings, an API URL containing a path, query, fragment or trailing slash, a wrong `NODE_ENV`, or a secret key. It names the variable without exposing its value.
+- [ ] Leave frontend `NODE_ENV` unset or set it to `production`. The frontend build runs `npm ci`, then `npm run check:deploy-env`, then `npm run build`; the guard fails for missing/local/non-HTTPS public settings, URL credentials, an API URL containing a path, query, fragment or trailing slash, a wrong `NODE_ENV`, or a secret key. It names the variable without exposing its value.
 - [ ] Keep later changes in each service's dashboard: `sync: false` prompts only at the first Blueprint deploy. Rebuild the frontend whenever a `VITE_*` value changes.
+
+### Confirm the actual URLs after the first deploy
+
+- [ ] Read the real URLs from both Render service dashboards. The Blueprint names stay `inframind-backend` and `inframind-frontend`, but Render added `-bsl1` to this backend's public hostname. Do not infer a public hostname from a service name.
+- [ ] If either actual URL differs from what was entered, update backend `CLIENT_URL` and `GITHUB_REDIRECT_URI`, frontend `VITE_API_URL`, the production GitHub OAuth App's homepage/callback, and Supabase Auth's Site URL/Redirect URLs together. For changed `VITE_*` values use **Clear build cache & deploy**.
+- [ ] Regenerate the CSP when the backend or Supabase host changes, copy the resulting header into the frontend's `Content-Security-Policy` entry in `render.yaml`, update the expected production origins in `client/scripts/render-blueprint.test.mjs`, run the client tests, and sync the Blueprint. From the repository root, the current command is:
+
+```bash
+node client/scripts/csp.mjs https://inframind-backend-bsl1.onrender.com https://swpjtyojdwstwqznyhuh.supabase.co
+```
+
+### Prisma P3005 owner baseline
+
+- [ ] If `npm run db:deploy` reports P3005, "The database schema is not empty", check these four Prisma relations in the Supabase SQL Editor. All must be null; if any exists, stop and inspect the schema/history instead of applying the initial-baseline recipe.
+
+```sql
+select
+  to_regclass('public.analysis_sessions') as analysis_sessions,
+  to_regclass('public.generated_files') as generated_files,
+  to_regclass('public.ai_calls') as ai_calls,
+  to_regclass('public._prisma_migrations') as prisma_migrations;
+```
+
+- [ ] As the database owner in the SQL Editor, run `set search_path = public;`, then the entire `server/prisma/migrations/20261103200038_init/migration.sql`. It creates only the Prisma-owned tables; preserve `saved_files` and `github_connections`.
+- [ ] From the repository root, run the installed Prisma CLI in **Bash** (`bash` first in a zsh terminal). Paste the complete, percent-encoded Session pooler URL at the silent prompt so its password is not a shell-history entry; the subshell discards it afterwards:
+
+```bash
+(
+  set +x
+  set -e
+  cd server
+  read -s -r -p 'DATABASE_URL (Session pooler, sslmode=require): ' DATABASE_URL
+  printf '\n'
+  export DATABASE_URL
+  npx prisma migrate resolve --applied 20261103200038_init
+)
+```
+
+- [ ] Immediately lock `_prisma_migrations` in the SQL Editor: `resolve` created it after the initial migration's own lockdown ran.
+
+```sql
+alter table public._prisma_migrations enable row level security;
+revoke all on table public._prisma_migrations from public, anon, authenticated;
+```
+
+- [ ] Verify four RLS-enabled tables, no grants to browser roles or `PUBLIC`, and a finished baseline record. Expect four `true` rows from the first query, zero rows from the second, and a non-null `finished_at` with null `rolled_back_at` from the third:
+
+```sql
+select schemaname, tablename, rowsecurity as rls_enabled
+from pg_catalog.pg_tables
+where schemaname = 'public'
+  and tablename in ('analysis_sessions', 'generated_files', 'ai_calls', '_prisma_migrations')
+order by tablename;
+
+select table_name, grantee, privilege_type
+from information_schema.table_privileges
+where table_schema = 'public'
+  and table_name in ('analysis_sessions', 'generated_files', 'ai_calls', '_prisma_migrations')
+  and grantee in ('PUBLIC', 'anon', 'authenticated')
+order by table_name, grantee, privilege_type;
+
+select migration_name, finished_at, rolled_back_at
+from public._prisma_migrations
+where migration_name = '20261103200038_init';
+```
+
+- [ ] Run `npm run db:deploy`, then `npm run db:status` using the second silent-prompt Bash block in [the baseline runbook](DEPLOYMENT-GUIDE.md#p3005-baseline-an-existing-supabase-project). Complete the database deployment before deploying Render.
+
+### Database CA and temporary memory mode
+
+- [ ] Download the CA certificate from Supabase **Database → Settings → SSL Configuration**. Add a Render backend **Secret File** named `supabase-ca.crt` containing the certificate. Separately add the **environment variable** `DATABASE_SSL_CA_FILE=/etc/secrets/supabase-ca.crt`. A file's name/contents and an environment variable's name/value are different controls; leave certificate verification enabled.
+- [ ] If a temporary fallback is needed, set both `SESSION_STORE=memory` and `GITHUB_TOKEN_STORE=memory`. This avoids the database/service-key startup requirements but loses all backend sessions, generated results, queued work and GitHub connections at every free-plan spin-down, restart or deploy. Supabase Auth users and files already saved in Supabase remain there.
+- [ ] Before a later Blueprint sync, prepare the database and service key: the sync resets these dashboard overrides to `SESSION_STORE=database` and `GITHUB_TOKEN_STORE=supabase` from `render.yaml`.
 
 ### Optional backend overrides and client-IP check
 
@@ -51,16 +125,18 @@ A checklist for an operator preparing a deployment. Nothing here is pre-ticked: 
 - [ ] Open and refresh `/dashboard?session=<id>` for an owned analysis: the static host serves the app, and after sign-in it opens the requested result.
 - [ ] Use the real hashed JavaScript asset path from the deployed HTML and confirm `Cache-Control: public, max-age=31536000, immutable`.
 - [ ] Confirm both `/index.html` and `/` return `Cache-Control: no-cache`.
-- [ ] Check the static responses with `curl -I`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy: camera=(), microphone=(), geolocation=()` are present. Replace the placeholders below with the deployed hosts and an existing hashed asset:
+- [ ] After merging and syncing the Blueprint, check the static responses with `curl -sI`: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy: camera=(), microphone=(), geolocation=()` are present. Replace the asset placeholder below with an existing hashed asset:
 
 ```bash
-curl -I "https://<backend host>/health"
-curl -I "https://<frontend host>/"
-curl -I "https://<frontend host>/index.html"
-curl -I "https://<frontend host>/assets/<hash>.js"
+curl -sI "https://inframind-backend-bsl1.onrender.com/health"
+curl -sI "https://inframind-frontend.onrender.com/"
+curl -sI "https://inframind-frontend.onrender.com/index.html"
+curl -sI "https://inframind-frontend.onrender.com/assets/<hash>.js"
 ```
 
-Render serves existing files before rewrites and uses the first matching redirect/rewrite rule. The SPA fallback also returns `index.html` with HTTP 200 for a missing asset path; it does not provide a separate missing-asset 404. See [Render rule matching and ordering](https://render.com/docs/redirects-rewrites#rule-matching-and-ordering). Content-Security-Policy is deferred to T-605 after the real API, Supabase, avatar and font origins are known.
+- [ ] With the browser console open, sign in, Connect GitHub, run an analysis, and open Saved Files. Confirm there are no CSP errors; a policy header check alone does not exercise these flows.
+
+Render serves existing files before rewrites and uses the first matching redirect/rewrite rule. The SPA fallback also returns `index.html` with HTTP 200 for a missing asset path; it does not provide a separate missing-asset 404. See [Render rule matching and ordering](https://render.com/docs/redirects-rewrites#rule-matching-and-ordering). The CSP is generated from `client/scripts/csp.mjs` for the real API and Supabase hosts; update it through that generator when either changes.
 
 ## Supabase
 
@@ -126,15 +202,15 @@ from (
 
 Each item is a fact about the code today, for deciding what to fix before launch:
 
-- The **Projects** tab lists only results from the current page visit; nothing is stored (`client/src/pages/ModernDashboard.tsx`).
-- Analyses run in an in-process job runner (`server/utils/jobs.js`): one backend instance only, since the queue is not shared between processes. A restart or deploy ends every running and queued analysis; with `SESSION_STORE=database` the next start marks them `failed` with the restart message, and the user starts again. Running analyses cannot be cancelled.
-- The step after an agent's event is that agent's own step name (for example "Analyzing codebase structure" while the generator runs), because the event is sent when the agent finishes (`runAnalysisJob` in `server/server.js`).
-- Chrome saves the `.env.example` download as `env.example`: it removes a leading dot from download names, so the user renames the file (`client/src/components/GeneratedFilesView.tsx` shows this under the file).
-- "Save to Account" is remembered for the page load only: after a reload, or when the same analysis is opened in a new tab with `/dashboard?session=<id>`, the button is enabled again and a second save inserts a second set of rows (`client/src/components/AgentProgress.tsx`).
-- Rate-limit counters are kept in memory by each server process: a second instance counts separately, and a restart resets every count (`server/utils/security.js`).
-- `TRUST_PROXY` defaults to 0 and is not set in `render.yaml`: behind Render's proxy, every visitor shares one bucket for the per-IP limits until it is set (`server/utils/config.js`).
-- File validation checks format and the workflow policy only. It does not build the image, run the workflow, or check that the `.env.example` variables are complete (`server/agents/files.js`).
-- The generated workflow triggers on `main`, with a comment to change it: the analyzer does not know the repository's default branch (`server/agents/prompts.js`).
-- Java `spring` detection still uses a file-path substring; Python frameworks come from the dependency names (`server/agents/index.js` `analyzeTechStack`).
-- The verifier's review is AI text shown as advice; nothing checks it (`client/src/components/AgentProgress.tsx`).
-- A clone stays on the server's disk while its session is `cloned` (at most 1 hour, then the session fails and the clone is removed) or `analyzing`; it is removed when the analysis ends (`server/server.js`).
+- The **Projects** list exists only for the current page visit; it is not a persisted project history (`client/src/pages/ModernDashboard.tsx:94`, `client/src/pages/ModernDashboard.tsx:279`). This does not erase session results kept by the database store.
+- Analyses use an in-process queue, so run one backend instance. Shutdown drops queued work and waits at most one second for running jobs; database mode marks sessions still unfinished at restart failed on the next start. There is no per-analysis cancellation operation (`server/utils/jobs.js:19`, `server/utils/jobs.js:83`; `server/server.js:1169`, `server/server.js:1327`).
+- Progress text describes the agent that just finished, for example "Analyzing codebase structure" while the generator runs: reports are emitted after each agent (`server/agents/index.js:362`; `server/server.js:948`).
+- Chrome was observed to save `.env.example` as `env.example`; the viewer shows the rename instruction. Check download behavior on the target browser/version (`client/src/components/GeneratedFilesView.tsx:11`, `client/src/components/GeneratedFilesView.tsx:16`).
+- The **Saved** button state is page-local and resets on reload/new tab. Saving again uses conflict-ignore inserts and the database unique key, so exact copies are not inserted again; different content is a distinct saved file (`client/src/lib/resultCache.ts:14`, `client/src/lib/resultCache.ts:26`; `client/src/lib/api.ts:47`; `supabase/migrations/20261106000000_saved_files_limits.sql:74`).
+- Rate-limit counters are in memory per process; another instance counts separately and a restart resets the counters (`server/utils/security.js:121`, `server/utils/security.js:148`).
+- `TRUST_PROXY` defaults to 0 and is absent from `render.yaml`. Per-IP limits can therefore count proxy addresses until the owner completes [the client-IP check](#optional-backend-overrides-and-client-ip-check); the actual dashboard override must be checked by the owner (`server/utils/config.js:36`; `server/utils/security.js:129`).
+- Generated-file validation checks format, secret-shaped values and workflow policy; it does not build the image, execute the workflow or prove the `.env.example` variables are complete (`server/agents/files.js:35`, `server/agents/files.js:161`, `server/agents/files.js:267`).
+- Generated workflows use `main` with a change-it comment because the repository's default branch is not known (`server/agents/prompts.js:30`).
+- Java `spring` detection still matches a file-path substring; Python frameworks use dependency names, with `manage.py` also indicating Django (`server/agents/index.js:281`, `server/agents/index.js:292`).
+- The verifier's AI review is displayed as advice, not an independently executed correctness check (`server/agents/index.js:170`; `client/src/components/AgentProgress.tsx:669`).
+- A clone remains on disk while `cloned` or `analyzing`, and is removed when the pipeline ends. A never-analyzed clone becomes eligible for failure after one hour; cleanup runs at startup and hourly, so one hour is not a strict maximum, and store outages can delay cleanup (`server/server.js:961`, `server/server.js:1116`, `server/server.js:1330`, `server/server.js:1342`; `server/utils/tempCleanup.js:26`).
